@@ -2128,6 +2128,11 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
     int v1 = 0;
 
     int rc = 1;
+
+#ifdef __vita__
+    VITA_ActivateIme();
+#endif
+
     while (rc == 1) {
         int tick = _get_time();
 
@@ -2424,11 +2429,7 @@ static int _SlotMap2Game(File* stream)
     const char* v9 = _strmfe(_str1, "AUTOMAP.DB", "SAV");
     sprintf(_str0, "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, v9);
     sprintf(_str1, "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
-#ifdef __vita__
     if (fileCopyDecompressed(_str0, _str1) == -1) {
-#else
-    if (_gzdecompress_file(_str0, _str1) == -1) {
-#endif
         debugPrint("LOADSAVE: returning 8\n");
         return -1;
     }
