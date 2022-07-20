@@ -1928,6 +1928,11 @@ static int _get_input_str(int win, int cancelKeyCode, char* text, int maxLength,
     bool blink = false;
 
     int rc = 1;
+
+#ifdef __vita__
+    VITA_ActivateIme();
+#endif
+
     while (rc == 1) {
         _frame_time = _get_time();
 

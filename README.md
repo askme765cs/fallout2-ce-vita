@@ -1,3 +1,53 @@
+# Fallout 2 Community Edition port for PS Vita
+
+## Install
+Download fallout2-ce.vpk file and install it to your PS Vita.
+
+Copy ```master.dat```, ```critter.dat```, ```patch000.dat```, ```data``` and ```sound``` folders from the installed Fallout 2 game folder into to ```ux0:data/fallout2/```.
+
+## Building
+
+### Prerequisites
+- VitaSDK
+- SDL2
+
+### Build
+```
+mkdir build && cd build
+cmake .. -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake
+make
+```
+
+## Port info
+
+### Controls
+
+- Left analog stick - Cursor movement
+- Right analog stick - Map scrolling
+- × - Left mouse button
+- ○ - Right mouse button
+- □ - Skill list/selection
+- △ - Inventory
+- D-Pad Up - Character screen
+- D-Pad Down - Pip-Boy
+- D-Pad Left - Start combat
+- D-Pad Right - End turn
+- L1 - Toogle active item
+- R1 (hold) - Cursor movement speedup
+- SELECT - Esc
+- START - On screen keyboard
+
+### Other
+
+Fallout 2 CE is still in early stages of development, so all kind of bugs and crashes are to be expected.
+
+Touchscreen is supported, but interaction with UI elements may require double tap on them.
+
+Another Fallout 2 CE port for PS Vita (functionally the same except for different controls):
+https://github.com/isage/fallout2-ce
+
+Thanks to @isage and beforementioned F2 port for help with figuring out the savegame bug.
+
 # Fallout 2 Community Edition
 
 ## Installation

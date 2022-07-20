@@ -263,6 +263,27 @@ if(WIN32)
     )
 endif()
 
+if(VITA)
+    set(VITA_FLAGS "-Ofast -mcpu=cortex-a9 -mfpu=neon -fno-peephole2 -fsigned-char")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${VITA_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VITA_FLAGS}")
+
+    add_definitions("-Dmemcpy=sceClibMemcpy")
+    add_definitions("-Dmemcmp=sceClibMemcmp")
+    add_definitions("-Dmemset=sceClibMemset")
+    add_definitions("-Dmemmove=sceClibMemmove")
+
+    target_link_libraries(${EXECUTABLE_NAME}
+        SDL2::SDL2
+        SceIme_stub
+    )
+
+    include("${CMAKE_SOURCE_DIR}/vita/vita.cmake")
+    add_definitions(-D__unix)
+    #add_definitions(-DOPENMP_BLIT)
+    target_compile_definitions(${EXECUTABLE_NAME} PRIVATE _POSIX_C_SOURCE=200809)
+endif()
+
 if(APPLE)
     set_target_properties(${EXECUTABLE_NAME} PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/os/macos/Info.plist")
     set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.alexbatalov.fallout2-ce")
@@ -275,7 +296,7 @@ add_subdirectory("third_party/fpattern")
 target_link_libraries(${EXECUTABLE_NAME} ${FPATTERN_LIBRARY})
 target_include_directories(${EXECUTABLE_NAME} PRIVATE ${FPATTERN_INCLUDE_DIR})
 
-if(NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+if(NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "Linux" AND NOT VITA)
     add_subdirectory("third_party/zlib")
     add_subdirectory("third_party/sdl2")
 else()

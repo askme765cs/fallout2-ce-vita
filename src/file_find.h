@@ -11,6 +11,10 @@
 #include <dirent.h>
 #endif
 
+#ifdef __vita__
+#include <psp2/io/stat.h>
+#endif
+
 // NOTE: This structure is significantly different from what was in the
 // original code. Watcom provides opendir/readdir/closedir implementations,
 // that use Win32 FindFirstFile/FindNextFile under the hood, which in turn
@@ -51,6 +55,8 @@ static inline bool fileFindIsDirectory(DirectoryFileFindData* findData)
     return (findData->ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 #elif defined(__WATCOMC__)
     return (findData->entry->d_attr & _A_SUBDIR) != 0;
+#elif defined(__vita__)
+    return SCE_S_ISDIR(findData->entry->d_stat.st_mode);
 #else
     return findData->entry->d_type == DT_DIR;
 #endif

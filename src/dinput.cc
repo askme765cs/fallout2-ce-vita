@@ -2,12 +2,27 @@
 
 #include <SDL.h>
 
+#ifdef __vita__
+#include <psp2/kernel/clib.h>
+
+SDL_GameController* gameController;
+float pendingPointerDX;
+float pendingPointerDY;
+int16_t numTouches = 0;
+#endif
+
 // 0x4E0400
 bool directInputInit()
 {
     if (SDL_InitSubSystem(SDL_INIT_EVENTS) != 0) {
         return false;
     }
+
+#ifdef __vita__
+    if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
+        return false;
+    }
+#endif
 
     if (!mouseDeviceInit()) {
         goto err;
@@ -47,9 +62,20 @@ bool mouseDeviceUnacquire()
 // 0x4E053C
 bool mouseDeviceGetData(MouseData* mouseState)
 {
+#ifdef __vita__
+    mouseState->x = pendingPointerDX;
+    mouseState->y = pendingPointerDY;
+
+    pendingPointerDX -= static_cast<int>(pendingPointerDX);
+    pendingPointerDY -= static_cast<int>(pendingPointerDY);
+
+    mouseState->buttons[0] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_A) || (numTouches == 1);
+    mouseState->buttons[1] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B);
+#else
     Uint32 buttons = SDL_GetRelativeMouseState(&(mouseState->x), &(mouseState->y));
     mouseState->buttons[0] = (buttons & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
     mouseState->buttons[1] = (buttons & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
+#endif
 
     return true;
 }
@@ -82,6 +108,9 @@ bool keyboardDeviceGetData(KeyboardData* keyboardData)
 // 0x4E070C
 bool mouseDeviceInit()
 {
+#ifdef __vita__
+    return true;
+#endif
     return SDL_SetRelativeMouseMode(SDL_TRUE) == 0;
 }
 

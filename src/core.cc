@@ -17,6 +17,20 @@
 #include <string.h>
 #include <SDL.h>
 
+#ifdef __vita__
+#include "map.h"
+#include <psp2/kernel/clib.h>
+
+#if !defined(SCE_IME_LANGUAGE_ENGLISH_US)
+#define SCE_IME_LANGUAGE_ENGLISH_US SCE_IME_LANGUAGE_ENGLISH
+#endif
+
+SceWChar16 libime_out[SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1];
+static char libime_initval[8] = { 1 };
+SceImeCaret caret_rev;
+int ime_active = 0;
+#endif
+
 // NOT USED.
 void (*_idle_func)() = NULL;
 
@@ -357,9 +371,7 @@ unsigned char gPressedPhysicalKeysCount;
 
 SDL_Window* gSdlWindow = NULL;
 SDL_Surface* gSdlSurface = NULL;
-SDL_Renderer* gSdlRenderer = NULL;
-SDL_Texture* gSdlTexture = NULL;
-SDL_Surface* gSdlTextureSurface = NULL;
+SDL_Surface* gSdlWindowSurface = NULL;
 
 // 0x4C8A70
 int coreInit(int a1)
@@ -379,6 +391,10 @@ int coreInit(int a1)
     if (_GNW95_input_init() == -1) {
         return -1;
     }
+
+#ifdef __vita__
+    OpenController();
+#endif
 
     buildNormalizedQwertyKeys();
     _GNW95_clear_time_stamps();
@@ -406,6 +422,10 @@ void coreExit()
     mouseFree();
     keyboardFree();
     directInputFree();
+
+#ifdef __vita__
+    CloseController();
+#endif
 
     TickerListNode* curr = gTickerListHead;
     while (curr != NULL) {
@@ -1270,6 +1290,7 @@ void _GNW95_process_message()
             case SDL_WINDOWEVENT_SIZE_CHANGED:
                 // TODO: Recreate gSdlSurface in case size really changed (i.e.
                 // not alt-tabbing in fullscreen mode).
+                gSdlWindowSurface = SDL_GetWindowSurface(gSdlWindow);
                 break;
             case SDL_WINDOWEVENT_FOCUS_GAINED:
                 gProgramIsActive = true;
@@ -1285,8 +1306,43 @@ void _GNW95_process_message()
         case SDL_QUIT:
             exit(EXIT_SUCCESS);
             break;
+#ifdef __vita__
+        case SDL_FINGERDOWN:
+        case SDL_FINGERUP:
+        case SDL_FINGERMOTION:
+            HandleTouchEvent(e.tfinger);
+            break;
+        case SDL_CONTROLLERDEVICEREMOVED:
+            if (gameController != nullptr) {
+                const SDL_GameController* removedController = SDL_GameControllerFromInstanceID(e.jdevice.which);
+                if (removedController == gameController) {
+                    SDL_GameControllerClose(gameController);
+                    gameController = nullptr;
+                }
+            }
+            break;
+        case SDL_CONTROLLERDEVICEADDED:
+            if (gameController == nullptr) {
+                gameController = SDL_GameControllerOpen(e.jdevice.which);
+            }
+            break;
+        case SDL_CONTROLLERAXISMOTION:
+            HandleControllerAxisEvent(e.caxis);
+            break;
+        case SDL_CONTROLLERBUTTONDOWN:
+        case SDL_CONTROLLERBUTTONUP:
+            HandleControllerButtonEvent(e.cbutton);
+            break;
+#endif
         }
     }
+
+#ifdef __vita__
+    if (ime_active) {
+        sceImeUpdate();
+    }
+    mapScroll(mapXScroll, mapYScroll);
+#endif
 
     if (gProgramIsActive && !keyboardIsDisabled()) {
         // NOTE: Uninline
@@ -1617,6 +1673,10 @@ void _mouse_info()
     if (_mouse_disabled) {
         return;
     }
+
+#ifdef __vita__
+    ProcessControllerAxisMotion();
+#endif
 
     int x;
     int y;
@@ -1975,6 +2035,11 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
         configFree(&resolutionConfig);
     }
 
+#ifdef __vita__
+    width = VITA_FULLSCREEN_WIDTH;
+    height = VITA_FULLSCREEN_HEIGHT;
+#endif
+
     if (_GNW95_init_window(width, height, fullscreen) == -1) {
         return -1;
     }
@@ -2015,67 +2080,24 @@ int _init_vesa_mode(int width, int height)
 int _GNW95_init_window(int width, int height, bool fullscreen)
 {
     if (gSdlWindow == NULL) {
-        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
-
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
             return -1;
         }
 
-        Uint32 windowFlags = SDL_WINDOW_OPENGL;
-
-        if (fullscreen) {
-            windowFlags |= SDL_WINDOW_FULLSCREEN;
-        }
-
-        gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, windowFlags);
+        gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, fullscreen ? SDL_WINDOW_FULLSCREEN : 0);
         if (gSdlWindow == NULL) {
             return -1;
         }
 
-        gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 0);
-        if (gSdlRenderer == NULL) {
-            goto err;
-        }
-        
-        if (SDL_RenderSetLogicalSize(gSdlRenderer, width, height) != 0) {
-            goto err;
-        }
-
-        gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, width, height);
-        if (gSdlTexture == NULL) {
-            goto err;
-        }
-
-        Uint32 format;
-        if (SDL_QueryTexture(gSdlTexture, &format, NULL, NULL, NULL) != 0) {
-            goto err;
-        }
-
-        gSdlTextureSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, SDL_BITSPERPIXEL(format), format);
-        if (gSdlTextureSurface == NULL) {
-            goto err;
+        gSdlWindowSurface = SDL_GetWindowSurface(gSdlWindow);
+        if (gSdlWindowSurface == NULL) {
+            SDL_DestroyWindow(gSdlWindow);
+            gSdlWindow = NULL;
+            return -1;
         }
     }
 
     return 0;
-
-err:
-    if (gSdlTexture != NULL) {
-        SDL_DestroyTexture(gSdlTexture);
-        gSdlTexture = NULL;
-    }
-
-    if (gSdlRenderer != NULL) {
-        SDL_DestroyRenderer(gSdlRenderer);
-        gSdlRenderer = NULL;
-    }
-
-    if (gSdlWindow != NULL) {
-        SDL_DestroyWindow(gSdlWindow);
-        gSdlWindow = NULL;
-    }
-
-    return -1;
 }
 
 // calculate shift for mask
@@ -2177,11 +2199,8 @@ void directDrawSetPaletteInRange(unsigned char* palette, int start, int count)
         }
 
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, start, count);
-        SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
-        SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
-        SDL_RenderClear(gSdlRenderer);
-        SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
-        SDL_RenderPresent(gSdlRenderer);
+        SDL_BlitSurface(gSdlSurface, NULL, gSdlWindowSurface, NULL);
+        SDL_UpdateWindowSurface(gSdlWindow);
     } else {
         for (int index = start; index < start + count; index++) {
             unsigned short r = palette[0] << 2;
@@ -2224,11 +2243,8 @@ void directDrawSetPalette(unsigned char* palette)
         }
 
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
-        SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
-        SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
-        SDL_RenderClear(gSdlRenderer);
-        SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
-        SDL_RenderPresent(gSdlRenderer);
+        SDL_BlitSurface(gSdlSurface, NULL, gSdlWindowSurface, NULL);
+        SDL_UpdateWindowSurface(gSdlWindow);
     } else {
         for (int index = 0; index < 256; index++) {
             unsigned short r = palette[index * 3] << 2;
@@ -2308,11 +2324,8 @@ void _GNW95_ShowRect(unsigned char* src, int srcPitch, int a3, int srcX, int src
     SDL_Rect destRect;
     destRect.x = destX;
     destRect.y = destY;
-    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
-    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
-    SDL_RenderClear(gSdlRenderer);
-    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
-    SDL_RenderPresent(gSdlRenderer);
+    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlWindowSurface, &destRect);
+    SDL_UpdateWindowSurface(gSdlWindow);
 }
 
 // 0x4CB93C
@@ -2351,11 +2364,8 @@ void _GNW95_MouseShowRect16(unsigned char* src, int srcPitch, int a3, int srcX, 
     SDL_Rect destRect;
     destRect.x = destX;
     destRect.y = destY;
-    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
-    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
-    SDL_RenderClear(gSdlRenderer);
-    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
-    SDL_RenderPresent(gSdlRenderer);
+    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlWindowSurface, &destRect);
+    SDL_UpdateWindowSurface(gSdlWindow);
 }
 
 // 0x4CBA44
@@ -2402,11 +2412,8 @@ void _GNW95_MouseShowTransRect16(unsigned char* src, int srcPitch, int a3, int s
     SDL_Rect destRect;
     destRect.x = destX;
     destRect.y = destY;
-    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
-    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
-    SDL_RenderClear(gSdlRenderer);
-    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
-    SDL_RenderPresent(gSdlRenderer);
+    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlWindowSurface, &destRect);
+    SDL_UpdateWindowSurface(gSdlWindow);
 }
 
 // Clears drawing surface.
@@ -2428,11 +2435,8 @@ void _GNW95_zero_vid_mem()
 
     SDL_UnlockSurface(gSdlSurface);
 
-    SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
-    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
-    SDL_RenderClear(gSdlRenderer);
-    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
-    SDL_RenderPresent(gSdlRenderer);
+    SDL_BlitSurface(gSdlSurface, NULL, gSdlWindowSurface, NULL);
+    SDL_UpdateWindowSurface(gSdlWindow);
 }
 
 // 0x4CBC90
@@ -4574,3 +4578,325 @@ bool mouseHitTestInWindow(int win, int left, int top, int right, int bottom)
 
     return _mouse_click_in(left, top, right, bottom);
 }
+
+#ifdef __vita__
+void OpenController()
+{
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (SDL_IsGameController(i)) {
+            gameController = SDL_GameControllerOpen(i);
+        }
+    }
+}
+
+void CloseController()
+{
+    if (SDL_GameControllerGetAttached(gameController)) {
+        SDL_GameControllerClose(gameController);
+        gameController = nullptr;
+    }
+}
+
+void HandleTouchEvent(const SDL_TouchFingerEvent& event)
+{
+    // ignore back touchpad
+    if (event.touchId != 0)
+        return;
+
+    if (event.type == SDL_FINGERDOWN) {
+        ++numTouches;
+        if (numTouches == 1) {
+            firstFingerId = event.fingerId;
+        }
+    } else if (event.type == SDL_FINGERUP) {
+        --numTouches;
+    }
+
+    if (firstFingerId == event.fingerId) {
+        int emulatedPointerPosX = VITA_FULLSCREEN_WIDTH * event.x;
+        int emulatedPointerPosY = VITA_FULLSCREEN_HEIGHT * event.y;
+        pendingPointerDX = emulatedPointerPosX - gMouseCursorX;
+        pendingPointerDY = emulatedPointerPosY - gMouseCursorY;
+    }
+}
+
+void ProcessControllerAxisMotion()
+{
+    const uint32_t currentTime = SDL_GetTicks();
+    const float deltaTime = currentTime - lastControllerTime;
+    lastControllerTime = currentTime;
+
+    if (controllerLeftXAxis != 0 || controllerLeftYAxis != 0) {
+        const int16_t xSign = (controllerLeftXAxis > 0) - (controllerLeftXAxis < 0);
+        const int16_t ySign = (controllerLeftYAxis > 0) - (controllerLeftYAxis < 0);
+
+        float dx = std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
+                            * cursorSpeedup / CONTROLLER_SPEED_MOD;
+        float dy = std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
+                            * cursorSpeedup / CONTROLLER_SPEED_MOD;
+
+        pendingPointerDX += dx;
+        pendingPointerDY += dy;
+    }
+}
+
+void HandleControllerAxisEvent(const SDL_ControllerAxisEvent& motion)
+{
+    if (motion.axis == SDL_CONTROLLER_AXIS_LEFTX) {
+        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE)
+            controllerLeftXAxis = motion.value;
+        else
+            controllerLeftXAxis = 0;
+    } else if (motion.axis == SDL_CONTROLLER_AXIS_LEFTY) {
+        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE)
+            controllerLeftYAxis = motion.value;
+        else
+            controllerLeftYAxis = 0;
+    } else if (motion.axis == SDL_CONTROLLER_AXIS_RIGHTX) {
+        if (std::abs(motion.value) > CONTROLLER_R_DEADZONE)
+            controllerRightXAxis = motion.value;
+        else
+            controllerRightXAxis = 0;
+    } else if (motion.axis == SDL_CONTROLLER_AXIS_RIGHTY) {
+        if (std::abs(motion.value) > CONTROLLER_R_DEADZONE)
+            controllerRightYAxis = motion.value;
+        else
+            controllerRightYAxis = 0;
+    }
+
+    //map scroll
+    if (controllerRightXAxis > CONTROLLER_R_DEADZONE)
+    {
+        mapXScroll = 1;
+    }
+    else if (mapXScroll == 1)
+    {
+        mapXScroll = 0;
+    }
+
+    if (controllerRightXAxis < -CONTROLLER_R_DEADZONE)
+    {
+        mapXScroll = -1;
+    }
+    else if (mapXScroll == -1)
+    {
+        mapXScroll = 0;
+    }
+
+    if (controllerRightYAxis > CONTROLLER_R_DEADZONE)
+    {
+        mapYScroll = 1;
+    }
+    else if (mapYScroll == 1)
+    {
+        mapYScroll = 0;
+    }
+
+    if (controllerRightYAxis < -CONTROLLER_R_DEADZONE)
+    {
+        mapYScroll = -1;
+    }
+    else if (mapYScroll == -1)
+    {
+        mapYScroll = 0;
+    }
+}
+
+void HandleControllerButtonEvent(const SDL_ControllerButtonEvent& button)
+{
+    bool keyboardPress = false;
+    SDL_Scancode scancode;
+    SDL_Keycode keycode;
+
+    switch (button.button) {
+    case SDL_CONTROLLER_BUTTON_A:
+        // LMB. mouse is processed elsewhere
+        break;
+    case SDL_CONTROLLER_BUTTON_B:
+        // RMB. mouse is processed elsewhere
+        break;
+    case SDL_CONTROLLER_BUTTON_X:
+        // skills
+        keyboardPress = true;
+        scancode = SDL_SCANCODE_S;
+        keycode = SDLK_s;
+        break;
+    case SDL_CONTROLLER_BUTTON_Y:
+        // inventory
+        keyboardPress = true;
+        scancode = SDL_SCANCODE_I;
+        keycode = SDLK_i;
+        break;
+    case SDL_CONTROLLER_BUTTON_BACK:
+        // Esc (menu)
+        keyboardPress = true;
+        scancode = SDL_SCANCODE_ESCAPE;
+        keycode = SDLK_ESCAPE;
+        break;
+    case SDL_CONTROLLER_BUTTON_START:
+        // virtual keyboard
+        if (button.type == SDL_CONTROLLERBUTTONUP)
+        {
+            VITA_ActivateIme();
+        }
+        break;
+    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+        // change active item
+        keyboardPress = true;
+        scancode = SDL_SCANCODE_B;
+        keycode = SDLK_b;
+        break;
+    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+        // cursor speedup
+        if (button.type == SDL_CONTROLLERBUTTONDOWN) {
+            cursorSpeedup = 2.0f;
+        } else {
+            cursorSpeedup = 1.0f;
+        }
+        break;
+    case SDL_CONTROLLER_BUTTON_DPAD_UP:
+        // character sheet
+        keyboardPress = true;
+        scancode = SDL_SCANCODE_C;
+        keycode = SDLK_c;
+        break;
+    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+        // pipboy
+        keyboardPress = true;
+        scancode = SDL_SCANCODE_P;
+        keycode = SDLK_p;
+        break;
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+        // start combat
+        keyboardPress = true;
+        scancode = SDL_SCANCODE_A;
+        keycode = SDLK_a;
+        break;
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+        // newt turn
+        keyboardPress = true;
+        scancode = SDL_SCANCODE_SPACE;
+        keycode = SDLK_SPACE;
+        break;
+    default:
+        break;
+    }
+
+    if (keyboardPress) {
+        SDL_Event ev;
+        ev.type = (button.type == SDL_CONTROLLERBUTTONDOWN) ? SDL_KEYDOWN : SDL_KEYUP;
+        ev.key.state = (button.type == SDL_CONTROLLERBUTTONDOWN) ? SDL_PRESSED : SDL_RELEASED;
+        ev.key.keysym.mod = SDL_GetModState();
+        ev.key.keysym.scancode = scancode;
+        ev.key.keysym.sym = keycode;
+        SDL_PushEvent(&ev);
+    }
+}
+
+void VITA_ActivateIme()
+{
+    if (!ime_active)
+    {
+        SceUInt32 libime_work[SCE_IME_WORK_BUFFER_SIZE / sizeof(SceInt32)];
+        SceImeParam param;
+
+        sceImeParamInit(&param);
+
+        SDL_memset(libime_out, 0, ((SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1) * sizeof(SceWChar16)));
+
+        param.supportedLanguages = SCE_IME_LANGUAGE_ENGLISH_US;
+        param.languagesForced = SCE_FALSE;
+        param.type = SCE_IME_TYPE_BASIC_LATIN;
+        param.option = SCE_IME_OPTION_NO_ASSISTANCE;
+        param.inputTextBuffer = libime_out;
+        param.maxTextLength = SCE_IME_MAX_TEXT_LENGTH;
+        param.handler = VITA_ImeEventHandler;
+        param.filter = NULL;
+        param.initialText = (SceWChar16 *)libime_initval;
+        param.arg = NULL;
+        param.work = libime_work;
+
+        int res = sceImeOpen(&param);
+        if (res < 0) {
+            sceClibPrintf("Failed to init IME\n");
+        }
+        ime_active = 1;
+    }
+}
+
+void VITA_ImeEventHandler(void *arg, const SceImeEventData *e)
+{
+    switch (e->id) {
+        case SCE_IME_EVENT_UPDATE_TEXT:
+            if (e->param.text.caretIndex == 0)
+            {
+                SDL_Event nevent;
+                nevent.type = SDL_KEYDOWN;
+                nevent.key.state = SDL_PRESSED;
+                nevent.key.keysym.sym = SDLK_BACKSPACE;
+                nevent.key.keysym.scancode = SDL_SCANCODE_BACKSPACE;
+                nevent.key.keysym.mod = KMOD_NONE;
+                SDL_PushEvent(&nevent);
+
+                nevent.type = SDL_KEYUP;
+                nevent.key.state = SDL_RELEASED;
+                nevent.key.keysym.sym = SDLK_BACKSPACE;
+                nevent.key.keysym.scancode = SDL_SCANCODE_BACKSPACE;
+                nevent.key.keysym.mod = KMOD_NONE;
+                SDL_PushEvent(&nevent);
+                sceImeSetText((SceWChar16 *)libime_initval, 4);
+            }
+            else
+            {
+                uint16_t lower = sceClibTolower(*(SceWChar16 *)&libime_out[1]);
+
+                if (lower > 0)
+                {
+                    SDL_Event nevent;
+                    nevent.type = SDL_KEYDOWN;
+                    nevent.key.state = SDL_PRESSED;
+                    nevent.key.keysym.sym = lower;
+                    nevent.key.keysym.scancode = SDL_GetScancodeFromKey(lower);
+                    nevent.key.keysym.mod = KMOD_NONE;
+                    SDL_PushEvent(&nevent);
+
+                    nevent.type = SDL_KEYUP;
+                    nevent.key.state = SDL_RELEASED;
+                    nevent.key.keysym.sym = lower;
+                    nevent.key.keysym.scancode = SDL_GetScancodeFromKey(lower);
+                    nevent.key.keysym.mod = KMOD_NONE;
+                    SDL_PushEvent(&nevent);
+                }
+
+                SDL_memset(&caret_rev, 0, sizeof(SceImeCaret));
+                SDL_memset(libime_out, 0, ((SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1) * sizeof(SceWChar16)));
+                caret_rev.index = 1;
+                sceImeSetCaret(&caret_rev);
+                sceImeSetText((SceWChar16 *)libime_initval, 4);
+            }
+            break;
+        case SCE_IME_EVENT_PRESS_ENTER:
+        {
+            SDL_Event nevent;
+            nevent.type = SDL_KEYDOWN;
+            nevent.key.state = SDL_PRESSED;
+            nevent.key.keysym.sym = SDLK_RETURN;
+            nevent.key.keysym.scancode = SDL_SCANCODE_RETURN;
+            nevent.key.keysym.mod = KMOD_NONE;
+            SDL_PushEvent(&nevent);
+
+            nevent.type = SDL_KEYUP;
+            nevent.key.state = SDL_RELEASED;
+            nevent.key.keysym.sym = SDLK_RETURN;
+            nevent.key.keysym.scancode = SDL_SCANCODE_RETURN;
+            nevent.key.keysym.mod = KMOD_NONE;
+            SDL_PushEvent(&nevent);
+            break;
+        }
+        case SCE_IME_EVENT_PRESS_CLOSE:
+            sceImeClose();
+            ime_active = 0;
+            break;
+    }
+}
+#endif
