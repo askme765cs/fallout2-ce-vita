@@ -14,7 +14,7 @@ Copy ```master.dat```, ```critter.dat```, ```patch000.dat```, ```data``` and ```
 ### Build
 ```
 mkdir build && cd build
-cmake .. -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake
+cmake .. -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=Release
 make
 ```
 
