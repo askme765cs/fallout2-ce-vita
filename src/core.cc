@@ -19,16 +19,46 @@
 
 #ifdef __vita__
 #include "map.h"
-#include <psp2/kernel/clib.h>
+#include <vita2d.h>
 
 #if !defined(SCE_IME_LANGUAGE_ENGLISH_US)
 #define SCE_IME_LANGUAGE_ENGLISH_US SCE_IME_LANGUAGE_ENGLISH
 #endif
 
+// used to convert user-friendly pointer speed values into more useable ones
+const float CONTROLLER_SPEED_MOD = 0.000004f;
+// bigger value correndsponds to faster pointer movement speed with bigger stick axis values
+const float CONTROLLER_AXIS_SPEEDUP = 1.03f;
+
+enum
+{
+    CONTROLLER_L_DEADZONE = 3000,
+    CONTROLLER_R_DEADZONE = 25000,
+    VITA_FULLSCREEN_WIDTH = 960,
+    VITA_FULLSCREEN_HEIGHT = 544,
+    DEFAULT_HEIGHT = 480
+};
+
+int16_t controllerLeftXAxis = 0;
+int16_t controllerLeftYAxis = 0;
+int16_t controllerRightXAxis = 0;
+int16_t controllerRightYAxis = 0;
+uint32_t lastControllerTime = 0;
+SDL_FingerID firstFingerId = 0;
+int32_t mapXScroll = 0;
+int32_t mapYScroll = 0;
+float cursorSpeedup = 1.0f;
+float resolutionSpeedMod = 1.0f;
+
 SceWChar16 libime_out[SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1];
 static char libime_initval[8] = { 1 };
 SceImeCaret caret_rev;
 int ime_active = 0;
+
+vita2d_texture *texBuffer;
+uint8_t *palettedTexturePointer;
+SDL_Rect renderRect;
+SDL_Surface *vitaPaletteSurface = NULL;
 #endif
 
 // NOT USED.
@@ -371,7 +401,9 @@ unsigned char gPressedPhysicalKeysCount;
 
 SDL_Window* gSdlWindow = NULL;
 SDL_Surface* gSdlSurface = NULL;
-SDL_Surface* gSdlWindowSurface = NULL;
+SDL_Renderer* gSdlRenderer = NULL;
+SDL_Texture* gSdlTexture = NULL;
+SDL_Surface* gSdlTextureSurface = NULL;
 
 // 0x4C8A70
 int coreInit(int a1)
@@ -393,7 +425,7 @@ int coreInit(int a1)
     }
 
 #ifdef __vita__
-    OpenController();
+    openController();
 #endif
 
     buildNormalizedQwertyKeys();
@@ -424,7 +456,24 @@ void coreExit()
     directInputFree();
 
 #ifdef __vita__
-    CloseController();
+    closeController();
+
+    if ( gSdlWindow != nullptr ) {
+        SDL_DestroyWindow( gSdlWindow );
+        gSdlWindow = nullptr;
+    }
+
+    if ( vitaPaletteSurface != nullptr ) {
+        SDL_FreeSurface( vitaPaletteSurface );
+        vitaPaletteSurface = nullptr;
+    }
+
+    vita2d_fini();
+
+    if ( texBuffer != nullptr ) {
+        vita2d_free_texture( texBuffer );
+        texBuffer = nullptr;
+    }
 #endif
 
     TickerListNode* curr = gTickerListHead;
@@ -1290,7 +1339,6 @@ void _GNW95_process_message()
             case SDL_WINDOWEVENT_SIZE_CHANGED:
                 // TODO: Recreate gSdlSurface in case size really changed (i.e.
                 // not alt-tabbing in fullscreen mode).
-                gSdlWindowSurface = SDL_GetWindowSurface(gSdlWindow);
                 break;
             case SDL_WINDOWEVENT_FOCUS_GAINED:
                 gProgramIsActive = true;
@@ -1310,7 +1358,7 @@ void _GNW95_process_message()
         case SDL_FINGERDOWN:
         case SDL_FINGERUP:
         case SDL_FINGERMOTION:
-            HandleTouchEvent(e.tfinger);
+            handleTouchEvent(e.tfinger);
             break;
         case SDL_CONTROLLERDEVICEREMOVED:
             if (gameController != nullptr) {
@@ -1327,11 +1375,11 @@ void _GNW95_process_message()
             }
             break;
         case SDL_CONTROLLERAXISMOTION:
-            HandleControllerAxisEvent(e.caxis);
+            handleControllerAxisEvent(e.caxis);
             break;
         case SDL_CONTROLLERBUTTONDOWN:
         case SDL_CONTROLLERBUTTONUP:
-            HandleControllerButtonEvent(e.cbutton);
+            handleControllerButtonEvent(e.cbutton);
             break;
 #endif
         }
@@ -1675,7 +1723,7 @@ void _mouse_info()
     }
 
 #ifdef __vita__
-    ProcessControllerAxisMotion();
+    processControllerAxisMotion();
 #endif
 
     int x;
@@ -1698,11 +1746,11 @@ void _mouse_info()
         x = 0;
         y = 0;
     }
-
+#ifndef __vita__
     // Adjust for mouse senstivity.
     x = (int)(x * gMouseSensitivity);
     y = (int)(y * gMouseSensitivity);
-
+#endif
     if (_vcr_state == 1) {
         if (((_vcr_terminate_flags & 4) && buttons) || ((_vcr_terminate_flags & 2) && (x || y))) {
             _vcr_terminated_condition = 2;
@@ -1928,7 +1976,7 @@ void _mouse_get_raw_state(int* out_x, int* out_y, int* out_buttons)
 // 0x4CAC3C
 void mouseSetSensitivity(double value)
 {
-    if (value > 0 && value < 2.0) {
+    if (value > 0 && value <= 2.5) {
         gMouseSensitivity = value;
     }
 }
@@ -2019,26 +2067,45 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
             if (configGetInt(&resolutionConfig, "MAIN", "SCR_WIDTH", &screenWidth)) {
                 width = screenWidth;
             }
+#ifdef __vita__
+            else
+            {
+                configSetInt(&resolutionConfig, "MAIN", "SCR_WIDTH", VITA_FULLSCREEN_WIDTH);
+                width = VITA_FULLSCREEN_WIDTH;
+                configWrite(&resolutionConfig, "f2_res.ini", false);
+            }
+#endif
 
             int screenHeight;
             if (configGetInt(&resolutionConfig, "MAIN", "SCR_HEIGHT", &screenHeight)) {
                 height = screenHeight;
             }
+#ifdef __vita__
+            else
+            {
+                configSetInt(&resolutionConfig, "MAIN", "SCR_HEIGHT", VITA_FULLSCREEN_HEIGHT);
+                height = VITA_FULLSCREEN_HEIGHT;
+                configWrite(&resolutionConfig, "f2_res.ini", false);
+            }
+#endif
 
             bool windowed;
             if (configGetBool(&resolutionConfig, "MAIN", "WINDOWED", &windowed)) {
                 fullscreen = !windowed;
             }
+#ifdef __vita__
+            else
+            {
+                configSetInt(&resolutionConfig, "MAIN", "WINDOWED", 0);
+                fullscreen = 0;
+                configWrite(&resolutionConfig, "f2_res.ini", false);
+            }
+#endif
 
             configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode);
         }
         configFree(&resolutionConfig);
     }
-
-#ifdef __vita__
-    width = VITA_FULLSCREEN_WIDTH;
-    height = VITA_FULLSCREEN_HEIGHT;
-#endif
 
     if (_GNW95_init_window(width, height, fullscreen) == -1) {
         return -1;
@@ -2079,25 +2146,92 @@ int _init_vesa_mode(int width, int height)
 // 0x4CAEDC
 int _GNW95_init_window(int width, int height, bool fullscreen)
 {
+#ifdef __vita__
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        return -1;
+    }
+
+    vita2d_init();
+    vita2d_set_vblank_wait(false);
+
+    gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, fullscreen ? SDL_WINDOW_FULLSCREEN : 0);
     if (gSdlWindow == NULL) {
+        return -1;
+    }
+
+    vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW);
+    texBuffer = vita2d_create_empty_texture_format(width, height, SCE_GXM_TEXTURE_FORMAT_P8_ABGR);
+    palettedTexturePointer = (uint8_t*)(vita2d_texture_get_datap(texBuffer));
+    memset(palettedTexturePointer, 0, width * height * sizeof(uint8_t));
+    setRenderRect(width, height, fullscreen);
+
+    float resolutionSpeedMod = static_cast<float>(height) / DEFAULT_HEIGHT;
+
+    return 0;
+#else
+    if (gSdlWindow == NULL) {
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
             return -1;
         }
 
-        gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, fullscreen ? SDL_WINDOW_FULLSCREEN : 0);
+        Uint32 windowFlags = SDL_WINDOW_OPENGL;
+
+        if (fullscreen) {
+            windowFlags |= SDL_WINDOW_FULLSCREEN;
+        }
+
+        gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, windowFlags);
         if (gSdlWindow == NULL) {
             return -1;
         }
 
-        gSdlWindowSurface = SDL_GetWindowSurface(gSdlWindow);
-        if (gSdlWindowSurface == NULL) {
-            SDL_DestroyWindow(gSdlWindow);
-            gSdlWindow = NULL;
-            return -1;
+        gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 0);
+        if (gSdlRenderer == NULL) {
+            goto err;
+        }
+
+        if (SDL_RenderSetLogicalSize(gSdlRenderer, width, height) != 0) {
+            goto err;
+        }
+
+        gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, width, height);
+        if (gSdlTexture == NULL) {
+            goto err;
+        }
+
+        Uint32 format;
+        if (SDL_QueryTexture(gSdlTexture, &format, NULL, NULL, NULL) != 0) {
+            goto err;
+        }
+
+        gSdlTextureSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, SDL_BITSPERPIXEL(format), format);
+        if (gSdlTextureSurface == NULL) {
+            goto err;
         }
     }
 
     return 0;
+
+err:
+    if (gSdlTexture != NULL) {
+        SDL_DestroyTexture(gSdlTexture);
+        gSdlTexture = NULL;
+    }
+
+    if (gSdlRenderer != NULL) {
+        SDL_DestroyRenderer(gSdlRenderer);
+        gSdlRenderer = NULL;
+    }
+
+    if (gSdlWindow != NULL) {
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+    }
+
+    return -1;
+#endif
 }
 
 // calculate shift for mask
@@ -2161,6 +2295,9 @@ int directDrawInit(int width, int height, int bpp)
         }
 
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
+#ifdef __vita__
+        updateVita2dPalette(colors, 0, 256);
+#endif
     } else {
         gRedMask = gSdlSurface->format->Rmask;
         gGreenMask = gSdlSurface->format->Gmask;
@@ -2199,8 +2336,16 @@ void directDrawSetPaletteInRange(unsigned char* palette, int start, int count)
         }
 
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, start, count);
-        SDL_BlitSurface(gSdlSurface, NULL, gSdlWindowSurface, NULL);
-        SDL_UpdateWindowSurface(gSdlWindow);
+#ifdef __vita__
+        updateVita2dPalette(colors, start, count);
+        renderVita2dFrame(gSdlSurface);
+#else
+        SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
+        SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
+        SDL_RenderClear(gSdlRenderer);
+        SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+        SDL_RenderPresent(gSdlRenderer);
+#endif
     } else {
         for (int index = start; index < start + count; index++) {
             unsigned short r = palette[0] << 2;
@@ -2243,8 +2388,16 @@ void directDrawSetPalette(unsigned char* palette)
         }
 
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
-        SDL_BlitSurface(gSdlSurface, NULL, gSdlWindowSurface, NULL);
-        SDL_UpdateWindowSurface(gSdlWindow);
+#ifdef __vita__
+        updateVita2dPalette(colors, 0, 256);
+        renderVita2dFrame(gSdlSurface);
+#else
+        SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
+        SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
+        SDL_RenderClear(gSdlRenderer);
+        SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+        SDL_RenderPresent(gSdlRenderer);
+#endif
     } else {
         for (int index = 0; index < 256; index++) {
             unsigned short r = palette[index * 3] << 2;
@@ -2324,8 +2477,15 @@ void _GNW95_ShowRect(unsigned char* src, int srcPitch, int a3, int srcX, int src
     SDL_Rect destRect;
     destRect.x = destX;
     destRect.y = destY;
-    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlWindowSurface, &destRect);
-    SDL_UpdateWindowSurface(gSdlWindow);
+#ifdef __vita__
+    renderVita2dFrame(gSdlSurface);
+#else
+    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
+    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
+    SDL_RenderClear(gSdlRenderer);
+    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+    SDL_RenderPresent(gSdlRenderer);
+#endif
 }
 
 // 0x4CB93C
@@ -2364,8 +2524,15 @@ void _GNW95_MouseShowRect16(unsigned char* src, int srcPitch, int a3, int srcX, 
     SDL_Rect destRect;
     destRect.x = destX;
     destRect.y = destY;
-    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlWindowSurface, &destRect);
-    SDL_UpdateWindowSurface(gSdlWindow);
+#ifdef __vita__
+    renderVita2dFrame(gSdlSurface);
+#else
+    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
+    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
+    SDL_RenderClear(gSdlRenderer);
+    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+    SDL_RenderPresent(gSdlRenderer);
+#endif
 }
 
 // 0x4CBA44
@@ -2412,8 +2579,15 @@ void _GNW95_MouseShowTransRect16(unsigned char* src, int srcPitch, int a3, int s
     SDL_Rect destRect;
     destRect.x = destX;
     destRect.y = destY;
-    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlWindowSurface, &destRect);
-    SDL_UpdateWindowSurface(gSdlWindow);
+#ifdef __vita__
+    renderVita2dFrame(gSdlSurface);
+#else
+    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
+    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
+    SDL_RenderClear(gSdlRenderer);
+    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+    SDL_RenderPresent(gSdlRenderer);
+#endif
 }
 
 // Clears drawing surface.
@@ -2435,8 +2609,15 @@ void _GNW95_zero_vid_mem()
 
     SDL_UnlockSurface(gSdlSurface);
 
-    SDL_BlitSurface(gSdlSurface, NULL, gSdlWindowSurface, NULL);
-    SDL_UpdateWindowSurface(gSdlWindow);
+#ifdef __vita__
+    renderVita2dFrame(gSdlSurface);
+#else
+    SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
+    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
+    SDL_RenderClear(gSdlRenderer);
+    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+    SDL_RenderPresent(gSdlRenderer);
+#endif
 }
 
 // 0x4CBC90
@@ -4580,7 +4761,64 @@ bool mouseHitTestInWindow(int win, int left, int top, int right, int bottom)
 }
 
 #ifdef __vita__
-void OpenController()
+void renderVita2dFrame(SDL_Surface *surface)
+{
+    memcpy(palettedTexturePointer, surface->pixels, surface->w * surface->h * sizeof(uint8_t));
+    vita2d_start_drawing();
+    vita2d_draw_rectangle(0, 0, VITA_FULLSCREEN_WIDTH, VITA_FULLSCREEN_HEIGHT, 0xff000000);
+    vita2d_draw_texture_scale(texBuffer, renderRect.x, renderRect.y, (float)(renderRect.w) / surface->w, (float)(renderRect.h) / surface->h);
+    vita2d_end_drawing();
+    vita2d_swap_buffers();
+}
+
+void updateVita2dPalette(SDL_Color *colors, int start, int count)
+{
+    uint32_t palette32Bit[count];
+
+    if (vitaPaletteSurface == NULL) {
+        vitaPaletteSurface = SDL_CreateRGBSurface(0, 1, 1, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
+    }
+
+    for ( size_t i = 0; i < count; ++i ) {
+        palette32Bit[i] = SDL_MapRGBA(vitaPaletteSurface->format, colors[i].r, colors[i].g, colors[i].b, colors[i].a);
+    }
+
+    memcpy(vita2d_texture_get_palette(texBuffer) + start * sizeof(uint32_t), palette32Bit, sizeof(uint32_t) * count);
+}
+
+void setRenderRect(int width, int height, bool fullscreen)
+{
+    renderRect.x = 0;
+    renderRect.y = 0;
+    renderRect.w = width;
+    renderRect.h = height;
+    vita2d_texture_set_filters(texBuffer, SCE_GXM_TEXTURE_FILTER_POINT, SCE_GXM_TEXTURE_FILTER_POINT);
+
+    if (width != VITA_FULLSCREEN_WIDTH || height != VITA_FULLSCREEN_HEIGHT)	{
+        if (fullscreen) {
+            //resize to fullscreen
+            if ((static_cast<float>(VITA_FULLSCREEN_WIDTH) / VITA_FULLSCREEN_HEIGHT) >= (static_cast<float>(width) / height)) {
+                float scale = static_cast<float>(VITA_FULLSCREEN_HEIGHT) / height;
+                renderRect.w = width * scale;
+                renderRect.h = VITA_FULLSCREEN_HEIGHT;
+                renderRect.x = (VITA_FULLSCREEN_WIDTH - renderRect.w) / 2;
+            } else {
+                float scale = static_cast<float>(VITA_FULLSCREEN_WIDTH) / width;
+                renderRect.w = VITA_FULLSCREEN_WIDTH;
+                renderRect.h = height * scale;
+                renderRect.y = (VITA_FULLSCREEN_HEIGHT - renderRect.h) / 2;
+            }
+
+            vita2d_texture_set_filters(texBuffer, SCE_GXM_TEXTURE_FILTER_LINEAR, SCE_GXM_TEXTURE_FILTER_LINEAR);
+        } else {
+            //center game area
+            renderRect.x = (VITA_FULLSCREEN_WIDTH - width) / 2;
+            renderRect.y = (VITA_FULLSCREEN_HEIGHT - height) / 2;
+        }
+    }
+}
+
+void openController()
 {
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         if (SDL_IsGameController(i)) {
@@ -4589,7 +4827,7 @@ void OpenController()
     }
 }
 
-void CloseController()
+void closeController()
 {
     if (SDL_GameControllerGetAttached(gameController)) {
         SDL_GameControllerClose(gameController);
@@ -4597,7 +4835,7 @@ void CloseController()
     }
 }
 
-void HandleTouchEvent(const SDL_TouchFingerEvent& event)
+void handleTouchEvent(const SDL_TouchFingerEvent& event)
 {
     // ignore back touchpad
     if (event.touchId != 0)
@@ -4606,6 +4844,7 @@ void HandleTouchEvent(const SDL_TouchFingerEvent& event)
     if (event.type == SDL_FINGERDOWN) {
         ++numTouches;
         if (numTouches == 1) {
+            delayedTouch = 0;
             firstFingerId = event.fingerId;
         }
     } else if (event.type == SDL_FINGERUP) {
@@ -4613,14 +4852,20 @@ void HandleTouchEvent(const SDL_TouchFingerEvent& event)
     }
 
     if (firstFingerId == event.fingerId) {
-        int emulatedPointerPosX = VITA_FULLSCREEN_WIDTH * event.x;
-        int emulatedPointerPosY = VITA_FULLSCREEN_HEIGHT * event.y;
-        pendingPointerDX = emulatedPointerPosX - gMouseCursorX;
-        pendingPointerDY = emulatedPointerPosY - gMouseCursorY;
+        int width = _scr_size.right - _scr_size.left + 1;
+        int height = _scr_size.bottom - _scr_size.top + 1;
+
+        int touchPosX = static_cast<float>(VITA_FULLSCREEN_WIDTH * event.x - renderRect.x) *
+                                    (static_cast<float>(width) / renderRect.w);
+        int touchPosY = static_cast<float>(VITA_FULLSCREEN_HEIGHT * event.y - renderRect.y) *
+                                    (static_cast<float>(height) / renderRect.h);
+
+        pendingPointerDX = touchPosX - gMouseCursorX;
+        pendingPointerDY = touchPosY - gMouseCursorY;
     }
 }
 
-void ProcessControllerAxisMotion()
+void processControllerAxisMotion()
 {
     const uint32_t currentTime = SDL_GetTicks();
     const float deltaTime = currentTime - lastControllerTime;
@@ -4630,17 +4875,14 @@ void ProcessControllerAxisMotion()
         const int16_t xSign = (controllerLeftXAxis > 0) - (controllerLeftXAxis < 0);
         const int16_t ySign = (controllerLeftYAxis > 0) - (controllerLeftYAxis < 0);
 
-        float dx = std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
-                            * cursorSpeedup / CONTROLLER_SPEED_MOD;
-        float dy = std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
-                            * cursorSpeedup / CONTROLLER_SPEED_MOD;
-
-        pendingPointerDX += dx;
-        pendingPointerDY += dy;
+        pendingPointerDX += std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
+                            * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
+        pendingPointerDY += std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
+                            * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
     }
 }
 
-void HandleControllerAxisEvent(const SDL_ControllerAxisEvent& motion)
+void handleControllerAxisEvent(const SDL_ControllerAxisEvent& motion)
 {
     if (motion.axis == SDL_CONTROLLER_AXIS_LEFTX) {
         if (std::abs(motion.value) > CONTROLLER_L_DEADZONE)
@@ -4702,11 +4944,9 @@ void HandleControllerAxisEvent(const SDL_ControllerAxisEvent& motion)
     }
 }
 
-void HandleControllerButtonEvent(const SDL_ControllerButtonEvent& button)
+void handleControllerButtonEvent(const SDL_ControllerButtonEvent& button)
 {
-    bool keyboardPress = false;
-    SDL_Scancode scancode;
-    SDL_Keycode keycode;
+    KeyboardData keyboardData;
 
     switch (button.button) {
     case SDL_CONTROLLER_BUTTON_A:
@@ -4717,34 +4957,34 @@ void HandleControllerButtonEvent(const SDL_ControllerButtonEvent& button)
         break;
     case SDL_CONTROLLER_BUTTON_X:
         // skills
-        keyboardPress = true;
-        scancode = SDL_SCANCODE_S;
-        keycode = SDLK_s;
+        keyboardData.key = SDL_SCANCODE_S;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
         break;
     case SDL_CONTROLLER_BUTTON_Y:
         // inventory
-        keyboardPress = true;
-        scancode = SDL_SCANCODE_I;
-        keycode = SDLK_i;
+        keyboardData.key = SDL_SCANCODE_I;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
         break;
     case SDL_CONTROLLER_BUTTON_BACK:
         // Esc (menu)
-        keyboardPress = true;
-        scancode = SDL_SCANCODE_ESCAPE;
-        keycode = SDLK_ESCAPE;
+        keyboardData.key = SDL_SCANCODE_ESCAPE;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
         break;
     case SDL_CONTROLLER_BUTTON_START:
         // virtual keyboard
         if (button.type == SDL_CONTROLLERBUTTONUP)
         {
-            VITA_ActivateIme();
+            vitaActivateIme();
         }
         break;
     case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
         // change active item
-        keyboardPress = true;
-        scancode = SDL_SCANCODE_B;
-        keycode = SDLK_b;
+        keyboardData.key = SDL_SCANCODE_B;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
         break;
     case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
         // cursor speedup
@@ -4756,44 +4996,34 @@ void HandleControllerButtonEvent(const SDL_ControllerButtonEvent& button)
         break;
     case SDL_CONTROLLER_BUTTON_DPAD_UP:
         // character sheet
-        keyboardPress = true;
-        scancode = SDL_SCANCODE_C;
-        keycode = SDLK_c;
+        keyboardData.key = SDL_SCANCODE_C;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
         break;
     case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
         // pipboy
-        keyboardPress = true;
-        scancode = SDL_SCANCODE_P;
-        keycode = SDLK_p;
+        keyboardData.key = SDL_SCANCODE_P;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
         break;
     case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
         // start combat
-        keyboardPress = true;
-        scancode = SDL_SCANCODE_A;
-        keycode = SDLK_a;
+        keyboardData.key = SDL_SCANCODE_A;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
         break;
     case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
         // newt turn
-        keyboardPress = true;
-        scancode = SDL_SCANCODE_SPACE;
-        keycode = SDLK_SPACE;
+        keyboardData.key = SDL_SCANCODE_SPACE;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
         break;
     default:
         break;
     }
-
-    if (keyboardPress) {
-        SDL_Event ev;
-        ev.type = (button.type == SDL_CONTROLLERBUTTONDOWN) ? SDL_KEYDOWN : SDL_KEYUP;
-        ev.key.state = (button.type == SDL_CONTROLLERBUTTONDOWN) ? SDL_PRESSED : SDL_RELEASED;
-        ev.key.keysym.mod = SDL_GetModState();
-        ev.key.keysym.scancode = scancode;
-        ev.key.keysym.sym = keycode;
-        SDL_PushEvent(&ev);
-    }
 }
 
-void VITA_ActivateIme()
+void vitaActivateIme()
 {
     if (!ime_active)
     {
@@ -4810,7 +5040,7 @@ void VITA_ActivateIme()
         param.option = SCE_IME_OPTION_NO_ASSISTANCE;
         param.inputTextBuffer = libime_out;
         param.maxTextLength = SCE_IME_MAX_TEXT_LENGTH;
-        param.handler = VITA_ImeEventHandler;
+        param.handler = vitaImeEventHandler;
         param.filter = NULL;
         param.initialText = (SceWChar16 *)libime_initval;
         param.arg = NULL;
@@ -4824,7 +5054,7 @@ void VITA_ActivateIme()
     }
 }
 
-void VITA_ImeEventHandler(void *arg, const SceImeEventData *e)
+void vitaImeEventHandler(void *arg, const SceImeEventData *e)
 {
     switch (e->id) {
         case SCE_IME_EVENT_UPDATE_TEXT:

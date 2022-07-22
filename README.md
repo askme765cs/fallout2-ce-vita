@@ -32,21 +32,23 @@ make
 - D-Pad Down - Pip-Boy
 - D-Pad Left - Start combat
 - D-Pad Right - End turn
-- L1 - Toogle active item
+- L1 - Toggle active item
 - R1 (hold) - Cursor movement speedup
 - SELECT - Esc
 - START - On screen keyboard
 
 ### Other
 
-Fallout 2 CE is still in early stages of development, so all kind of bugs and crashes are to be expected.
+You can change the game resolution by editing ```ux0:data/fallout2/f2_res.ini``` file and modifying ```SCR_WIDTH``` and ```SCR_HEIGHT``` parameters. Recommended resolutions are ```640x480```, ```848x480``` and ```960x544```.
 
-Touchscreen is supported, but interaction with UI elements may require double tap on them.
+Cursor speed can be changed with ```MOUSE SENSITIVITY``` slider in game preferences.
+
+Fallout 2 CE is still in early stages of development, so all kinds of bugs and crashes are to be expected.
 
 Another Fallout 2 CE port for PS Vita (functionally the same except for different controls):
 https://github.com/isage/fallout2-ce
 
-Thanks to @isage and beforementioned F2 port for help with figuring out the savegame bug.
+Thanks to @isage and aforementioned F2 port for help with figuring out the save game bug.
 
 # Fallout 2 Community Edition
 

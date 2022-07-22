@@ -523,7 +523,9 @@ extern unsigned char gPressedPhysicalKeysCount;
 
 extern SDL_Window* gSdlWindow;
 extern SDL_Surface* gSdlSurface;
-extern SDL_Surface* gSdlWindowSurface;
+extern SDL_Renderer* gSdlRenderer;
+extern SDL_Texture* gSdlTexture;
+extern SDL_Surface* gSdlTextureSurface;
 
 int coreInit(int a1);
 void coreExit();
@@ -636,44 +638,27 @@ bool mouseHitTestInWindow(int win, int left, int top, int right, int bottom);
 
 #ifdef __vita__
 #include <psp2/libime.h>
-
-// used to convert user-friendly pointer speed values into more useable ones
-const float CONTROLLER_SPEED_MOD = 200000.0f;
-// bigger value correndsponds to faster pointer movement speed with bigger stick axis values
-const float CONTROLLER_AXIS_SPEEDUP = 1.03f;
-
-enum
-{
-    CONTROLLER_L_DEADZONE = 3000,
-    CONTROLLER_R_DEADZONE = 25000,
-    VITA_FULLSCREEN_WIDTH = 960,
-    VITA_FULLSCREEN_HEIGHT = 544
-};
+#include <psp2/kernel/clib.h>
 
 extern SDL_GameController* gameController;
 extern float pendingPointerDX;
 extern float pendingPointerDY;
-extern int16_t numTouches;
+extern uint8_t numTouches;
+extern uint8_t delayedTouch;
 
-static int16_t controllerLeftXAxis = 0;
-static int16_t controllerLeftYAxis = 0;
-static int16_t controllerRightXAxis = 0;
-static int16_t controllerRightYAxis = 0;
-static uint32_t lastControllerTime = 0;
-static SDL_FingerID firstFingerId = 0;
-static int32_t mapXScroll = 0;
-static int32_t mapYScroll = 0;
-static float cursorSpeedup = 1.0f;
+void openController();
+void closeController();
+void handleTouchEvent(const SDL_TouchFingerEvent& event);
+void processControllerAxisMotion();
+void handleControllerAxisEvent(const SDL_ControllerAxisEvent& motion);
+void handleControllerButtonEvent(const SDL_ControllerButtonEvent& button);
 
-void OpenController();
-void CloseController();
-void HandleTouchEvent(const SDL_TouchFingerEvent& event);
-void ProcessControllerAxisMotion();
-void HandleControllerAxisEvent(const SDL_ControllerAxisEvent& motion);
-void HandleControllerButtonEvent(const SDL_ControllerButtonEvent& button);
+void vitaActivateIme();
+void vitaImeEventHandler(void *arg, const SceImeEventData *e);
 
-void VITA_ActivateIme();
-void VITA_ImeEventHandler(void *arg, const SceImeEventData *e);
+void updateVita2dPalette(SDL_Color *colors, int start, int count);
+void renderVita2dFrame(SDL_Surface *surface);
+void setRenderRect(int width, int height, bool fullscreen);
 #endif
 
 #endif /* CORE_H */

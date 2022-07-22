@@ -5,10 +5,13 @@
 #ifdef __vita__
 #include <psp2/kernel/clib.h>
 
+const uint8_t TOUCH_DELAY = 2;
+
 SDL_GameController* gameController;
 float pendingPointerDX;
 float pendingPointerDY;
-int16_t numTouches = 0;
+uint8_t numTouches = 0;
+uint8_t delayedTouch = 0;
 #endif
 
 // 0x4E0400
@@ -66,11 +69,18 @@ bool mouseDeviceGetData(MouseData* mouseState)
     mouseState->x = pendingPointerDX;
     mouseState->y = pendingPointerDY;
 
+    // keep the fractional part for more preciese movement
     pendingPointerDX -= static_cast<int>(pendingPointerDX);
     pendingPointerDY -= static_cast<int>(pendingPointerDY);
 
-    mouseState->buttons[0] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_A) || (numTouches == 1);
+    mouseState->buttons[0] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_A) || (numTouches == 1 && delayedTouch == TOUCH_DELAY);
     mouseState->buttons[1] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B);
+
+    // Skip 2 frames before triggering LMB event with touchpad. Most UI elements fail to interact on the first frame after the cursor movement
+    if (numTouches == 1 && delayedTouch < TOUCH_DELAY)
+    {
+        delayedTouch++;
+    }
 #else
     Uint32 buttons = SDL_GetRelativeMouseState(&(mouseState->x), &(mouseState->y));
     mouseState->buttons[0] = (buttons & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;

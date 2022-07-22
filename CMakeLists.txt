@@ -276,6 +276,7 @@ if(VITA)
     target_link_libraries(${EXECUTABLE_NAME}
         SDL2::SDL2
         SceIme_stub
+        vita2d
     )
 
     include("${CMAKE_SOURCE_DIR}/vita/vita.cmake")

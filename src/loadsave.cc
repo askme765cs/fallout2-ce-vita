@@ -2130,7 +2130,7 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
     int rc = 1;
 
 #ifdef __vita__
-    VITA_ActivateIme();
+    vitaActivateIme();
 #endif
 
     while (rc == 1) {
