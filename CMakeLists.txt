@@ -264,7 +264,8 @@ if(WIN32)
 endif()
 
 if(VITA)
-    set(VITA_FLAGS "-Ofast -mcpu=cortex-a9 -mfpu=neon -fno-peephole2 -fsigned-char")
+    #set(VITA_FLAGS "-Ofast -mcpu=cortex-a9 -mfpu=neon -fno-peephole2 -fsigned-char")
+    set(VITA_FLAGS "-Og -g -fsigned-char")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${VITA_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VITA_FLAGS}")
 
@@ -281,6 +282,7 @@ if(VITA)
 
     include("${CMAKE_SOURCE_DIR}/vita/vita.cmake")
     add_definitions(-D__unix)
+    add_definitions(-D_DEBUG)
     #add_definitions(-DOPENMP_BLIT)
     target_compile_definitions(${EXECUTABLE_NAME} PRIVATE _POSIX_C_SOURCE=200809)
 endif()

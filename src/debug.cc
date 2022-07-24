@@ -14,6 +14,10 @@
 #include <windows.h>
 #endif
 
+#ifdef __vita__
+#include <psp2/kernel/clib.h>
+#endif
+
 static int _debug_puts(char* string);
 static void _debug_clear();
 static int _debug_mono(char* string);
@@ -149,6 +153,8 @@ int debugPrint(const char* format, ...)
         vsprintf(string, format, args);
 #ifdef _WIN32
         OutputDebugStringA(string);
+#elif defined(__vita__)
+        sceClibPrintf("%s\n", string);
 #else
         printf("%s", string);
 #endif

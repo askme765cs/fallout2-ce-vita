@@ -161,6 +161,18 @@ static CacheEntry* gMainMenuButtonDownFrmHandle;
 // 0x614864
 static CacheEntry* gMainMenuBackgroundFrmHandle;
 
+#if defined(OPENMP_BLIT) && defined(__vita__)
+long int sysconf(int name)
+{
+	switch (name)
+		{
+		case _SC_NPROCESSORS_ONLN:
+			return 3;
+		}
+	return -1;
+}
+#endif
+
 // 0x48099C
 int falloutMain(int argc, char** argv)
 {
