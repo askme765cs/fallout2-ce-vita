@@ -269,8 +269,8 @@ if(WIN32)
 endif()
 
 if(VITA)
-    #set(VITA_FLAGS "-Ofast -mcpu=cortex-a9 -mfpu=neon -fno-peephole2")
-    set(VITA_FLAGS "-Og -g")
+    #set(VITA_FLAGS "-Ofast -mcpu=cortex-a9 -mfpu=neon -fno-peephole2 -DNDEBUG")
+    set(VITA_FLAGS "-Og -g -DNDEBUG")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${VITA_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VITA_FLAGS}")
 
