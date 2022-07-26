@@ -5,7 +5,7 @@ set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 set(EXECUTABLE_NAME fallout2-ce)
 
 if (APPLE)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.11" CACHE STRING "")
     set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "")
 endif()
 
@@ -15,7 +15,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS NO)
 
-add_executable(${EXECUTABLE_NAME} WIN32 MACOSX_BUNDLE
+if (ANDROID)
+    add_library(${EXECUTABLE_NAME} SHARED)
+else()
+    add_executable(${EXECUTABLE_NAME} WIN32 MACOSX_BUNDLE)
+endif()
+
+target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/actions.cc"
     "src/actions.h"
     "src/animation.cc"
