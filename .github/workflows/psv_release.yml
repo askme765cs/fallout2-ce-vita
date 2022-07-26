@@ -61,12 +61,12 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Upload tagged release
-      if: ${{ startsWith(github.ref, 'refs/tags/') }}
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          build/fallout2-ce.vpk
-          build/fallout2-ce
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#    - name: Upload tagged release
+#      if: ${{ startsWith(github.ref, 'refs/tags/') }}
+#      uses: softprops/action-gh-release@v1
+#      with:
+#        files: |
+#          build/fallout2-ce.vpk
+#          build/fallout2-ce
+#      env:
+#        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
