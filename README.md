@@ -45,6 +45,8 @@ Cursor speed can be changed with ```MOUSE SENSITIVITY``` slider in game preferen
 
 Fallout 2 CE is still in early stages of development, so all kinds of bugs and crashes are to be expected.
 
+Savegames can get corrupted sometimes, so you should try saving on the different save slots to avoid losing the game progress. Rewriting the "corrupted" savegame slot might break the new savegame too. Corrupted save folder from the ```ux0:data/fallout2/data/SAVEGAME``` needs to be deleted before it's reused again.
+
 Another Fallout 2 CE port for PS Vita (functionally the same except for different controls):
 https://github.com/isage/fallout2-ce
 
