@@ -1341,6 +1341,15 @@ void _GNW95_process_message()
             // The data is accumulated in SDL itself and will be processed
             // in `_mouse_info`.
             break;
+        case SDL_FINGERDOWN:
+        case SDL_FINGERMOTION:
+        case SDL_FINGERUP:
+#ifdef __vita__
+            handleTouchEvent(e.tfinger);
+#else
+            handleTouchFingerEvent(&(e.tfinger));
+#endif
+            break;
         case SDL_KEYDOWN:
         case SDL_KEYUP:
             if (!keyboardIsDisabled()) {
@@ -1373,11 +1382,6 @@ void _GNW95_process_message()
             exit(EXIT_SUCCESS);
             break;
 #ifdef __vita__
-        case SDL_FINGERDOWN:
-        case SDL_FINGERUP:
-        case SDL_FINGERMOTION:
-            handleTouchEvent(e.tfinger);
-            break;
         case SDL_CONTROLLERDEVICEREMOVED:
             if (gameController != nullptr) {
                 const SDL_GameController* removedController = SDL_GameControllerFromInstanceID(e.jdevice.which);
