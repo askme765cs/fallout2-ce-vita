@@ -688,14 +688,16 @@ bool mouseHitTestInWindow(int win, int left, int top, int right, int bottom);
 #include <psp2/kernel/clib.h>
 
 extern SDL_GameController* gameController;
-extern float pendingPointerDX;
-extern float pendingPointerDY;
+extern float gTouchMouseDeltaX;
+extern float gTouchMouseDeltaY;
 extern uint8_t numTouches;
 extern uint8_t delayedTouch;
+extern TouchpadMode frontTouchpadMode;
+extern TouchpadMode rearTouchpadMode;
 
 void openController();
 void closeController();
-void handleTouchEvent(const SDL_TouchFingerEvent& event);
+void handleTouchEventDirect(const SDL_TouchFingerEvent& event);
 void processControllerAxisMotion();
 void handleControllerAxisEvent(const SDL_ControllerAxisEvent& motion);
 void handleControllerButtonEvent(const SDL_ControllerButtonEvent& button);

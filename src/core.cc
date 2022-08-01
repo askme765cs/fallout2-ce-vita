@@ -36,6 +36,7 @@ enum
     CONTROLLER_R_DEADZONE = 25000,
     VITA_FULLSCREEN_WIDTH = 960,
     VITA_FULLSCREEN_HEIGHT = 544,
+    DEFAULT_WIDTH = 640,
     DEFAULT_HEIGHT = 480
 };
 
@@ -1345,10 +1346,9 @@ void _GNW95_process_message()
         case SDL_FINGERMOTION:
         case SDL_FINGERUP:
 #ifdef __vita__
-            handleTouchEvent(e.tfinger);
-#else
-            handleTouchFingerEvent(&(e.tfinger));
+            handleTouchEventDirect(e.tfinger);
 #endif
+            handleTouchFingerEvent(&(e.tfinger));
             break;
         case SDL_KEYDOWN:
         case SDL_KEYUP:
@@ -2127,6 +2127,35 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
             }
 #endif
 
+#ifdef __vita__
+            // load Vita options here
+            if (width < DEFAULT_WIDTH) {
+                width = DEFAULT_WIDTH;
+            }
+            if (height < DEFAULT_HEIGHT) {
+                height = DEFAULT_HEIGHT;
+            }
+
+            int frontTouch;
+            if (configGetInt(&resolutionConfig, "VITA", "FRONT_TOUCH_MODE", &frontTouch)) {
+                frontTouchpadMode = static_cast<TouchpadMode>(frontTouch);
+            }
+            else
+            {
+                configSetInt(&resolutionConfig, "VITA", "FRONT_TOUCH_MODE", 1);
+                configWrite(&resolutionConfig, "f2_res.ini", false);
+            }
+
+            int rearTouch;
+            if (configGetInt(&resolutionConfig, "VITA", "REAR_TOUCH_MODE", &rearTouch)) {
+                rearTouchpadMode = static_cast<TouchpadMode>(rearTouch);
+            }
+            else
+            {
+                configSetInt(&resolutionConfig, "VITA", "REAR_TOUCH_MODE", 0);
+                configWrite(&resolutionConfig, "f2_res.ini", false);
+            }
+#endif
             configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode);
         }
         configFree(&resolutionConfig);
@@ -5066,11 +5095,12 @@ void closeController()
     }
 }
 
-void handleTouchEvent(const SDL_TouchFingerEvent& event)
+void handleTouchEventDirect(const SDL_TouchFingerEvent& event)
 {
     // ignore back touchpad
-    if (event.touchId != 0)
+    if (event.touchId == 0 && frontTouchpadMode != TouchpadMode::TOUCH_DIRECT || event.touchId == 1) {
         return;
+    }
 
     if (event.type == SDL_FINGERDOWN) {
         ++numTouches;
@@ -5083,16 +5113,16 @@ void handleTouchEvent(const SDL_TouchFingerEvent& event)
     }
 
     if (firstFingerId == event.fingerId) {
-        int width = _scr_size.right - _scr_size.left + 1;
-        int height = _scr_size.bottom - _scr_size.top + 1;
+        int width = screenGetWidth();
+        int height = screenGetHeight();
 
         int touchPosX = static_cast<float>(VITA_FULLSCREEN_WIDTH * event.x - renderRect.x) *
                                     (static_cast<float>(width) / renderRect.w);
         int touchPosY = static_cast<float>(VITA_FULLSCREEN_HEIGHT * event.y - renderRect.y) *
                                     (static_cast<float>(height) / renderRect.h);
 
-        pendingPointerDX = touchPosX - gMouseCursorX;
-        pendingPointerDY = touchPosY - gMouseCursorY;
+        gTouchMouseDeltaX = touchPosX - gMouseCursorX;
+        gTouchMouseDeltaY = touchPosY - gMouseCursorY;
     }
 }
 
@@ -5106,9 +5136,9 @@ void processControllerAxisMotion()
         const int16_t xSign = (controllerLeftXAxis > 0) - (controllerLeftXAxis < 0);
         const int16_t ySign = (controllerLeftYAxis > 0) - (controllerLeftYAxis < 0);
 
-        pendingPointerDX += std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
+        gTouchMouseDeltaX += std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
                             * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
-        pendingPointerDY += std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
+        gTouchMouseDeltaY += std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
                             * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
     }
 }

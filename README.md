@@ -37,6 +37,19 @@ make
 - SELECT - Esc
 - START - On screen keyboard
 
+
+### Touchpad controls
+
+You can change the control mode of front or rear touchpad by editing ```ux0:data/fallout2/f2_res.ini``` and changing ```FRONT_TOUCH_MODE``` and ```REAR_TOUCH_MODE``` parameters.
+
+Following touchpad modes are supported:
+
+```0``` - Touchpad disabled
+
+```1``` - Direct control (front touchpad only)
+
+```2``` - Trackpad control
+
 ### Other
 
 You can change the game resolution by editing ```ux0:data/fallout2/f2_res.ini``` file and modifying ```SCR_WIDTH``` and ```SCR_HEIGHT``` parameters. Recommended resolutions are ```640x480```, ```848x480``` and ```960x544```.

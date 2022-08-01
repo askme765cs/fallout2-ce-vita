@@ -30,4 +30,15 @@ void keyboardDeviceFree();
 
 void handleTouchFingerEvent(SDL_TouchFingerEvent* event);
 
+#ifdef __vita__
+enum TouchpadMode
+{
+    TOUCH_DISABLED = 0,
+    TOUCH_DIRECT = 1,
+    TOUCH_TRACKPAD = 2
+};
+
+void handleTouchEventDirect(const SDL_TouchFingerEvent& event);
+#endif
+
 #endif /* DINPUT_H */

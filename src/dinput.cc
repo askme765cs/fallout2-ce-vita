@@ -2,9 +2,13 @@
 
 static int gTouchMouseLastX = 0;
 static int gTouchMouseLastY = 0;
+#ifdef __vita__
+float gTouchMouseDeltaX = 0;
+float gTouchMouseDeltaY = 0;
+#else
 static int gTouchMouseDeltaX = 0;
 static int gTouchMouseDeltaY = 0;
-
+#endif
 static int gTouchFingers = 0;
 static unsigned int gTouchGestureLastTouchDownTimestamp = 0;
 static unsigned int gTouchGestureLastTouchUpTimestamp = 0;
@@ -16,12 +20,13 @@ extern int screenGetHeight();
 
 #ifdef __vita__
 #include <psp2/kernel/clib.h>
+#include "core.h"
 
 const uint8_t TOUCH_DELAY = 2;
 
 SDL_GameController* gameController;
-float pendingPointerDX;
-float pendingPointerDY;
+TouchpadMode frontTouchpadMode = TouchpadMode::TOUCH_DIRECT;
+TouchpadMode rearTouchpadMode = TouchpadMode::TOUCH_DISABLED;
 uint8_t numTouches = 0;
 uint8_t delayedTouch = 0;
 #endif
@@ -78,22 +83,55 @@ bool mouseDeviceUnacquire()
 bool mouseDeviceGetData(MouseData* mouseState)
 {
 #ifdef __vita__
-    mouseState->x = pendingPointerDX;
-    mouseState->y = pendingPointerDY;
+    mouseState->x = gTouchMouseDeltaX;
+    mouseState->y = gTouchMouseDeltaY;
 
     // keep the fractional part for more preciese movement
-    pendingPointerDX -= static_cast<int>(pendingPointerDX);
-    pendingPointerDY -= static_cast<int>(pendingPointerDY);
+    gTouchMouseDeltaX -= static_cast<int>(gTouchMouseDeltaX);
+    gTouchMouseDeltaY -= static_cast<int>(gTouchMouseDeltaY);
 
-    mouseState->buttons[0] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_A) || (numTouches == 1 && delayedTouch == TOUCH_DELAY);
+    mouseState->buttons[0] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_A);
     mouseState->buttons[1] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B);
 
-    // Skip 2 frames before triggering LMB event with touchpad. Most UI elements fail to interact on the first frame after the cursor movement
-    if (numTouches == 1 && delayedTouch < TOUCH_DELAY)
-    {
-        delayedTouch++;
+    if (frontTouchpadMode == TouchpadMode::TOUCH_DIRECT) {
+        if (mouseState->buttons[0] == 0) {
+            mouseState->buttons[0] = (numTouches == 1 && delayedTouch == TOUCH_DELAY);
+        }
+
+        // Skip 2 frames before triggering LMB event with touchpad. Most UI elements fail to interact on the first frame after the cursor movement
+        if (numTouches == 1 && delayedTouch < TOUCH_DELAY) {
+            delayedTouch++;
+        }
+    } else if (frontTouchpadMode == TouchpadMode::TOUCH_TRACKPAD) {
+        if (gTouchFingers == 0) {
+            if (SDL_GetTicks() - gTouchGestureLastTouchUpTimestamp > 150) {
+                if (!gTouchGestureHandled) {
+                    if (gTouchGestureTaps == 2) {
+                        mouseState->buttons[0] = 1;
+                        gTouchGestureHandled = true;
+                    } else if (gTouchGestureTaps == 3) {
+                        mouseState->buttons[1] = 1;
+                        gTouchGestureHandled = true;
+                    }
+                }
+            }
+        } else if (gTouchFingers == 1) {
+            if (SDL_GetTicks() - gTouchGestureLastTouchDownTimestamp > 150) {
+                if (gTouchGestureTaps == 1) {
+                    mouseState->buttons[0] = 1;
+                    gTouchGestureHandled = true;
+                } else if (gTouchGestureTaps == 2) {
+                    mouseState->buttons[1] = 1;
+                    gTouchGestureHandled = true;
+                }
+            }
+        }
     }
-#elif __ANDROID__
+
+    return true;
+#endif
+
+#if __ANDROID__
     mouseState->x = gTouchMouseDeltaX;
     mouseState->y = gTouchMouseDeltaY;
     mouseState->buttons[0] = 0;
@@ -185,6 +223,12 @@ void keyboardDeviceFree()
 
 void handleTouchFingerEvent(SDL_TouchFingerEvent* event)
 {
+#ifdef __vita__
+    if ((event->touchId == 0 && frontTouchpadMode != TouchpadMode::TOUCH_TRACKPAD) ||
+        event->touchId == 1 && rearTouchpadMode != TouchpadMode::TOUCH_TRACKPAD) {
+        return;
+    }
+#endif
     int windowWidth = screenGetWidth();
     int windowHeight = screenGetHeight();
 
@@ -207,8 +251,13 @@ void handleTouchFingerEvent(SDL_TouchFingerEvent* event)
         int prevY = gTouchMouseLastY;
         gTouchMouseLastX = (int)(event->x * windowWidth);
         gTouchMouseLastY = (int)(event->y * windowHeight);
+#ifdef __vita__
+        gTouchMouseDeltaX += (gTouchMouseLastX - prevX) * gMouseSensitivity;
+        gTouchMouseDeltaY += (gTouchMouseLastY - prevY) * gMouseSensitivity;
+#else
         gTouchMouseDeltaX += gTouchMouseLastX - prevX;
         gTouchMouseDeltaY += gTouchMouseLastY - prevY;
+#endif
     } else if (event->type == SDL_FINGERUP) {
         gTouchFingers--;
 
@@ -216,8 +265,13 @@ void handleTouchFingerEvent(SDL_TouchFingerEvent* event)
         int prevY = gTouchMouseLastY;
         gTouchMouseLastX = (int)(event->x * windowWidth);
         gTouchMouseLastY = (int)(event->y * windowHeight);
+#ifdef __vita__
+        gTouchMouseDeltaX += (gTouchMouseLastX - prevX) * gMouseSensitivity;
+        gTouchMouseDeltaY += (gTouchMouseLastY - prevY) * gMouseSensitivity;
+#else
         gTouchMouseDeltaX += gTouchMouseLastX - prevX;
         gTouchMouseDeltaY += gTouchMouseLastY - prevY;
+#endif
 
         gTouchGestureTaps++;
         gTouchGestureLastTouchUpTimestamp = event->timestamp;
