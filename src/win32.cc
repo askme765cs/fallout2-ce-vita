@@ -60,9 +60,9 @@ int main(int argc, char* argv[])
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
 	scePowerSetArmClockFrequency(444);
-	//scePowerSetBusClockFrequency(222);
-	//scePowerSetGpuClockFrequency(222);
-	//scePowerSetGpuXbarClockFrequency(166);
+    scePowerSetGpuClockFrequency(166);
+    scePowerSetBusClockFrequency(222);
+	scePowerSetGpuXbarClockFrequency(166);
 #endif
 
     return falloutMain(argc, argv);
