@@ -46,6 +46,7 @@ static int useStairs(Object* a1, Object* stairs, int a3);
 static int _set_door_state_open(Object* a1, Object* a2);
 static int _set_door_state_closed(Object* a1, Object* a2);
 static int _check_door_state(Object* a1, Object* a2);
+static bool _obj_is_portal(Object* obj);
 static bool _obj_is_lockable(Object* obj);
 static bool _obj_is_openable(Object* obj);
 static int objectOpenClose(Object* obj);
@@ -843,10 +844,8 @@ static int _obj_use_explosive(Object* explosive)
     MessageListItem messageListItem;
 
     int pid = explosive->pid;
-    if (pid != PROTO_ID_DYNAMITE_I
-        && pid != PROTO_ID_PLASTIC_EXPLOSIVES_I
-        && pid != PROTO_ID_DYNAMITE_II
-        && pid != PROTO_ID_PLASTIC_EXPLOSIVES_II) {
+    // SFALL
+    if (!explosiveIsExplosive(pid)) {
         return -1;
     }
 
@@ -865,11 +864,8 @@ static int _obj_use_explosive(Object* explosive)
                 displayMonitorAddMessage(messageListItem.text);
             }
 
-            if (pid == PROTO_ID_DYNAMITE_I) {
-                explosive->pid = PROTO_ID_DYNAMITE_II;
-            } else if (pid == PROTO_ID_PLASTIC_EXPLOSIVES_I) {
-                explosive->pid = PROTO_ID_PLASTIC_EXPLOSIVES_II;
-            }
+            // SFALL
+            explosiveActivate(&(explosive->pid));
 
             int delay = 10 * seconds;
 
@@ -932,6 +928,9 @@ static int _obj_use_power_on_car(Object* item)
         return -1;
     }
 
+    // SFALL: Fix for cells getting consumed even when the car is already fully
+    // charged.
+    int rc;
     if (carGetFuel() < CAR_FUEL_MAX) {
         int energy = ammoGetQuantity(item) * energyDensity;
         int capacity = ammoGetCapacity(item);
@@ -943,15 +942,17 @@ static int _obj_use_power_on_car(Object* item)
 
         // You charge the car with more power.
         messageNum = 595;
+        rc = 1;
     } else {
         // The car is already full of power.
         messageNum = 596;
+        rc = 0;
     }
 
     char* text = getmsg(&gProtoMessageList, &messageListItem, messageNum);
     displayMonitorAddMessage(text);
 
-    return 1;
+    return rc;
 }
 
 // 0x49BE88
@@ -1048,7 +1049,8 @@ int _protinst_use_item(Object* critter, Object* item)
 // 0x49BFE8
 static int _protinstTestDroppedExplosive(Object* a1)
 {
-    if (a1->pid == PROTO_ID_DYNAMITE_II || a1->pid == PROTO_ID_PLASTIC_EXPLOSIVES_II) {
+    // SFALL
+    if (explosiveIsActiveExplosive(a1->pid)) {
         Attack attack;
         attackInit(&attack, gDude, 0, HIT_MODE_PUNCH, HIT_LOCATION_TORSO);
         attack.attackerFlags = DAM_HIT;
@@ -1184,9 +1186,15 @@ static int _protinst_default_use_item(Object* a1, Object* a2, Object* item)
 
         return rc;
     case ITEM_TYPE_AMMO:
-        rc = _obj_use_power_on_car(item);
-        if (rc == 1) {
-            return 1;
+        // SFALL: Fix for being able to charge the car by using cells on other
+        // scenery/critters.
+        if (a2->pid == PROTO_ID_CAR || a2->pid == PROTO_ID_CAR_TRUNK) {
+            rc = _obj_use_power_on_car(item);
+            if (rc == 1) {
+                return 1;
+            } else if (rc == 0) {
+                return -1;
+            }
         }
         break;
     case ITEM_TYPE_WEAPON:
@@ -1588,7 +1596,10 @@ static int _set_door_state_closed(Object* a1, Object* a2)
 static int _check_door_state(Object* a1, Object* a2)
 {
     if ((a1->data.scenery.door.openFlags & 0x01) == 0) {
-        a1->flags &= ~OBJECT_OPEN_DOOR;
+        // SFALL: Fix flags on non-door objects.
+        if (_obj_is_portal(a1)) {
+            a1->flags &= ~OBJECT_OPEN_DOOR;
+        }
 
         _obj_rebuild_all_light();
         tileWindowRefresh();
@@ -1623,7 +1634,10 @@ static int _check_door_state(Object* a1, Object* a2)
         artUnlock(artHandle);
         return 0;
     } else {
-        a1->flags |= OBJECT_OPEN_DOOR;
+        // SFALL: Fix flags on non-door objects.
+        if (_obj_is_portal(a1)) {
+            a1->flags |= OBJECT_OPEN_DOOR;
+        }
 
         _obj_rebuild_all_light();
         tileWindowRefresh();
@@ -1860,6 +1874,21 @@ int _obj_use_skill_on(Object* source, Object* target, int skill)
     }
 
     return 0;
+}
+
+// 0x49D140
+static bool _obj_is_portal(Object* obj)
+{
+    if (obj == NULL) {
+        return false;
+    }
+
+    Proto* proto;
+    if (protoGetProto(obj->pid, &proto) == -1) {
+        return false;
+    }
+
+    return proto->scenery.type == SCENERY_TYPE_DOOR;
 }
 
 // 0x49D178

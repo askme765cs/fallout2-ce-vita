@@ -2665,7 +2665,10 @@ static void _combat_over()
         for (int index = 0; index < _list_com; index++) {
             Object* critter = _combat_list[index];
             if (critter != gDude) {
-                _cai_attempt_w_reload(critter, 0);
+                // SFALL: Fix to prevent dead NPCs from reloading their weapons.
+                if ((critter->data.critter.combat.results & DAM_DEAD) == 0) {
+                    _cai_attempt_w_reload(critter, 0);
+                }
             }
         }
     }
@@ -3430,6 +3433,9 @@ int _combat_attack(Object* a1, Object* a2, int hitMode, int hitLocation)
         _critter_set_who_hit_me(a1, a2);
     }
 
+    // SFALL
+    explosionSettingsReset();
+
     _combat_call_display = 1;
     _combat_cleanup_enabled = 1;
     aiInfoSetLastTarget(a1, a2);
@@ -3707,7 +3713,8 @@ static int attackCompute(Attack* attack)
 
     bool isGrenade = false;
     int damageType = weaponGetDamageType(attack->attacker, attack->weapon);
-    if (anim == ANIM_THROW_ANIM && (damageType == DAMAGE_TYPE_EXPLOSION || damageType == DAMAGE_TYPE_PLASMA || damageType == DAMAGE_TYPE_EMP)) {
+    // SFALL
+    if (anim == ANIM_THROW_ANIM && (damageType == explosionGetDamageType() || damageType == DAMAGE_TYPE_PLASMA || damageType == DAMAGE_TYPE_EMP)) {
         isGrenade = true;
     }
 
@@ -3835,7 +3842,8 @@ static int attackCompute(Attack* attack)
         }
     }
 
-    if ((damageType == DAMAGE_TYPE_EXPLOSION || isGrenade) && ((attack->attackerFlags & DAM_HIT) != 0 || (attack->attackerFlags & DAM_CRITICAL) == 0)) {
+    // SFALL
+    if ((damageType == explosionGetDamageType() || isGrenade) && ((attack->attackerFlags & DAM_HIT) != 0 || (attack->attackerFlags & DAM_CRITICAL) == 0)) {
         _compute_explosion_on_extras(attack, 0, isGrenade, 0);
     } else {
         if ((attack->attackerFlags & DAM_EXPLODE) != 0) {
@@ -3882,7 +3890,10 @@ void _compute_explosion_on_extras(Attack* attack, int a2, bool isGrenade, int a4
     int rotation = 0;
     int v5 = -1;
     int v19 = tile;
-    while (attack->extrasLength < 6) {
+
+    // SFALL
+    int maxTargets = explosionGetMaxTargets();
+    while (attack->extrasLength < maxTargets) {
         if (v22 != 0 && (v5 == -1 || (v5 = tileGetTileInDirection(v5, rotation, 1)) != v19)) {
             v20++;
             if (v20 % v22 == 0) {
@@ -4222,6 +4233,11 @@ static int attackDetermineToHit(Object* attacker, int tile, Object* defender, in
 
             int perception = critterGetStat(attacker, STAT_PERCEPTION);
 
+            // SFALL: Fix Sharpshooter.
+            if (attacker == gDude) {
+                perception += 2 * perkGetRank(gDude, PERK_SHARPSHOOTER);
+            }
+
             if (defender != NULL) {
                 modifier = objectGetDistanceBetweenTiles(attacker, tile, defender, defender->tile);
             } else {
@@ -4240,10 +4256,6 @@ static int attackDetermineToHit(Object* attacker, int tile, Object* defender, in
 
             if (-2 * perception > modifier) {
                 modifier = -2 * perception;
-            }
-
-            if (attacker == gDude) {
-                modifier -= 2 * perkGetRank(gDude, PERK_SHARPSHOOTER);
             }
 
             if (modifier >= 0) {
