@@ -2155,6 +2155,12 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
                 configSetInt(&resolutionConfig, "VITA", "REAR_TOUCH_MODE", 0);
                 configWrite(&resolutionConfig, "f2_res.ini", false);
             }
+
+            // Use FACE_BAR_MODE=1 by default on Vita
+            if (!configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode)) {
+                configSetInt(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", 1);
+                configWrite(&resolutionConfig, "f2_res.ini", false);
+            }
 #endif
             configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode);
         }
@@ -5210,12 +5216,6 @@ void handleControllerButtonEvent(const SDL_ControllerButtonEvent& button)
     KeyboardData keyboardData;
 
     switch (button.button) {
-    case SDL_CONTROLLER_BUTTON_A:
-        // LMB. mouse is processed elsewhere
-        break;
-    case SDL_CONTROLLER_BUTTON_B:
-        // RMB. mouse is processed elsewhere
-        break;
     case SDL_CONTROLLER_BUTTON_X:
         // skills
         keyboardData.key = SDL_SCANCODE_S;
@@ -5242,12 +5242,40 @@ void handleControllerButtonEvent(const SDL_ControllerButtonEvent& button)
         }
         break;
     case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
-        // change active item
-        keyboardData.key = SDL_SCANCODE_B;
-        keyboardData.down = (button.state & SDL_PRESSED) != 0;
-        _GNW95_process_key(&keyboardData);
+        if (SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B))
+        {
+            if (button.state == SDL_PRESSED)
+            {
+                // Quick save
+                keyboardData.key = SDL_SCANCODE_F6;
+                keyboardData.down = 1;
+                _GNW95_process_key(&keyboardData);
+                keyboardData.down = 0;
+                _GNW95_process_key(&keyboardData);
+            }
+        }
+        else
+        {
+            // change active item
+            keyboardData.key = SDL_SCANCODE_B;
+            keyboardData.down = (button.state & SDL_PRESSED) != 0;
+            _GNW95_process_key(&keyboardData);
+        }
         break;
     case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+        if (SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B))
+        {
+            if (button.state == SDL_PRESSED)
+            {
+                // Quick load
+                keyboardData.key = SDL_SCANCODE_F7;
+                keyboardData.down = 1;
+                _GNW95_process_key(&keyboardData);
+                keyboardData.down = 0;
+                _GNW95_process_key(&keyboardData);
+            }
+        }
+
         // cursor speedup
         if (button.type == SDL_CONTROLLERBUTTONDOWN) {
             cursorSpeedup = 2.0f;

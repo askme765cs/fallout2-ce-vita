@@ -3,7 +3,7 @@
 ## Install
 Download fallout2-ce.vpk file and install it to your PS Vita.
 
-Copy ```master.dat```, ```critter.dat```, ```patch000.dat```, ```data``` and ```sound``` folders from the installed Fallout 2 game folder into to ```ux0:data/fallout2/```.
+Copy ```master.dat```, ```critter.dat```, ```patch000.dat```, ```data``` and ```sound``` folders from the installed Fallout 2 game folder into to ```ux0:data/fallout2/```. Copy ```fallout2.cfg``` too, if you're using non-english Fallout 2 version (or make sure that ```language``` setting is properly set in it (```language=german```, ```language=french```, etc)).
 
 ## Building
 
@@ -36,7 +36,8 @@ make
 - R1 (hold) - Cursor movement speedup
 - SELECT - Esc
 - START - On screen keyboard
-
+- ○ + L1 - Quick save
+- ○ + R1 - Quick load
 
 ### Touchpad controls
 
@@ -49,6 +50,8 @@ Following touchpad modes are supported:
 ```1``` - Direct control (front touchpad only)
 
 ```2``` - Trackpad control
+
+In trackpad control mode you can use double tap to "click" left mouse button in the current cursor position and triple tap to "click" right mouse button.
 
 ### Other
 
