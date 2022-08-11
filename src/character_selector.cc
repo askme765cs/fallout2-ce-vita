@@ -243,6 +243,8 @@ int characterSelectorOpen()
             if (characterEditorShow(1) == 0) {
                 rc = 2;
                 done = true;
+            } else {
+                characterSelectorWindowRefresh();
             }
 
             break;
@@ -251,6 +253,8 @@ int characterSelectorOpen()
             if (!characterEditorShow(1)) {
                 rc = 2;
                 done = true;
+            } else {
+                characterSelectorWindowRefresh();
             }
 
             break;
@@ -673,9 +677,6 @@ static void characterSelectorWindowFree()
 
     windowDestroy(gCharacterSelectorWindow);
     gCharacterSelectorWindow = -1;
-
-    // SFALL
-    premadeCharactersExit();
 }
 
 // 0x4A7D58

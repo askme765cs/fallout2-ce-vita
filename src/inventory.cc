@@ -542,7 +542,8 @@ void inventoryOpen()
     for (;;) {
         int keyCode = _get_input();
 
-        if (keyCode == KEY_ESCAPE) {
+        // SFALL: Close with 'I'.
+        if (keyCode == KEY_ESCAPE || keyCode == KEY_UPPERCASE_I || keyCode == KEY_LOWERCASE_I) {
             break;
         }
 
@@ -613,6 +614,23 @@ void inventoryOpen()
                         inventoryWindowOpenContextMenu(keyCode, INVENTORY_WINDOW_TYPE_NORMAL);
                     } else {
                         _inven_pickup(keyCode, _stack_offset[_curr_stack]);
+                    }
+                }
+            } else if ((mouseGetEvent() & MOUSE_EVENT_WHEEL) != 0) {
+                if (mouseHitTestInWindow(gInventoryWindow, INVENTORY_SCROLLER_X, INVENTORY_SCROLLER_Y, INVENTORY_SCROLLER_MAX_X, INVENTORY_SLOT_HEIGHT * gInventorySlotsCount + INVENTORY_SCROLLER_Y)) {
+                    int wheelX;
+                    int wheelY;
+                    mouseGetWheel(&wheelX, &wheelY);
+                    if (wheelY > 0) {
+                        if (_stack_offset[_curr_stack] > 0) {
+                            _stack_offset[_curr_stack] -= 1;
+                            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_NORMAL);
+                        }
+                    } else if (wheelY < 0) {
+                        if (gInventorySlotsCount + _stack_offset[_curr_stack] < _pud->length) {
+                            _stack_offset[_curr_stack] += 1;
+                            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_NORMAL);
+                        }
                     }
                 }
             }
@@ -2188,6 +2206,23 @@ void inventoryOpenUseItemOn(Object* a1)
                         }
                     }
                 }
+            } else if ((mouseGetEvent() & MOUSE_EVENT_WHEEL) != 0) {
+                if (mouseHitTestInWindow(gInventoryWindow, INVENTORY_SCROLLER_X, INVENTORY_SCROLLER_Y, INVENTORY_SCROLLER_MAX_X, INVENTORY_SLOT_HEIGHT * gInventorySlotsCount + INVENTORY_SCROLLER_Y)) {
+                    int wheelX;
+                    int wheelY;
+                    mouseGetWheel(&wheelX, &wheelY);
+                    if (wheelY > 0) {
+                        if (_stack_offset[_curr_stack] > 0) {
+                            _stack_offset[_curr_stack] -= 1;
+                            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
+                        }
+                    } else if (wheelY < 0) {
+                        if (_stack_offset[_curr_stack] + gInventorySlotsCount < _pud->length) {
+                            _stack_offset[_curr_stack] += 1;
+                            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
+                        }
+                    }
+                }
             }
         }
 
@@ -2398,6 +2433,16 @@ static void inventoryRenderSummary()
         HIT_MODE_RIGHT_WEAPON_PRIMARY,
     };
 
+    const int secondaryHitModes[2] = {
+        HIT_MODE_LEFT_WEAPON_SECONDARY,
+        HIT_MODE_RIGHT_WEAPON_SECONDARY,
+    };
+
+    const int unarmedHitModes[2] = {
+        HIT_MODE_PUNCH,
+        HIT_MODE_KICK,
+    };
+
     offset += 499 * fontGetLineHeight();
 
     for (int index = 0; index < 2; index += 1) {
@@ -2416,10 +2461,33 @@ static void inventoryRenderSummary()
             // Unarmed dmg:
             messageListItem.num = 24;
             if (messageListGetItem(&gInventoryMessageList, &messageListItem)) {
-                // TODO: Figure out why it uses STAT_MELEE_DAMAGE instead of
-                // STAT_UNARMED_DAMAGE.
-                int damage = critterGetStat(_stack[0], STAT_MELEE_DAMAGE) + 2;
-                sprintf(formattedText, "%s 1-%d", messageListItem.text, damage);
+                // SFALL: Display the actual damage values of unarmed attacks.
+                // CE: Implementation is different.
+                int hitMode = unarmedHitModes[index];
+                if (_stack[0] == gDude) {
+                    int actions[2];
+                    interfaceGetItemActions(&(actions[0]), &(actions[1]));
+
+                    bool isSecondary = actions[index] == INTERFACE_ITEM_ACTION_SECONDARY ||
+                        actions[index] == INTERFACE_ITEM_ACTION_SECONDARY_AIMING;
+
+                    if (index == HAND_LEFT) {
+                        hitMode = unarmedGetPunchHitMode(isSecondary);
+                    } else {
+                        hitMode = unarmedGetKickHitMode(isSecondary);
+                    }
+                }
+
+                // Formula is the same as in `weaponGetMeleeDamage`.
+                int minDamage;
+                int maxDamage;
+                int bonusDamage = unarmedGetDamage(hitMode, &minDamage, &maxDamage);
+                int meleeDamage = critterGetStat(_stack[0], STAT_MELEE_DAMAGE);
+                // TODO: Localize unarmed attack names.
+                sprintf(formattedText, "%s %d-%d",
+                    messageListItem.text,
+                    bonusDamage + minDamage,
+                    bonusDamage + meleeDamage + maxDamage);
             }
 
             fontDrawText(windowBuffer + offset, formattedText, 120, 499, _colorTable[992]);
@@ -2447,13 +2515,29 @@ static void inventoryRenderSummary()
             continue;
         }
 
-        int range = _item_w_range(_stack[0], hitModes[index]);
+        // SFALL: Fix displaying secondary mode weapon range.
+        int hitMode = hitModes[index];
+        if (_stack[0] == gDude) {
+            int actions[2];
+            interfaceGetItemActions(&(actions[0]), &(actions[1]));
+
+            bool isSecondary = actions[index] == INTERFACE_ITEM_ACTION_SECONDARY ||
+                actions[index] == INTERFACE_ITEM_ACTION_SECONDARY_AIMING;
+
+            if (isSecondary) {
+                hitMode = secondaryHitModes[index];
+            }
+        }
+
+        int range = _item_w_range(_stack[0], hitMode);
 
         int damageMin;
         int damageMax;
         weaponGetDamageMinMax(item, &damageMin, &damageMax);
 
-        int attackType = weaponGetAttackTypeForHitMode(item, hitModes[index]);
+        // CE: Fix displaying secondary mode weapon damage (affects throwable
+        // melee weapons - knifes, spears, etc.).
+        int attackType = weaponGetAttackTypeForHitMode(item, hitMode);
 
         formattedText[0] = '\0';
 
@@ -3713,6 +3797,40 @@ int inventoryOpenLooting(Object* a1, Object* a2)
                         }
                     }
                 }
+            } else if ((mouseGetEvent() & MOUSE_EVENT_WHEEL) != 0) {
+                if (mouseHitTestInWindow(gInventoryWindow, INVENTORY_LOOT_LEFT_SCROLLER_X, INVENTORY_LOOT_LEFT_SCROLLER_Y, INVENTORY_LOOT_LEFT_SCROLLER_MAX_X, INVENTORY_SLOT_HEIGHT * gInventorySlotsCount + INVENTORY_LOOT_LEFT_SCROLLER_Y)) {
+                    int wheelX;
+                    int wheelY;
+                    mouseGetWheel(&wheelX, &wheelY);
+                    if (wheelY > 0) {
+                        if (_stack_offset[_curr_stack] > 0) {
+                            _stack_offset[_curr_stack] -= 1;
+                            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_LOOT);
+                        }
+                    } else if (wheelY < 0) {
+                        if (_stack_offset[_curr_stack] + gInventorySlotsCount < _pud->length) {
+                            _stack_offset[_curr_stack] += 1;
+                            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_LOOT);
+                        }
+                    }
+                } else if (mouseHitTestInWindow(gInventoryWindow, INVENTORY_LOOT_RIGHT_SCROLLER_X, INVENTORY_LOOT_RIGHT_SCROLLER_Y, INVENTORY_LOOT_RIGHT_SCROLLER_MAX_X, INVENTORY_SLOT_HEIGHT * gInventorySlotsCount + INVENTORY_LOOT_RIGHT_SCROLLER_Y)) {
+                    int wheelX;
+                    int wheelY;
+                    mouseGetWheel(&wheelX, &wheelY);
+                    if (wheelY > 0) {
+                        if (_target_stack_offset[_target_curr_stack] > 0) {
+                            _target_stack_offset[_target_curr_stack] -= 1;
+                            _display_target_inventory(_target_stack_offset[_target_curr_stack], -1, _target_pud, INVENTORY_WINDOW_TYPE_LOOT);
+                            windowRefresh(gInventoryWindow);
+                        }
+                    } else if (wheelY < 0) {
+                        if (_target_stack_offset[_target_curr_stack] + gInventorySlotsCount < _target_pud->length) {
+                            _target_stack_offset[_target_curr_stack] += 1;
+                            _display_target_inventory(_target_stack_offset[_target_curr_stack], -1, _target_pud, INVENTORY_WINDOW_TYPE_LOOT);
+                            windowRefresh(gInventoryWindow);
+                        }
+                    }
+                }
             }
         }
 
@@ -4534,6 +4652,70 @@ void inventoryOpenTrade(int win, Object* a2, Object* a3, Object* a4, int a5)
                     }
 
                     keyCode = -1;
+                }
+            } else if ((mouseGetEvent() & MOUSE_EVENT_WHEEL) != 0) {
+                if (mouseHitTestInWindow(gInventoryWindow, INVENTORY_TRADE_INNER_LEFT_SCROLLER_TRACKING_X, INVENTORY_TRADE_INNER_LEFT_SCROLLER_TRACKING_Y, INVENTORY_TRADE_INNER_LEFT_SCROLLER_TRACKING_MAX_X, INVENTORY_SLOT_HEIGHT * gInventorySlotsCount + INVENTORY_TRADE_INNER_LEFT_SCROLLER_TRACKING_Y)) {
+                    int wheelX;
+                    int wheelY;
+                    mouseGetWheel(&wheelX, &wheelY);
+                    if (wheelY > 0) {
+                        if (_stack_offset[_curr_stack] > 0) {
+                            _stack_offset[_curr_stack] -= 1;
+                            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_TRADE);
+                        }
+                    } else if (wheelY < 0) {
+                        if (_stack_offset[_curr_stack] + gInventorySlotsCount < _pud->length) {
+                            _stack_offset[_curr_stack] += 1;
+                            _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_TRADE);
+                        }
+                    }
+                } else if (mouseHitTestInWindow(gInventoryWindow, INVENTORY_TRADE_LEFT_SCROLLER_TRACKING_X, INVENTORY_TRADE_LEFT_SCROLLER_TRACKING_Y, INVENTORY_TRADE_LEFT_SCROLLER_TRACKING_MAX_X, INVENTORY_SLOT_HEIGHT * gInventorySlotsCount + INVENTORY_TRADE_LEFT_SCROLLER_TRACKING_Y)) {
+                    int wheelX;
+                    int wheelY;
+                    mouseGetWheel(&wheelX, &wheelY);
+                    if (wheelY > 0) {
+                        if (_ptable_offset > 0) {
+                            _ptable_offset -= 1;
+                            inventoryWindowRenderInnerInventories(win, a3, a4, -1);
+                        }
+                    } else if (wheelY < 0) {
+                        if (_ptable_offset + gInventorySlotsCount < _ptable_pud->length) {
+                            _ptable_offset += 1;
+                            inventoryWindowRenderInnerInventories(win, a3, a4, -1);
+                        }
+                    }
+                } else if (mouseHitTestInWindow(gInventoryWindow, INVENTORY_TRADE_RIGHT_SCROLLER_TRACKING_X, INVENTORY_TRADE_RIGHT_SCROLLER_TRACKING_Y, INVENTORY_TRADE_RIGHT_SCROLLER_TRACKING_MAX_X, INVENTORY_SLOT_HEIGHT * gInventorySlotsCount + INVENTORY_TRADE_RIGHT_SCROLLER_TRACKING_Y)) {
+                    int wheelX;
+                    int wheelY;
+                    mouseGetWheel(&wheelX, &wheelY);
+                    if (wheelY > 0) {
+                        if (_target_stack_offset[_target_curr_stack] > 0) {
+                            _target_stack_offset[_target_curr_stack] -= 1;
+                            _display_target_inventory(_target_stack_offset[_target_curr_stack], -1, _target_pud, INVENTORY_WINDOW_TYPE_TRADE);
+                            windowRefresh(gInventoryWindow);
+                        }
+                    } else if (wheelY < 0) {
+                        if (_target_stack_offset[_target_curr_stack] + gInventorySlotsCount < _target_pud->length) {
+                            _target_stack_offset[_target_curr_stack] += 1;
+                            _display_target_inventory(_target_stack_offset[_target_curr_stack], -1, _target_pud, INVENTORY_WINDOW_TYPE_TRADE);
+                            windowRefresh(gInventoryWindow);
+                        }
+                    }
+                } else if (mouseHitTestInWindow(gInventoryWindow, INVENTORY_TRADE_INNER_RIGHT_SCROLLER_TRACKING_X, INVENTORY_TRADE_INNER_RIGHT_SCROLLER_TRACKING_Y, INVENTORY_TRADE_INNER_RIGHT_SCROLLER_TRACKING_MAX_X, INVENTORY_SLOT_HEIGHT * gInventorySlotsCount + INVENTORY_TRADE_INNER_RIGHT_SCROLLER_TRACKING_Y)) {
+                    int wheelX;
+                    int wheelY;
+                    mouseGetWheel(&wheelX, &wheelY);
+                    if (wheelY > 0) {
+                        if (_btable_offset > 0) {
+                            _btable_offset -= 1;
+                            inventoryWindowRenderInnerInventories(win, a3, a4, -1);
+                        }
+                    } else if (wheelY < 0) {
+                        if (_btable_offset + gInventorySlotsCount < _btable_pud->length) {
+                            _btable_offset++;
+                            inventoryWindowRenderInnerInventories(win, a3, a4, -1);
+                        }
+                    }
                 }
             }
         }

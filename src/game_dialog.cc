@@ -664,7 +664,11 @@ static int gameDialogWindowRenderBackground();
 static int _talkToRefreshDialogWindowRect(Rect* rect);
 static void gameDialogRenderHighlight(unsigned char* src, int srcWidth, int srcHeight, int srcPitch, unsigned char* dest, int x, int y, int destPitch, unsigned char* a9, unsigned char* a10);
 static void gameDialogRenderTalkingHead(Art* art, int frame);
-static void gameDialogPrepareHighlights();
+static void gameDialogHighlightsInit();
+static void gameDialogHighlightsExit();
+
+static void gameDialogRedButtonsInit();
+static void gameDialogRedButtonsExit();
 
 // gdialog_init
 // 0x444D1C
@@ -921,7 +925,7 @@ int _gdialogInitFromScript(int headFid, int reaction)
     dialogSetOptionColor(0.2f, 0.2f, 0.2f);
     dialogSetReplyTitle(NULL);
     _dialogRegisterWinDrawCallbacks(_demo_copy_title, _demo_copy_options);
-    gameDialogPrepareHighlights();
+    gameDialogHighlightsInit();
     colorCycleDisable();
     if (_gdDialogTurnMouseOff) {
         _gmouse_disable(0);
@@ -935,6 +939,9 @@ int _gdialogInitFromScript(int headFid, int reaction)
     }
 
     _talk_need_to_center = 1;
+
+    // CE: Fix Barter button.
+    gameDialogRedButtonsInit();
 
     _gdCreateHeadWindow();
     tickersAdd(gameDialogTicker);
@@ -979,6 +986,9 @@ int _gdialogExitFromScript()
 
     _gdDestroyHeadWindow();
 
+    // CE: Fix Barter button.
+    gameDialogRedButtonsExit();
+
     fontSetCurrent(_oldFont);
 
     if (gGameDialogFidgetFrm != NULL) {
@@ -995,11 +1005,8 @@ int _gdialogExitFromScript()
         _lipsFID = 0;
     }
 
-    _freeColorBlendTable(_colorTable[17969]);
-    _freeColorBlendTable(_colorTable[22187]);
-
-    artUnlock(gGameDialogUpperHighlightFrmHandle);
-    artUnlock(gGameDialogLowerHighlightFrmHandle);
+    // NOTE: Uninline.
+    gameDialogHighlightsExit();
 
     _gdialog_state = 0;
     _dialogue_state = 0;
@@ -1734,29 +1741,12 @@ int _gdProcessInit()
         goto err_2;
     }
 
-    // di_rdbt2.frm - dialog red button down
-    fid = buildFid(OBJ_TYPE_INTERFACE, 96, 0, 0, 0);
-    gGameDialogRedButtonUpFrmData = artLockFrameData(fid, 0, 0, &gGameDialogRedButtonUpFrmHandle);
-    if (gGameDialogRedButtonUpFrmData == NULL) {
-        goto err_3;
-    }
-
-    // di_rdbt1.frm - dialog red button up
-    fid = buildFid(OBJ_TYPE_INTERFACE, 95, 0, 0, 0);
-    gGameDialogRedButtonDownFrmData = artLockFrameData(fid, 0, 0, &gGameDialogRedButtonDownFrmHandle);
-    if (gGameDialogRedButtonDownFrmData == NULL) {
-        goto err_3;
-    }
+    // CE: Move red buttons init to `_gdialogInitFromScript`.
 
     _talkOldFont = fontGetCurrent();
     fontSetCurrent(101);
 
     return 0;
-
-err_3:
-
-    artUnlock(gGameDialogRedButtonUpFrmHandle);
-    gGameDialogRedButtonUpFrmHandle = NULL;
 
 err_2:
 
@@ -1795,13 +1785,7 @@ int _gdProcessExit()
 {
     _gdProcessCleanup();
 
-    artUnlock(gGameDialogRedButtonDownFrmHandle);
-    gGameDialogRedButtonDownFrmHandle = NULL;
-    gGameDialogRedButtonDownFrmData = NULL;
-
-    artUnlock(gGameDialogRedButtonUpFrmHandle);
-    gGameDialogRedButtonUpFrmHandle = NULL;
-    gGameDialogRedButtonUpFrmData = NULL;
+    // CE: Move red buttons exit to `_gdialogExitFromScript`.
 
     windowDestroy(gGameDialogReplyWindow);
     gGameDialogReplyWindow = -1;
@@ -1868,6 +1852,8 @@ int _gdProcess()
     pageOffsets[0] = 0;
     for (;;) {
         int keyCode = _get_input();
+
+        convertMouseWheelToArrowKey(&keyCode);
 
         if (keyCode == KEY_CTRL_Q || keyCode == KEY_CTRL_X || keyCode == KEY_F10) {
             showQuitConfirmationDialog();
@@ -4595,7 +4581,7 @@ void gameDialogRenderTalkingHead(Art* headFrm, int frame)
 }
 
 // 0x44B080
-void gameDialogPrepareHighlights()
+void gameDialogHighlightsInit()
 {
     for (int color = 0; color < 256; color++) {
         int r = (_Color2RGB_(color) & 0x7C00) >> 10;
@@ -4622,4 +4608,48 @@ void gameDialogPrepareHighlights()
     gGameDialogLowerHighlightFrm = artLock(lowerHighlightFid, &gGameDialogLowerHighlightFrmHandle);
     gGameDialogLowerHighlightFrmWidth = artGetWidth(gGameDialogLowerHighlightFrm, 0, 0);
     gGameDialogLowerHighlightFrmHeight = artGetHeight(gGameDialogLowerHighlightFrm, 0, 0);
+}
+
+// NOTE: Inlined.
+//
+// 0x44B1D4
+static void gameDialogHighlightsExit()
+{
+    _freeColorBlendTable(_colorTable[17969]);
+    _freeColorBlendTable(_colorTable[22187]);
+
+    artUnlock(gGameDialogUpperHighlightFrmHandle);
+    artUnlock(gGameDialogLowerHighlightFrmHandle);
+}
+
+static void gameDialogRedButtonsInit()
+{
+    // di_rdbt2.frm - dialog red button down
+    int pressedFid = buildFid(OBJ_TYPE_INTERFACE, 96, 0, 0, 0);
+    gGameDialogRedButtonUpFrmData = artLockFrameData(pressedFid, 0, 0, &gGameDialogRedButtonUpFrmHandle);
+    if (gGameDialogRedButtonUpFrmData == NULL) {
+        gameDialogRedButtonsExit();
+    }
+
+    // di_rdbt1.frm - dialog red button up
+    int normalFid = buildFid(OBJ_TYPE_INTERFACE, 95, 0, 0, 0);
+    gGameDialogRedButtonDownFrmData = artLockFrameData(normalFid, 0, 0, &gGameDialogRedButtonDownFrmHandle);
+    if (gGameDialogRedButtonDownFrmData == NULL) {
+        gameDialogRedButtonsExit();
+    }
+}
+
+static void gameDialogRedButtonsExit()
+{
+    if (gGameDialogRedButtonDownFrmHandle != NULL) {
+        artUnlock(gGameDialogRedButtonDownFrmHandle);
+        gGameDialogRedButtonDownFrmHandle = NULL;
+        gGameDialogRedButtonDownFrmData = NULL;
+    }
+
+    if (gGameDialogRedButtonUpFrmHandle != NULL) {
+        artUnlock(gGameDialogRedButtonUpFrmHandle);
+        gGameDialogRedButtonUpFrmHandle = NULL;
+        gGameDialogRedButtonUpFrmData = NULL;
+    }
 }

@@ -444,6 +444,27 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
     }
 
     if (eventCode == -1) {
+        if ((mouseGetEvent() & MOUSE_EVENT_WHEEL) != 0) {
+            int wheelX;
+            int wheelY;
+            mouseGetWheel(&wheelX, &wheelY);
+
+            int dx = 0;
+            if (wheelX > 0) {
+                dx = 1;
+            } else if (wheelX < 0) {
+                dx = -1;
+            }
+
+            int dy = 0;
+            if (wheelY > 0) {
+                dy = -1;
+            } else if (wheelY < 0) {
+                dy = 1;
+            }
+
+            mapScroll(dx, dy);
+        }
         return 0;
     }
 
@@ -567,7 +588,7 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
                 showDialogBox(title, NULL, 0, 192, 116, _colorTable[32328], NULL, _colorTable[32328], 0);
             } else {
                 soundPlayFile("ib1p1xx1");
-                pipboyOpen(false);
+                pipboyOpen(PIPBOY_OPEN_INTENT_UNSPECIFIED);
             }
         }
         break;
@@ -635,7 +656,7 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
                 showDialogBox(title, NULL, 0, 192, 116, _colorTable[32328], NULL, _colorTable[32328], 0);
             } else {
                 soundPlayFile("ib1p1xx1");
-                pipboyOpen(true);
+                pipboyOpen(PIPBOY_OPEN_INTENT_REST);
             }
         }
         break;

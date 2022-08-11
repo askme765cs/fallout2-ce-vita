@@ -418,6 +418,9 @@ SDL_Renderer* gSdlRenderer = NULL;
 SDL_Texture* gSdlTexture = NULL;
 SDL_Surface* gSdlTextureSurface = NULL;
 
+static int gMouseWheelX = 0;
+static int gMouseWheelY = 0;
+
 // 0x4C8A70
 int coreInit(int a1)
 {
@@ -1342,6 +1345,9 @@ void _GNW95_process_message()
             // The data is accumulated in SDL itself and will be processed
             // in `_mouse_info`.
             break;
+        case SDL_MOUSEWHEEL:
+            handleMouseWheelEvent(&(e.wheel));
+            break;
         case SDL_FINGERDOWN:
         case SDL_FINGERMOTION:
         case SDL_FINGERUP:
@@ -1788,6 +1794,16 @@ void _mouse_info()
     }
 
     _mouse_simulate_input(x, y, buttons);
+
+    // TODO: Move to `_mouse_simulate_input`.
+    // TODO: Record wheel event in VCR.
+    gMouseWheelX = mouseData.wheelX;
+    gMouseWheelY = mouseData.wheelY;
+
+    if (gMouseWheelX != 0 || gMouseWheelY != 0) {
+        gMouseEvent |= MOUSE_EVENT_WHEEL;
+        _raw_buttons |= MOUSE_EVENT_WHEEL;
+    }
 }
 
 // 0x4CA698
@@ -5027,6 +5043,29 @@ bool mouseHitTestInWindow(int win, int left, int top, int right, int bottom)
     }
 
     return _mouse_click_in(left, top, right, bottom);
+}
+
+void mouseGetWheel(int* x, int* y)
+{
+    *x = gMouseWheelX;
+    *y = gMouseWheelY;
+}
+
+void convertMouseWheelToArrowKey(int* keyCodePtr)
+{
+    if (*keyCodePtr == -1) {
+        if ((mouseGetEvent() & MOUSE_EVENT_WHEEL) != 0) {
+            int wheelX;
+            int wheelY;
+            mouseGetWheel(&wheelX, &wheelY);
+
+            if (wheelY > 0) {
+                *keyCodePtr = KEY_ARROW_UP;
+            } else if (wheelY < 0) {
+                *keyCodePtr = KEY_ARROW_DOWN;
+            }
+        }
+    }
 }
 
 #ifdef __vita__
