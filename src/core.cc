@@ -2527,6 +2527,9 @@ void _GNW95_ShowRect(unsigned char* src, int srcPitch, int a3, int srcX, int src
     blitBufferToBuffer(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch, (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + destX, gSdlSurface->pitch);
     SDL_UnlockSurface(gSdlSurface);
 
+#ifdef __vita__
+    renderVita2dFrame(gSdlSurface);
+#else
     SDL_Rect srcRect;
     srcRect.x = destX;
     srcRect.y = destY;
@@ -2536,9 +2539,7 @@ void _GNW95_ShowRect(unsigned char* src, int srcPitch, int a3, int srcX, int src
     SDL_Rect destRect;
     destRect.x = destX;
     destRect.y = destY;
-#ifdef __vita__
-    renderVita2dFrame(gSdlSurface);
-#else
+
     SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
     SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
     SDL_RenderClear(gSdlRenderer);
@@ -2574,6 +2575,9 @@ void _GNW95_MouseShowRect16(unsigned char* src, int srcPitch, int a3, int srcX, 
 
     SDL_UnlockSurface(gSdlSurface);
 
+#ifdef __vita__
+    renderVita2dFrame(gSdlSurface);
+#else
     SDL_Rect srcRect;
     srcRect.x = destX;
     srcRect.y = destY;
@@ -2583,9 +2587,7 @@ void _GNW95_MouseShowRect16(unsigned char* src, int srcPitch, int a3, int srcX, 
     SDL_Rect destRect;
     destRect.x = destX;
     destRect.y = destY;
-#ifdef __vita__
-    renderVita2dFrame(gSdlSurface);
-#else
+
     SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
     SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
     SDL_RenderClear(gSdlRenderer);
@@ -2629,6 +2631,9 @@ void _GNW95_MouseShowTransRect16(unsigned char* src, int srcPitch, int a3, int s
 
     SDL_UnlockSurface(gSdlSurface);
 
+#ifdef __vita__
+    renderVita2dFrame(gSdlSurface);
+#else
     SDL_Rect srcRect;
     srcRect.x = destX;
     srcRect.y = destY;
@@ -2638,9 +2643,7 @@ void _GNW95_MouseShowTransRect16(unsigned char* src, int srcPitch, int a3, int s
     SDL_Rect destRect;
     destRect.x = destX;
     destRect.y = destY;
-#ifdef __vita__
-    renderVita2dFrame(gSdlSurface);
-#else
+
     SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
     SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
     SDL_RenderClear(gSdlRenderer);

@@ -1,5 +1,10 @@
 include(FetchContent)
 
+if(VITA)
+    SET(CMAKE_AR arm-vita-eabi-gcc-ar)
+    SET(CMAKE_RANLIB arm-vita-eabi-gcc-ranlib)
+endif()
+
 FetchContent_Declare(fpattern
     GIT_REPOSITORY "https://github.com/Loadmaster/fpattern"
     GIT_TAG "v1.9"
