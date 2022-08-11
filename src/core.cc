@@ -1795,6 +1795,8 @@ void _mouse_info()
 
     _mouse_simulate_input(x, y, buttons);
 
+// breaks mouse button emulation on Vita
+#ifndef __vita__
     // TODO: Move to `_mouse_simulate_input`.
     // TODO: Record wheel event in VCR.
     gMouseWheelX = mouseData.wheelX;
@@ -1804,6 +1806,7 @@ void _mouse_info()
         gMouseEvent |= MOUSE_EVENT_WHEEL;
         _raw_buttons |= MOUSE_EVENT_WHEEL;
     }
+#endif
 }
 
 // 0x4CA698
