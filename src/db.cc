@@ -1,11 +1,11 @@
 #include "db.h"
 
-#include "platform_compat.h"
-#include "xfile.h"
-
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "platform_compat.h"
+#include "xfile.h"
 
 typedef struct FileList {
     XList xlist;
@@ -61,20 +61,22 @@ int dbOpen(const char* filePath1, int a2, const char* filePath2, int a4)
     return 0;
 }
 
-// NOTE: This function simply returns 0, but it definitely accept one parameter
-// via eax, as seen at every call site. This value is ignored. It's impossible
-// to guess it's name.
-//
 // 0x4C5D54
-int _db_current(int a1)
+int _db_select(int dbHandle)
+{
+    return 0;
+}
+
+// NOTE: Uncollapsed 0x4C5D54.
+int _db_current()
 {
     return 0;
 }
 
 // 0x4C5D58
-bool _db_total()
+int _db_total()
 {
-    return true;
+    return 0;
 }
 
 // 0x4C5D60
@@ -653,7 +655,7 @@ int fileNameListInit(const char* pattern, char*** fileNameListPtr, int a3, int a
                 char path[COMPAT_MAX_PATH];
                 sprintf(path, "%s%s", fileName, extension);
                 free(xlist->fileNames[length]);
-                xlist->fileNames[length] = strdup(path);
+                xlist->fileNames[length] = compat_strdup(path);
                 length++;
             }
         }

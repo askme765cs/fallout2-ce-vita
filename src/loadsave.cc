@@ -1,5 +1,12 @@
 #include "loadsave.h"
 
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+#include <algorithm>
+
 #include "art.h"
 #include "automap.h"
 #include "character_editor.h"
@@ -44,14 +51,7 @@
 #include "version.h"
 #include "window_manager.h"
 #include "word_wrap.h"
-#include "world_map.h"
-
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
-#include <time.h>
-
-#include <algorithm>
+#include "worldmap.h"
 
 #define LS_WINDOW_WIDTH 640
 #define LS_WINDOW_HEIGHT 480
@@ -216,7 +216,7 @@ static SaveGameHandler* _master_save_list[LOAD_SAVE_HANDLER_COUNT] = {
     automapSave,
     preferencesSave,
     characterEditorSave,
-    worldmapSave,
+    wmWorldMap_save,
     pipboySave,
     gameMoviesSave,
     skillsUsageSave,
@@ -247,7 +247,7 @@ static LoadGameHandler* _master_load_list[LOAD_SAVE_HANDLER_COUNT] = {
     automapLoad,
     preferencesLoad,
     characterEditorLoad,
-    worldmapLoad,
+    wmWorldMap_load,
     pipboyLoad,
     gameMoviesLoad,
     skillsUsageLoad,
@@ -819,7 +819,7 @@ int lsgLoadGame(int mode)
 
         messageListFree(&gLoadSaveMessageList);
 
-        _map_new_map();
+        mapNewMap();
 
         _game_user_wants_to_quit = 2;
 
@@ -1143,7 +1143,7 @@ int lsgLoadGame(int mode)
 
                         showDialogBox(_str0, body, 1, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
 
-                        _map_new_map();
+                        mapNewMap();
 
                         _game_user_wants_to_quit = 2;
 
@@ -2115,7 +2115,7 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
     char text[256];
     strcpy(text, description);
 
-    int textLength = strlen(text);
+    size_t textLength = strlen(text);
     text[textLength] = ' ';
     text[textLength + 1] = '\0';
 
@@ -2222,7 +2222,7 @@ static int _PrepLoad(File* stream)
 // 0x47F4C8
 static int _EndLoad(File* stream)
 {
-    worldmapStartMapMusic();
+    wmMapMusicStart();
     dudeSetName(_LSData[_slot_cursor].character_name);
     interfaceBarRefresh();
     indicatorBarRefresh();

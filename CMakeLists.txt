@@ -239,8 +239,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/window.h"
     "src/word_wrap.cc"
     "src/word_wrap.h"
-    "src/world_map.cc"
-    "src/world_map.h"
+    "src/worldmap.cc"
+    "src/worldmap.h"
     "src/xfile.cc"
     "src/xfile.h"
 )
@@ -283,7 +283,6 @@ if(VITA)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VITA_FLAGS}")
 
     add_definitions("-Dmemcpy=sceClibMemcpy")
-    add_definitions("-Dmemcmp=sceClibMemcmp")
     add_definitions("-Dmemset=sceClibMemset")
     add_definitions("-Dmemmove=sceClibMemmove")
 
@@ -300,9 +299,13 @@ if(VITA)
 endif()
 
 if(APPLE)
+    target_sources(${EXECUTABLE_NAME} PUBLIC "os/macos/fallout2-ce.icns")
+    set_source_files_properties("os/macos/fallout2-ce.icns" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+
     set_target_properties(${EXECUTABLE_NAME} PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/os/macos/Info.plist")
     set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.alexbatalov.fallout2-ce")
     set(MACOSX_BUNDLE_BUNDLE_NAME "${EXECUTABLE_NAME}")
+    set(MACOSX_BUNDLE_ICON_FILE "fallout2-ce.icns")
     set(MACOSX_BUNDLE_DISPLAY_NAME "Fallout 2")
 endif()
 

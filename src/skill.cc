@@ -1,5 +1,9 @@
 #include "skill.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "actions.h"
 #include "color.h"
 #include "combat.h"
@@ -23,10 +27,6 @@
 #include "stat.h"
 #include "trait.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #define SKILLS_MAX_USES_PER_DAY (3)
 
 #define REPAIRABLE_DAMAGE_FLAGS_LENGTH (5)
@@ -48,6 +48,7 @@ typedef struct SkillDescription {
 
 static void _show_skill_use_messages(Object* obj, int skill, Object* a3, int a4, int a5);
 static int skillGetFreeUsageSlot(int skill);
+static int skill_use_slot_clear();
 
 // Damage flags which can be repaired using "Repair" skill.
 //
@@ -152,7 +153,8 @@ int skillsInit()
         gTaggedSkills[index] = -1;
     }
 
-    memset(_timesSkillUsed, 0, sizeof(_timesSkillUsed));
+    // NOTE: Uninline.
+    skill_use_slot_clear();
 
     return 0;
 }
@@ -164,7 +166,8 @@ void skillsReset()
         gTaggedSkills[index] = -1;
     }
 
-    memset(_timesSkillUsed, 0, sizeof(_timesSkillUsed));
+    // NOTE: Uninline.
+    skill_use_slot_clear();
 }
 
 // 0x4AA478
@@ -1169,6 +1172,15 @@ int skillUpdateLastUse(int skill)
 
     _timesSkillUsed[skill][slot] = gameTimeGetTime();
 
+    return 0;
+}
+
+// NOTE: Inlined.
+//
+// 0x4ABF24
+int skill_use_slot_clear()
+{
+    memset(_timesSkillUsed, 0, sizeof(_timesSkillUsed));
     return 0;
 }
 

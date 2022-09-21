@@ -1,5 +1,9 @@
 #include "interpreter_extra.h"
 
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "actions.h"
 #include "animation.h"
 #include "art.h"
@@ -38,11 +42,7 @@
 #include "text_object.h"
 #include "tile.h"
 #include "trait.h"
-#include "world_map.h"
-
-#include <limits.h>
-#include <stdio.h>
-#include <string.h>
+#include "worldmap.h"
 
 typedef enum ScriptError {
     SCRIPT_ERROR_NOT_IMPLEMENTED,
@@ -799,13 +799,13 @@ static void opMarkAreaKnown(Program* program)
     // TODO: Provide meaningful names.
     if (data[2] == 0) {
         if (data[0] == CITY_STATE_INVISIBLE) {
-            _wmAreaSetVisibleState(data[1], 0, 1);
+            wmAreaSetVisibleState(data[1], 0, 1);
         } else {
-            _wmAreaSetVisibleState(data[1], 1, 1);
-            _wmAreaMarkVisitedState(data[1], data[0]);
+            wmAreaSetVisibleState(data[1], 1, 1);
+            wmAreaMarkVisitedState(data[1], data[0]);
         }
     } else if (data[2] == 1) {
-        _wmMapMarkVisited(data[1]);
+        wmMapMarkVisited(data[1]);
     }
 }
 
@@ -1035,7 +1035,7 @@ static void opDestroyObject(Program* program)
 
     Object* owner = objectGetOwner(object);
     if (owner != NULL) {
-        int quantity = _item_count(owner, object);
+        int quantity = itemGetQuantity(owner, object);
         itemRemove(owner, object, quantity);
 
         if (owner == gDude) {
@@ -2025,18 +2025,18 @@ static void opMetarule3(Program* program)
         }
         break;
     case METARULE3_MARK_SUBTILE:
-        result.integerValue = _wmSubTileMarkRadiusVisited(param1.integerValue, param2.integerValue, param3.integerValue);
+        result.integerValue = wmSubTileMarkRadiusVisited(param1.integerValue, param2.integerValue, param3.integerValue);
         break;
     case METARULE3_GET_KILL_COUNT:
         result.integerValue = killsGetByType(param1.integerValue);
         break;
     case METARULE3_MARK_MAP_ENTRANCE:
-        result.integerValue = _wmMapMarkMapEntranceState(param1.integerValue, param2.integerValue, param3.integerValue);
+        result.integerValue = wmMapMarkMapEntranceState(param1.integerValue, param2.integerValue, param3.integerValue);
         break;
     case METARULE3_WM_SUBTILE_STATE:
         if (1) {
             int state;
-            if (_wmSubTileGetVisitedState(param1.integerValue, param2.integerValue, &state) == 0) {
+            if (wmSubTileGetVisitedState(param1.integerValue, param2.integerValue, &state) == 0) {
                 result.integerValue = state;
             }
         }
@@ -2090,7 +2090,7 @@ static void opMetarule3(Program* program)
         result.integerValue = aiGetChemUse(static_cast<Object*>(param1.pointerValue));
         break;
     case METARULE3_110:
-        result.integerValue = carIsEmpty() ? 1 : 0;
+        result.integerValue = wmCarIsOutOfGas() ? 1 : 0;
         break;
     case METARULE3_111:
         result.integerValue = _map_target_load_area();
@@ -2108,7 +2108,7 @@ static void opSetMapMusic(Program* program)
     int mapIndex = programStackPopInteger(program);
 
     debugPrint("\nset_map_music: %d, %s", mapIndex, string);
-    worldmapSetMapMusic(mapIndex, string);
+    wmSetMapMusic(mapIndex, string);
 }
 
 // NOTE: Function name is a bit misleading. Last parameter is a boolean value
@@ -2184,7 +2184,7 @@ static void opLoadMap(Program* program)
 
     if (mapName != NULL) {
         gGameGlobalVars[GVAR_LOAD_MAP_INDEX] = param;
-        mapIndex = mapGetIndexByFileName(mapName);
+        mapIndex = wmMapMatchNameToIdx(mapName);
     } else {
         if (mapIndexOrName.integerValue >= 0) {
             gGameGlobalVars[GVAR_LOAD_MAP_INDEX] = param;
@@ -2210,7 +2210,7 @@ static void opWorldmapCitySetPos(Program* program)
     int x = programStackPopInteger(program);
     int city = programStackPopInteger(program);
 
-    if (worldmapCitySetPos(city, x, y) == -1) {
+    if (wmAreaSetWorldPos(city, x, y) == -1) {
         scriptPredefinedError(program, "wm_area_set_pos", SCRIPT_ERROR_FOLLOWS);
         debugPrint("Invalid Parameter!");
     }
@@ -2694,7 +2694,7 @@ static void opGameDialogSystemEnter(Program* program)
         return;
     }
 
-    if (_game_state_request(4) == -1) {
+    if (_game_state_request(GAME_STATE_4) == -1) {
         return;
     }
 
@@ -3210,25 +3210,25 @@ static void opMetarule(Program* program)
         result = _getPartyMemberCount();
         break;
     case METARULE_AREA_KNOWN:
-        result = _wmAreaVisitedState(param.integerValue);
+        result = wmAreaVisitedState(param.integerValue);
         break;
     case METARULE_WHO_ON_DRUGS:
         result = queueHasEvent(static_cast<Object*>(param.pointerValue), EVENT_TYPE_DRUG);
         break;
     case METARULE_MAP_KNOWN:
-        result = _wmMapIsKnown(param.integerValue);
+        result = wmMapIsKnown(param.integerValue);
         break;
     case METARULE_IS_LOADGAME:
         result = _isLoadingGame();
         break;
     case METARULE_CAR_CURRENT_TOWN:
-        result = carGetCity();
+        result = wmCarCurrentArea();
         break;
     case METARULE_GIVE_CAR_TO_PARTY:
-        result = _wmCarGiveToParty();
+        result = wmCarGiveToParty();
         break;
     case METARULE_GIVE_CAR_GAS:
-        result = carAddFuel(param.integerValue);
+        result = wmCarFillGas(param.integerValue);
         break;
     case METARULE_SKILL_CHECK_TAG:
         result = skillIsTagged(param.integerValue);
@@ -3236,7 +3236,7 @@ static void opMetarule(Program* program)
     case METARULE_DROP_ALL_INVEN:
         if (1) {
             Object* object = static_cast<Object*>(param.pointerValue);
-            result = _item_drop_all(object, object->tile);
+            result = itemDropAll(object, object->tile);
             if (gDude == object) {
                 interfaceUpdateItems(false, INTERFACE_ITEM_ACTION_DEFAULT, INTERFACE_ITEM_ACTION_DEFAULT);
                 interfaceRenderArmorClass(false);
@@ -3268,13 +3268,13 @@ static void opMetarule(Program* program)
         }
         break;
     case METARULE_GET_WORLDMAP_XPOS:
-        _wmGetPartyWorldPos(&result, NULL);
+        wmGetPartyWorldPos(&result, NULL);
         break;
     case METARULE_GET_WORLDMAP_YPOS:
-        _wmGetPartyWorldPos(NULL, &result);
+        wmGetPartyWorldPos(NULL, &result);
         break;
     case METARULE_CURRENT_TOWN:
-        if (_wmGetPartyCurArea(&result) == -1) {
+        if (wmGetPartyCurArea(&result) == -1) {
             debugPrint("\nIntextra: Error: metarule: current_town");
         }
         break;
@@ -3604,7 +3604,8 @@ static void opAddMultipleObjectsToInventory(Program* program)
     if (quantity < 0) {
         quantity = 1;
     } else if (quantity > 99999) {
-        quantity = 500;
+        // SFALL
+        quantity = 99999;
     }
 
     if (itemAdd(object, item, quantity) == 0) {
@@ -3629,7 +3630,7 @@ static void opRemoveMultipleObjectsFromInventory(Program* program)
 
     bool itemWasEquipped = (item->flags & OBJECT_EQUIPPED) != 0;
 
-    int quantity = _item_count(owner, item);
+    int quantity = itemGetQuantity(owner, item);
     if (quantity > quantityToRemove) {
         quantity = quantityToRemove;
     }
@@ -4458,7 +4459,7 @@ static void opDestroyMultipleObjects(Program* program)
 
     Object* owner = objectGetOwner(object);
     if (owner != NULL) {
-        int quantityToDestroy = _item_count(owner, object);
+        int quantityToDestroy = itemGetQuantity(owner, object);
         if (quantityToDestroy > quantity) {
             quantityToDestroy = quantity;
         }
@@ -4578,7 +4579,7 @@ static void opMoveObjectInventoryToObject(Program* program)
         _correctFidForRemovedItem(object1, item2, flags);
     }
 
-    _item_move_all(object1, object2);
+    itemMoveAll(object1, object2);
 
     if (object1 == gDude) {
         if (oldArmor != NULL) {

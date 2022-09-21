@@ -1,5 +1,10 @@
 #include "item.h"
 
+#include <string.h>
+
+#include <algorithm>
+#include <vector>
+
 #include "animation.h"
 #include "art.h"
 #include "automap.h"
@@ -27,11 +32,6 @@
 #include "stat.h"
 #include "tile.h"
 #include "trait.h"
-
-#include <string.h>
-
-#include <algorithm>
-#include <vector>
 
 #define ADDICTION_COUNT (9)
 
@@ -66,6 +66,10 @@ static void booksExit();
 static void explosionsInit();
 static void explosionsReset();
 static void explosionsExit();
+
+static void healingItemsInit();
+static void healingItemsInitVanilla();
+static void healingItemsInitCustom();
 
 typedef struct DrugDescription {
     int drugPid;
@@ -179,6 +183,7 @@ static int gExplosionFrm;
 static int gExplosionRadius;
 static int gExplosionDamageType;
 static int gExplosionMaxTargets;
+static int gHealingItemPids[HEALING_ITEM_COUNT];
 
 // 0x4770E0
 int itemsInit()
@@ -197,6 +202,7 @@ int itemsInit()
     // SFALL
     booksInit();
     explosionsInit();
+    healingItemsInit();
 
     return 0;
 }
@@ -499,93 +505,64 @@ static int _item_move_func(Object* a1, Object* a2, Object* a3, int quantity, boo
 }
 
 // 0x47769C
-int _item_move(Object* a1, Object* a2, Object* a3, int quantity)
+int itemMove(Object* from, Object* to, Object* item, int quantity)
 {
-    return _item_move_func(a1, a2, a3, quantity, false);
+    return _item_move_func(from, to, item, quantity, false);
 }
 
 // 0x4776A4
-int _item_move_force(Object* a1, Object* a2, Object* a3, int quantity)
+int itemMoveForce(Object* from, Object* to, Object* item, int quantity)
 {
-    return _item_move_func(a1, a2, a3, quantity, true);
+    return _item_move_func(from, to, item, quantity, true);
 }
 
 // 0x4776AC
-void _item_move_all(Object* a1, Object* a2)
+void itemMoveAll(Object* from, Object* to)
 {
-    Inventory* inventory = &(a1->data.inventory);
+    Inventory* inventory = &(from->data.inventory);
     while (inventory->length > 0) {
         InventoryItem* inventoryItem = &(inventory->items[0]);
-        _item_move_func(a1, a2, inventoryItem->item, inventoryItem->quantity, true);
+        // NOTE: Uninline.
+        itemMoveForce(from, to, inventoryItem->item, inventoryItem->quantity);
     }
 }
 
 // 0x4776E0
-int _item_move_all_hidden(Object* a1, Object* a2)
+int itemMoveAllHidden(Object* from, Object* to)
 {
-    Inventory* inventory = &(a1->data.inventory);
-    // TODO: Not sure about two loops.
-    for (int i = 0; i < inventory->length;) {
-        for (int j = i; j < inventory->length;) {
-            bool v5;
-            InventoryItem* inventoryItem = &(inventory->items[j]);
-            if (PID_TYPE(inventoryItem->item->pid) == OBJ_TYPE_ITEM) {
-                Proto* proto;
-                if (protoGetProto(inventoryItem->item->pid, &proto) != -1) {
-                    v5 = (proto->item.extendedFlags & ItemProtoExtendedFlags_NaturalWeapon) == 0;
-                } else {
-                    v5 = true;
-                }
-            } else {
-                v5 = true;
-            }
-
-            if (!v5) {
-                _item_move_func(a1, a2, inventoryItem->item, inventoryItem->quantity, true);
-            } else {
-                i++;
-                j++;
-            }
+    Inventory* inventory = &(from->data.inventory);
+    for (int index = 0; index < inventory->length;) {
+        InventoryItem* inventoryItem = &(inventory->items[index]);
+        // NOTE: Uninline.
+        if (itemIsHidden(inventoryItem->item)) {
+            // NOTE: Uninline.
+            itemMoveForce(from, to, inventoryItem->item, inventoryItem->quantity);
+        } else {
+            index++;
         }
     }
     return 0;
 }
 
 // 0x477770
-int _item_destroy_all_hidden(Object* a1)
+int itemDestroyAllHidden(Object* owner)
 {
-    Inventory* inventory = &(a1->data.inventory);
-    // TODO: Not sure about this one. Why two loops?
-    for (int i = 0; i < inventory->length;) {
-        // TODO: Probably wrong, something with two loops.
-        for (int j = i; j < inventory->length;) {
-            bool v5;
-            InventoryItem* inventoryItem = &(inventory->items[j]);
-            if (PID_TYPE(inventoryItem->item->pid) == OBJ_TYPE_ITEM) {
-                Proto* proto;
-                if (protoGetProto(inventoryItem->item->pid, &proto) != -1) {
-                    v5 = (proto->item.extendedFlags & ItemProtoExtendedFlags_NaturalWeapon) == 0;
-                } else {
-                    v5 = true;
-                }
-            } else {
-                v5 = true;
-            }
-
-            if (!v5) {
-                itemRemove(a1, inventoryItem->item, 1);
-                _obj_destroy(inventoryItem->item);
-            } else {
-                i++;
-                j++;
-            }
+    Inventory* inventory = &(owner->data.inventory);
+    for (int index = 0; index < inventory->length;) {
+        InventoryItem* inventoryItem = &(inventory->items[index]);
+        // NOTE: Uninline.
+        if (itemIsHidden(inventoryItem->item)) {
+            itemRemove(owner, inventoryItem->item, 1);
+            _obj_destroy(inventoryItem->item);
+        } else {
+            index++;
         }
     }
     return 0;
 }
 
 // 0x477804
-int _item_drop_all(Object* critter, int tile)
+int itemDropAll(Object* critter, int tile)
 {
     bool hasEquippedItems = false;
 
@@ -661,11 +638,11 @@ static bool _item_identical(Object* a1, Object* a2)
         return false;
     }
 
-    if ((a1->flags & (OBJECT_EQUIPPED | OBJECT_USED)) != 0) {
+    if ((a1->flags & (OBJECT_EQUIPPED | OBJECT_QUEUED)) != 0) {
         return false;
     }
 
-    if ((a2->flags & (OBJECT_EQUIPPED | OBJECT_USED)) != 0) {
+    if ((a2->flags & (OBJECT_EQUIPPED | OBJECT_QUEUED)) != 0) {
         return false;
     }
 
@@ -773,7 +750,7 @@ int itemGetWeight(Object* item)
     int weight = proto->item.weight;
 
     // NOTE: Uninline.
-    if (weaponIsNatural(item)) {
+    if (itemIsHidden(item)) {
         weight = 0;
     }
 
@@ -966,7 +943,7 @@ int objectGetInventoryWeight(Object* obj)
 }
 
 // 0x477F3C
-bool _can_use_weapon(Object* weapon)
+bool dudeIsWeaponDisabled(Object* weapon)
 {
     if (weapon == NULL) {
         return false;
@@ -995,12 +972,11 @@ bool _can_use_weapon(Object* weapon)
 // 0x477FB0
 int itemGetInventoryFid(Object* item)
 {
-    Proto* proto;
-
     if (item == NULL) {
         return -1;
     }
 
+    Proto* proto;
     protoGetProto(item->pid, &proto);
 
     return proto->item.inventoryFid;
@@ -1024,7 +1000,7 @@ Object* critterGetWeaponForHitMode(Object* critter, int hitMode)
 }
 
 // 0x478040
-int _item_mp_cost(Object* obj, int hitMode, bool aiming)
+int itemGetActionPointCost(Object* obj, int hitMode, bool aiming)
 {
     if (obj == NULL) {
         return 0;
@@ -1036,25 +1012,24 @@ int _item_mp_cost(Object* obj, int hitMode, bool aiming)
         return 2;
     }
 
-    return _item_w_mp_cost(obj, hitMode, aiming);
+    return weaponGetActionPointCost(obj, hitMode, aiming);
 }
 
-// Returns quantity of [a2] in [obj]s inventory.
+// Returns quantity of [item] in [obj]s inventory.
 //
 // 0x47808C
-int _item_count(Object* obj, Object* a2)
+int itemGetQuantity(Object* obj, Object* item)
 {
     int quantity = 0;
 
     Inventory* inventory = &(obj->data.inventory);
     for (int index = 0; index < inventory->length; index++) {
         InventoryItem* inventoryItem = &(inventory->items[index]);
-        Object* item = inventoryItem->item;
-        if (item == a2) {
+        if (inventoryItem->item == item) {
             quantity = inventoryItem->quantity;
         } else {
-            if (itemGetType(item) == ITEM_TYPE_CONTAINER) {
-                quantity = _item_count(item, a2);
+            if (itemGetType(inventoryItem->item) == ITEM_TYPE_CONTAINER) {
+                quantity = itemGetQuantity(inventoryItem->item, item);
                 if (quantity > 0) {
                     return quantity;
                 }
@@ -1068,25 +1043,25 @@ int _item_count(Object* obj, Object* a2)
 // Returns true if [a1] posesses an item with 0x2000 flag.
 //
 // 0x4780E4
-int _item_queued(Object* obj)
+int itemIsQueued(Object* obj)
 {
     if (obj == NULL) {
         return false;
     }
 
-    if ((obj->flags & OBJECT_USED) != 0) {
+    if ((obj->flags & OBJECT_QUEUED) != 0) {
         return true;
     }
 
     Inventory* inventory = &(obj->data.inventory);
     for (int index = 0; index < inventory->length; index++) {
         InventoryItem* inventoryItem = &(inventory->items[index]);
-        if ((inventoryItem->item->flags & OBJECT_USED) != 0) {
+        if ((inventoryItem->item->flags & OBJECT_QUEUED) != 0) {
             return true;
         }
 
         if (itemGetType(inventoryItem->item) == ITEM_TYPE_CONTAINER) {
-            if (_item_queued(inventoryItem->item)) {
+            if (itemIsQueued(inventoryItem->item)) {
                 return true;
             }
         }
@@ -1096,36 +1071,36 @@ int _item_queued(Object* obj)
 }
 
 // 0x478154
-Object* _item_replace(Object* a1, Object* a2, int a3)
+Object* itemReplace(Object* owner, Object* itemToReplace, int flags)
 {
-    if (a1 == NULL) {
+    if (owner == NULL) {
         return NULL;
     }
 
-    if (a2 == NULL) {
+    if (itemToReplace == NULL) {
         return NULL;
     }
 
-    Inventory* inventory = &(a1->data.inventory);
+    Inventory* inventory = &(owner->data.inventory);
     for (int index = 0; index < inventory->length; index++) {
         InventoryItem* inventoryItem = &(inventory->items[index]);
-        if (_item_identical(inventoryItem->item, a2)) {
+        if (_item_identical(inventoryItem->item, itemToReplace)) {
             Object* item = inventoryItem->item;
-            if (itemRemove(a1, item, 1) == 0) {
-                item->flags |= a3;
-                if (itemAdd(a1, item, 1) == 0) {
+            if (itemRemove(owner, item, 1) == 0) {
+                item->flags |= flags;
+                if (itemAdd(owner, item, 1) == 0) {
                     return item;
                 }
 
-                item->flags &= ~a3;
-                if (itemAdd(a1, item, 1) != 0) {
+                item->flags &= ~flags;
+                if (itemAdd(owner, item, 1) != 0) {
                     _obj_destroy(item);
                 }
             }
         }
 
         if (itemGetType(inventoryItem->item) == ITEM_TYPE_CONTAINER) {
-            Object* obj = _item_replace(inventoryItem->item, a2, a3);
+            Object* obj = itemReplace(inventoryItem->item, itemToReplace, flags);
             if (obj != NULL) {
                 return obj;
             }
@@ -1135,24 +1110,19 @@ Object* _item_replace(Object* a1, Object* a2, int a3)
     return NULL;
 }
 
-// Returns true if [item] is an natural weapon of it's owner.
-//
-// See [ItemProtoExtendedFlags_NaturalWeapon] for more details on natural weapons.
-//
 // 0x478244
-int weaponIsNatural(Object* obj)
+bool itemIsHidden(Object* item)
 {
+    if (PID_TYPE(item->pid) != OBJ_TYPE_ITEM) {
+        return false;
+    }
+
     Proto* proto;
-
-    if (PID_TYPE(obj->pid) != OBJ_TYPE_ITEM) {
-        return 0;
+    if (protoGetProto(item->pid, &proto) == -1) {
+        return false;
     }
 
-    if (protoGetProto(obj->pid, &proto) == -1) {
-        return 0;
-    }
-
-    return proto->item.extendedFlags & ItemProtoExtendedFlags_NaturalWeapon;
+    return (proto->item.extendedFlags & ITEM_HIDDEN) != 0;
 }
 
 // 0x478280
@@ -1211,7 +1181,7 @@ int weaponGetSkillForHitMode(Object* weapon, int hitMode)
 // Returns skill value when critter is about to perform hitMode.
 //
 // 0x478370
-int _item_w_skill_level(Object* critter, int hitMode)
+int weaponGetSkillValue(Object* critter, int hitMode)
 {
     if (critter == NULL) {
         return 0;
@@ -1252,7 +1222,7 @@ int weaponGetDamageMinMax(Object* weapon, int* minDamagePtr, int* maxDamagePtr)
 }
 
 // 0x478448
-int weaponGetMeleeDamage(Object* critter, int hitMode)
+int weaponGetDamage(Object* critter, int hitMode)
 {
     if (critter == NULL) {
         return 0;
@@ -1267,20 +1237,35 @@ int weaponGetMeleeDamage(Object* critter, int hitMode)
     Object* weapon = critterGetWeaponForHitMode(critter, hitMode);
 
     if (weapon != NULL) {
-        Proto* proto;
-        protoGetProto(weapon->pid, &proto);
-
-        minDamage = proto->item.data.weapon.minDamage;
-        maxDamage = proto->item.data.weapon.maxDamage;
+        // NOTE: Uninline.
+        weaponGetDamageMinMax(weapon, &minDamage, &maxDamage);
 
         int attackType = weaponGetAttackTypeForHitMode(weapon, hitMode);
         if (attackType == ATTACK_TYPE_MELEE || attackType == ATTACK_TYPE_UNARMED) {
             meleeDamage = critterGetStat(critter, STAT_MELEE_DAMAGE);
+
+            // SFALL: Bonus HtH Damage fix.
+            if (damageModGetBonusHthDamageFix()) {
+                if (critter == gDude) {
+                    // See explanation below.
+                    minDamage += 2 * perkGetRank(gDude, PERK_BONUS_HTH_DAMAGE);
+                }
+            }
         }
     } else {
         // SFALL
         bonusDamage = unarmedGetDamage(hitMode, &minDamage, &maxDamage);
         meleeDamage = critterGetStat(critter, STAT_MELEE_DAMAGE);
+
+        // SFALL: Bonus HtH Damage fix.
+        if (damageModGetBonusHthDamageFix()) {
+            if (critter == gDude) {
+                // Increase only min damage. Max damage should not be changed.
+                // It is calculated later by adding `meleeDamage` which already
+                // includes damage bonus (via `perkAddEffect`).
+                minDamage += 2 * perkGetRank(gDude, PERK_BONUS_HTH_DAMAGE);
+            }
+        }
     }
 
     return randomBetween(bonusDamage + minDamage, bonusDamage + meleeDamage + maxDamage);
@@ -1431,7 +1416,7 @@ void ammoSetQuantity(Object* ammoOrWeapon, int quantity)
 }
 
 // 0x478768
-int _item_w_try_reload(Object* critter, Object* weapon)
+int weaponAttemptReload(Object* critter, Object* weapon)
 {
     // NOTE: Uninline.
     int quantity = ammoGetQuantity(weapon);
@@ -1450,7 +1435,7 @@ int _item_w_try_reload(Object* critter, Object* weapon)
 
             if (weapon->data.item.weapon.ammoTypePid == ammo->pid) {
                 if (weaponCanBeReloadedWith(weapon, ammo) != 0) {
-                    int rc = _item_w_reload(weapon, ammo);
+                    int rc = weaponReload(weapon, ammo);
                     if (rc == 0) {
                         _obj_destroy(ammo);
                     }
@@ -1472,7 +1457,7 @@ int _item_w_try_reload(Object* critter, Object* weapon)
             }
 
             if (weaponCanBeReloadedWith(weapon, ammo) != 0) {
-                int rc = _item_w_reload(weapon, ammo);
+                int rc = weaponReload(weapon, ammo);
                 if (rc == 0) {
                     _obj_destroy(ammo);
                 }
@@ -1486,7 +1471,7 @@ int _item_w_try_reload(Object* critter, Object* weapon)
         }
     }
 
-    if (_item_w_reload(weapon, NULL) != 0) {
+    if (weaponReload(weapon, NULL) != 0) {
         return -1;
     }
 
@@ -1546,7 +1531,7 @@ bool weaponCanBeReloadedWith(Object* weapon, Object* ammo)
 }
 
 // 0x478918
-int _item_w_reload(Object* weapon, Object* ammo)
+int weaponReload(Object* weapon, Object* ammo)
 {
     if (!weaponCanBeReloadedWith(weapon, ammo)) {
         return -1;
@@ -1587,7 +1572,7 @@ int _item_w_reload(Object* weapon, Object* ammo)
 }
 
 // 0x478A1C
-int _item_w_range(Object* critter, int hitMode)
+int weaponGetRange(Object* critter, int hitMode)
 {
     int range;
     int v12;
@@ -1630,7 +1615,7 @@ int _item_w_range(Object* critter, int hitMode)
 // Returns action points required for hit mode.
 //
 // 0x478B24
-int _item_w_mp_cost(Object* critter, int hitMode, bool aiming)
+int weaponGetActionPointCost(Object* critter, int hitMode, bool aiming)
 {
     int actionPoints;
 
@@ -1659,15 +1644,15 @@ int _item_w_mp_cost(Object* critter, int hitMode, bool aiming)
         if (weapon != NULL) {
             if (hitMode == HIT_MODE_LEFT_WEAPON_PRIMARY || hitMode == HIT_MODE_RIGHT_WEAPON_PRIMARY) {
                 // NOTE: Uninline.
-                actionPoints = weaponGetActionPointCost1(weapon);
+                actionPoints = weaponGetPrimaryActionPointCost(weapon);
             } else {
                 // NOTE: Uninline.
-                actionPoints = weaponGetActionPointCost2(weapon);
+                actionPoints = weaponGetSecondaryActionPointCost(weapon);
             }
 
             if (critter == gDude) {
                 if (traitIsSelected(TRAIT_FAST_SHOT)) {
-                    if (_item_w_range(critter, hitMode) > 2) {
+                    if (weaponGetRange(critter, hitMode) > 2) {
                         actionPoints--;
                     }
                 }
@@ -1810,16 +1795,16 @@ char weaponGetSoundId(Object* weapon)
 }
 
 // 0x478E5C
-int _item_w_called_shot(Object* critter, int hitMode)
+bool critterCanAim(Object* critter, int hitMode)
 {
     if (critter == gDude && traitIsSelected(TRAIT_FAST_SHOT)) {
-        return 0;
+        return false;
     }
 
     // NOTE: Uninline.
     int anim = critterGetAnimationForHitMode(critter, hitMode);
     if (anim == ANIM_FIRE_BURST || anim == ANIM_FIRE_CONTINUOUS) {
-        return 0;
+        return false;
     }
 
     // NOTE: Uninline.
@@ -1833,7 +1818,7 @@ int _item_w_called_shot(Object* critter, int hitMode)
 }
 
 // 0x478EF4
-int _item_w_can_unload(Object* weapon)
+int weaponCanBeUnloaded(Object* weapon)
 {
     if (weapon == NULL) {
         return false;
@@ -1867,9 +1852,9 @@ int _item_w_can_unload(Object* weapon)
 }
 
 // 0x478F80
-Object* _item_w_unload(Object* weapon)
+Object* weaponUnload(Object* weapon)
 {
-    if (!_item_w_can_unload(weapon)) {
+    if (!weaponCanBeUnloaded(weapon)) {
         return NULL;
     }
 
@@ -1906,7 +1891,7 @@ Object* _item_w_unload(Object* weapon)
 }
 
 // 0x47905C
-int weaponGetActionPointCost1(Object* weapon)
+int weaponGetPrimaryActionPointCost(Object* weapon)
 {
     if (weapon == NULL) {
         return -1;
@@ -1921,7 +1906,7 @@ int weaponGetActionPointCost1(Object* weapon)
 // NOTE: Inlined.
 //
 // 0x479084
-int weaponGetActionPointCost2(Object* weapon)
+int weaponGetSecondaryActionPointCost(Object* weapon)
 {
     if (weapon == NULL) {
         return -1;
@@ -1962,30 +1947,30 @@ bool weaponIsGrenade(Object* weapon)
 }
 
 // 0x47910C
-int _item_w_area_damage_radius(Object* weapon, int hitMode)
+int weaponGetDamageRadius(Object* weapon, int hitMode)
 {
     int attackType = weaponGetAttackTypeForHitMode(weapon, hitMode);
     int anim = weaponGetAnimationForHitMode(weapon, hitMode);
     int damageType = weaponGetDamageType(NULL, weapon);
 
-    int v1 = 0;
+    int radius = 0;
     if (attackType == ATTACK_TYPE_RANGED) {
         if (anim == ANIM_FIRE_SINGLE && damageType == DAMAGE_TYPE_EXPLOSION) {
             // NOTE: Uninline.
-            v1 = _item_w_rocket_dmg_radius(weapon);
+            radius = weaponGetRocketExplosionRadius(weapon);
         }
     } else if (attackType == ATTACK_TYPE_THROW) {
         // NOTE: Uninline.
         if (weaponIsGrenade(weapon)) {
             // NOTE: Uninline.
-            v1 = _item_w_grenade_dmg_radius(weapon);
+            radius = weaponGetGrenadeExplosionRadius(weapon);
         }
     }
-    return v1;
+    return radius;
 }
 
 // 0x479180
-int _item_w_grenade_dmg_radius(Object* weapon)
+int weaponGetGrenadeExplosionRadius(Object* weapon)
 {
     // SFALL
     if (gExplosionRadius != -1) {
@@ -1996,7 +1981,7 @@ int _item_w_grenade_dmg_radius(Object* weapon)
 }
 
 // 0x479188
-int _item_w_rocket_dmg_radius(Object* weapon)
+int weaponGetRocketExplosionRadius(Object* weapon)
 {
     // SFALL
     if (gExplosionRadius != -1) {
@@ -2785,7 +2770,8 @@ int _item_d_take_drug(Object* critter, Object* item)
                 dudeClearAddiction(PROTO_ID_JET);
             }
 
-            return 0;
+            // SFALL: Fix for Jet antidote not being removed.
+            return 1;
         }
     }
 
@@ -3568,4 +3554,52 @@ int explosionGetMaxTargets()
 void explosionSetMaxTargets(int maxTargets)
 {
     gExplosionMaxTargets = maxTargets;
+}
+
+static void healingItemsInit()
+{
+    healingItemsInitVanilla();
+    healingItemsInitCustom();
+}
+
+static void healingItemsInitVanilla()
+{
+    gHealingItemPids[HEALING_ITEM_STIMPACK] = PROTO_ID_STIMPACK;
+    gHealingItemPids[HEALING_ITEM_SUPER_STIMPACK] = PROTO_ID_SUPER_STIMPACK;
+    gHealingItemPids[HEALING_ITEM_HEALING_POWDER] = PROTO_ID_HEALING_POWDER;
+}
+
+static void healingItemsInitCustom()
+{
+    char* tweaksFilePath = NULL;
+    configGetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_TWEAKS_FILE_KEY, &tweaksFilePath);
+    if (tweaksFilePath != NULL && *tweaksFilePath == '\0') {
+        tweaksFilePath = NULL;
+    }
+
+    if (tweaksFilePath == NULL) {
+        return;
+    }
+
+    Config tweaksConfig;
+    if (configInit(&tweaksConfig)) {
+        if (configRead(&tweaksConfig, tweaksFilePath, false)) {
+            configGetInt(&gSfallConfig, "Items", "STIMPAK", &(gHealingItemPids[HEALING_ITEM_STIMPACK]));
+            configGetInt(&gSfallConfig, "Items", "SUPER_STIMPAK", &(gHealingItemPids[HEALING_ITEM_SUPER_STIMPACK]));
+            configGetInt(&gSfallConfig, "Items", "HEALING_POWDER", &(gHealingItemPids[HEALING_ITEM_HEALING_POWDER]));
+        }
+
+        configFree(&tweaksConfig);
+    }
+}
+
+bool itemIsHealing(int pid)
+{
+    for (int index = 0; index < HEALING_ITEM_COUNT; index++) {
+        if (gHealingItemPids[index] == pid) {
+            return true;
+        }
+    }
+
+    return false;
 }

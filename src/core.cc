@@ -1,5 +1,10 @@
 #include "core.h"
 
+#include <limits.h>
+#include <string.h>
+
+#include <SDL.h>
+
 #include "audio_engine.h"
 #include "color.h"
 #include "config.h"
@@ -13,9 +18,7 @@
 #include "window_manager.h"
 #include "window_manager_private.h"
 
-#include <SDL.h>
-#include <limits.h>
-#include <string.h>
+static void idleImpl();
 
 #ifdef __vita__
 #include "map.h"
@@ -62,11 +65,11 @@ SDL_Rect renderRect;
 SDL_Surface *vitaPaletteSurface = NULL;
 #endif
 
-// NOT USED.
-void (*_idle_func)() = NULL;
+// 0x51E234
+IdleFunc* _idle_func = NULL;
 
-// NOT USED.
-void (*_focus_func)(int) = NULL;
+// 0x51E238
+FocusFunc* _focus_func = NULL;
 
 // 0x51E23C
 int gKeyboardKeyRepeatRate = 80;
@@ -459,6 +462,10 @@ int coreInit(int a1)
     gScreenshotHandler = screenshotHandlerDefaultImpl;
     gTickerListHead = NULL;
     gScreenshotKeyCode = KEY_ALT_C;
+
+    // SFALL: Set idle function.
+    // CE: Prevents frying CPU when window is not focused.
+    inputSetIdleFunc(idleImpl);
 
     return 0;
 }
@@ -992,6 +999,70 @@ unsigned int _get_bk_time()
     return gTickerLastTimestamp;
 }
 
+// NOTE: Unused.
+//
+// 0x4C9418
+void inputSetKeyboardKeyRepeatRate(int value)
+{
+    gKeyboardKeyRepeatRate = value;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9420
+int inputGetKeyboardKeyRepeatRate()
+{
+    return gKeyboardKeyRepeatRate;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9428
+void inputSetKeyboardKeyRepeatDelay(int value)
+{
+    gKeyboardKeyRepeatDelay = value;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9430
+int inputGetKeyboardKeyRepeatDelay()
+{
+    return gKeyboardKeyRepeatDelay;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9438
+void inputSetFocusFunc(FocusFunc* func)
+{
+    _focus_func = func;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9440
+FocusFunc* inputGetFocusFunc()
+{
+    return _focus_func;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9448
+void inputSetIdleFunc(IdleFunc* func)
+{
+    _idle_func = func;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9450
+IdleFunc* inputGetIdleFunc()
+{
+    return _idle_func;
+}
+
 // 0x4C9490
 void buildNormalizedQwertyKeys()
 {
@@ -1342,11 +1413,8 @@ void _GNW95_process_message()
         case SDL_MOUSEMOTION:
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
-            // The data is accumulated in SDL itself and will be processed
-            // in `_mouse_info`.
-            break;
         case SDL_MOUSEWHEEL:
-            handleMouseWheelEvent(&(e.wheel));
+            handleMouseEvent(&e);
             break;
         case SDL_FINGERDOWN:
         case SDL_FINGERMOTION:
@@ -1354,7 +1422,7 @@ void _GNW95_process_message()
 #ifdef __vita__
             handleTouchEventDirect(e.tfinger);
 #endif
-            handleTouchFingerEvent(&(e.tfinger));
+            handleTouchEvent(&e);
             break;
         case SDL_KEYDOWN:
         case SDL_KEYUP:
@@ -1478,7 +1546,7 @@ void _GNW95_process_key(KeyboardData* data)
 void _GNW95_lost_focus()
 {
     if (_focus_func != NULL) {
-        _focus_func(0);
+        _focus_func(false);
     }
 
     while (!gProgramIsActive) {
@@ -1490,7 +1558,7 @@ void _GNW95_lost_focus()
     }
 
     if (_focus_func != NULL) {
-        _focus_func(1);
+        _focus_func(true);
     }
 }
 
@@ -5069,6 +5137,11 @@ void convertMouseWheelToArrowKey(int* keyCodePtr)
             }
         }
     }
+}
+
+static void idleImpl()
+{
+    SDL_Delay(125);
 }
 
 #ifdef __vita__

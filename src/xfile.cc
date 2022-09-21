@@ -1,16 +1,17 @@
 #include "xfile.h"
 
-#include "file_find.h"
-
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #ifdef _WIN32
 #include <direct.h>
 #else
 #include <unistd.h>
 #endif
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
+#include "file_find.h"
 
 typedef enum XFileEnumerationEntryType {
     XFILE_ENUMERATION_ENTRY_TYPE_FILE,
@@ -441,7 +442,7 @@ long xfileGetSize(XFile* stream)
         fileSize = 0;
         break;
     default:
-        fileSize = compat_filelength(fileno(stream->file));
+        fileSize = getFileSize(stream->file);
         break;
     }
 
@@ -512,7 +513,7 @@ bool xbaseOpen(const char* path)
 
     memset(xbase, 0, sizeof(*xbase));
 
-    xbase->path = strdup(path);
+    xbase->path = compat_strdup(path);
     if (xbase->path == NULL) {
         free(xbase);
         return false;
@@ -814,7 +815,7 @@ static bool xlistEnumerateHandler(XListEnumerationContext* context)
 
     xlist->fileNames = fileNames;
 
-    fileNames[xlist->fileNamesLength] = strdup(context->name);
+    fileNames[xlist->fileNamesLength] = compat_strdup(context->name);
     if (fileNames[xlist->fileNamesLength] == NULL) {
         xlistFree(xlist);
         xlist->fileNamesLength = -1;

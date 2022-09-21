@@ -1,5 +1,10 @@
 #include "scripts.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
 #include "actions.h"
 #include "animation.h"
 #include "art.h"
@@ -24,17 +29,17 @@
 #include "proto.h"
 #include "proto_instance.h"
 #include "queue.h"
+#include "stat.h"
 #include "tile.h"
 #include "window_manager.h"
 #include "window_manager_private.h"
-#include "world_map.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#include "worldmap.h"
 
 #define SCRIPT_LIST_EXTENT_SIZE 16
+
+// SFALL: Increase number of message lists for scripted dialogs.
+// CE: In Sfall this increase is configurable with `BoostScriptDialogLimit`.
+#define SCRIPT_DIALOG_MESSAGE_LIST_CAPACITY 10000
 
 typedef struct ScriptsListEntry {
     char name[16];
@@ -242,7 +247,7 @@ static Object* gScriptsRequestedStealingBy;
 static Object* gScriptsRequestedStealingFrom;
 
 // 0x6649D4
-static MessageList _script_dialog_msgs[1450];
+static MessageList _script_dialog_msgs[SCRIPT_DIALOG_MESSAGE_LIST_CAPACITY];
 
 // scr.msg
 //
@@ -438,9 +443,9 @@ int _scriptsCheckGameEvents(int* moviePtr, int window)
             movie = MOVIE_ARTIMER4;
             if (!gameMovieIsSeen(MOVIE_ARTIMER4)) {
                 adjustRep = true;
-                _wmAreaSetVisibleState(CITY_ARROYO, 0, 1);
-                _wmAreaSetVisibleState(CITY_DESTROYED_ARROYO, 1, 1);
-                _wmAreaMarkVisitedState(CITY_DESTROYED_ARROYO, 2);
+                wmAreaSetVisibleState(CITY_ARROYO, 0, 1);
+                wmAreaSetVisibleState(CITY_DESTROYED_ARROYO, 1, 1);
+                wmAreaMarkVisitedState(CITY_DESTROYED_ARROYO, 2);
             }
         } else if (day >= 270 && gameGetGlobalVar(GVAR_FALLOUT_2) != 3) {
             adjustRep = true;
@@ -739,7 +744,7 @@ static void _script_chk_timed_events()
         v1 = true;
     }
 
-    if (_game_state() != 4) {
+    if (_game_state() != GAME_STATE_4) {
         if (getTicksBetween(v0, _last_light_time) >= 30000) {
             _last_light_time = v0;
             scriptsExecMapUpdateScripts(SCRIPT_PROC_MAP_UPDATE);
@@ -902,12 +907,12 @@ int scriptsHandleRequests()
 
     if ((gScriptsRequests & SCRIPT_REQUEST_0x02) != 0) {
         gScriptsRequests &= ~SCRIPT_REQUEST_0x02;
-        _wmTownMap();
+        wmTownMap();
     }
 
     if ((gScriptsRequests & SCRIPT_REQUEST_WORLD_MAP) != 0) {
         gScriptsRequests &= ~SCRIPT_REQUEST_WORLD_MAP;
-        _wmWorldMap();
+        wmWorldMap();
     }
 
     if ((gScriptsRequests & SCRIPT_REQUEST_ELEVATOR) != 0) {
@@ -1303,7 +1308,8 @@ int scriptExecProc(int sid, int proc)
         }
 
         script->action = 0;
-        programListNodeCreate(program);
+        // NOTE: Uninline.
+        runProgram(program);
         _interpret(program, -1);
     }
 
@@ -1494,7 +1500,7 @@ int scriptsInit()
         return -1;
     }
 
-    for (int index = 0; index < 1450; index++) {
+    for (int index = 0; index < SCRIPT_DIALOG_MESSAGE_LIST_CAPACITY; index++) {
         if (!messageListInit(&(_script_dialog_msgs[index]))) {
             return -1;
         }
@@ -1541,7 +1547,7 @@ int _scr_game_init()
         return -1;
     }
 
-    for (i = 0; i < 1450; i++) {
+    for (i = 0; i < SCRIPT_DIALOG_MESSAGE_LIST_CAPACITY; i++) {
         if (!messageListInit(&(_script_dialog_msgs[i]))) {
             debugPrint("\nERROR IN SCRIPT_DIALOG_MSGS!");
             return -1;
@@ -1611,7 +1617,7 @@ int scriptsExit()
 // 0x4A52F4
 int _scr_message_free()
 {
-    for (int index = 0; index < 1450; index++) {
+    for (int index = 0; index < SCRIPT_DIALOG_MESSAGE_LIST_CAPACITY; index++) {
         MessageList* messageList = &(_script_dialog_msgs[index]);
         if (messageList->entries_num != 0) {
             if (!messageListFree(messageList)) {
@@ -2657,6 +2663,10 @@ static int scriptsGetMessageList(int a1, MessageList** messageListPtr)
             debugPrint("\nError filtering script dialog message file!");
             return -1;
         }
+
+        // SFALL: Gender-specific words.
+        int gender = critterGetStat(gDude, STAT_GENDER);
+        messageListFilterGenderWords(messageList, gender);
     }
 
     *messageListPtr = messageList;

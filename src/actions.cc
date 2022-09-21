@@ -1,5 +1,8 @@
 #include "actions.h"
 
+#include <limits.h>
+#include <string.h>
+
 #include "animation.h"
 #include "art.h"
 #include "color.h"
@@ -25,16 +28,20 @@
 #include "proto_types.h"
 #include "random.h"
 #include "scripts.h"
+#include "sfall_config.h"
 #include "skill.h"
 #include "stat.h"
 #include "text_object.h"
 #include "tile.h"
 #include "trait.h"
 
-#include <limits.h>
-#include <string.h>
-
 #define MAX_KNOCKDOWN_DISTANCE 20
+
+typedef enum ScienceRepairTargetType {
+    SCIENCE_REPAIR_TARGET_TYPE_DEFAULT,
+    SCIENCE_REPAIR_TARGET_TYPE_DUDE,
+    SCIENCE_REPAIR_TARGET_TYPE_ANYONE,
+} ScienceRepairTargetType;
 
 // 0x5106D0
 static int _action_in_explode = 0;
@@ -74,6 +81,7 @@ static int _action_melee(Attack* attack, int a2);
 static int _action_ranged(Attack* attack, int a2);
 static int _is_next_to(Object* a1, Object* a2);
 static int _action_climb_ladder(Object* a1, Object* a2);
+static int _action_use_skill_in_combat_error(Object* critter);
 static int _pick_fall(Object* obj, int anim);
 static int _report_explosion(Attack* attack, Object* a2);
 static int _finished_explosion(Object* a1, Object* a2);
@@ -465,7 +473,7 @@ int _show_death(Object* obj, int anim)
     }
 
     if (anim >= 30 && anim <= 31 && _critter_flag_check(obj->pid, CRITTER_FLAG_0x1000) == 0 && _critter_flag_check(obj->pid, CRITTER_FLAG_0x40) == 0) {
-        _item_drop_all(obj, obj->tile);
+        itemDropAll(obj, obj->tile);
     }
 
     tileWindowRefreshRect(&v8, obj->elevation);
@@ -706,7 +714,7 @@ int _action_ranged(Attack* attack, int anim)
     int actionFrame = (art != NULL) ? artGetActionFrame(art) : 0;
     artUnlock(artHandle);
 
-    _item_w_range(attack->attacker, attack->hitMode);
+    weaponGetRange(attack->attacker, attack->hitMode);
 
     int damageType = weaponGetDamageType(attack->attacker, attack->weapon);
 
@@ -753,7 +761,7 @@ int _action_ranged(Attack* attack, int anim)
                     interfaceGetItemActions(&leftItemAction, &rightItemAction);
 
                     itemRemove(attack->attacker, weapon, 1);
-                    v50 = _item_replace(attack->attacker, weapon, weaponFlags & OBJECT_IN_ANY_HAND);
+                    v50 = itemReplace(attack->attacker, weapon, weaponFlags & OBJECT_IN_ANY_HAND);
                     objectSetFid(projectile, projectileProto->fid, NULL);
                     _cAIPrepWeaponItem(attack->attacker, weapon);
 
@@ -1282,23 +1290,33 @@ int _action_skill_use(int skill)
     return -1;
 }
 
+// NOTE: Inlined.
+//
+// 0x412500
+static int _action_use_skill_in_combat_error(Object* critter)
+{
+    MessageListItem messageListItem;
+
+    if (critter == gDude) {
+        messageListItem.num = 902;
+        if (messageListGetItem(&gProtoMessageList, &messageListItem) == 1) {
+            displayMonitorAddMessage(messageListItem.text);
+        }
+    }
+
+    return -1;
+}
+
 // skill_use
 // 0x41255C
 int actionUseSkill(Object* a1, Object* a2, int skill)
 {
-    MessageListItem messageListItem;
-
     switch (skill) {
     case SKILL_FIRST_AID:
     case SKILL_DOCTOR:
         if (isInCombat()) {
-            if (a1 == gDude) {
-                messageListItem.num = 902;
-                if (messageListGetItem(&gProtoMessageList, &messageListItem)) {
-                    displayMonitorAddMessage(messageListItem.text);
-                }
-            }
-            return -1;
+            // NOTE: Uninline.
+            return _action_use_skill_in_combat_error(a1);
         }
 
         if (PID_TYPE(a2->pid) != OBJ_TYPE_CRITTER) {
@@ -1307,13 +1325,8 @@ int actionUseSkill(Object* a1, Object* a2, int skill)
         break;
     case SKILL_LOCKPICK:
         if (isInCombat()) {
-            if (a1 == gDude) {
-                messageListItem.num = 902;
-                if (messageListGetItem(&gProtoMessageList, &messageListItem)) {
-                    displayMonitorAddMessage(messageListItem.text);
-                }
-            }
-            return -1;
+            // NOTE: Uninline.
+            return _action_use_skill_in_combat_error(a1);
         }
 
         if (PID_TYPE(a2->pid) != OBJ_TYPE_ITEM && PID_TYPE(a2->pid) != OBJ_TYPE_SCENERY) {
@@ -1323,13 +1336,8 @@ int actionUseSkill(Object* a1, Object* a2, int skill)
         break;
     case SKILL_STEAL:
         if (isInCombat()) {
-            if (a1 == gDude) {
-                messageListItem.num = 902;
-                if (messageListGetItem(&gProtoMessageList, &messageListItem)) {
-                    displayMonitorAddMessage(messageListItem.text);
-                }
-            }
-            return -1;
+            // NOTE: Uninline.
+            return _action_use_skill_in_combat_error(a1);
         }
 
         if (PID_TYPE(a2->pid) != OBJ_TYPE_ITEM && PID_TYPE(a2->pid) != OBJ_TYPE_CRITTER) {
@@ -1343,13 +1351,8 @@ int actionUseSkill(Object* a1, Object* a2, int skill)
         break;
     case SKILL_TRAPS:
         if (isInCombat()) {
-            if (a1 == gDude) {
-                messageListItem.num = 902;
-                if (messageListGetItem(&gProtoMessageList, &messageListItem)) {
-                    displayMonitorAddMessage(messageListItem.text);
-                }
-            }
-            return -1;
+            // NOTE: Uninline.
+            return _action_use_skill_in_combat_error(a1);
         }
 
         if (PID_TYPE(a2->pid) == OBJ_TYPE_CRITTER) {
@@ -1360,13 +1363,8 @@ int actionUseSkill(Object* a1, Object* a2, int skill)
     case SKILL_SCIENCE:
     case SKILL_REPAIR:
         if (isInCombat()) {
-            if (a1 == gDude) {
-                messageListItem.num = 902;
-                if (messageListGetItem(&gProtoMessageList, &messageListItem)) {
-                    displayMonitorAddMessage(messageListItem.text);
-                }
-            }
-            return -1;
+            // NOTE: Uninline.
+            return _action_use_skill_in_combat_error(a1);
         }
 
         if (PID_TYPE(a2->pid) != OBJ_TYPE_CRITTER) {
@@ -1380,6 +1378,19 @@ int actionUseSkill(Object* a1, Object* a2, int skill)
         if (critterGetKillType(a2) == KILL_TYPE_BRAHMIN
             && skill == SKILL_SCIENCE) {
             break;
+        }
+
+        // SFALL: Science on critters patch.
+        if (1) {
+            int targetType = SCIENCE_REPAIR_TARGET_TYPE_DEFAULT;
+            configGetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_SCIENCE_REPAIR_TARGET_TYPE_KEY, &targetType);
+            if (targetType == SCIENCE_REPAIR_TARGET_TYPE_DUDE) {
+                if (a2 == gDude) {
+                    break;
+                }
+            } else if (targetType == SCIENCE_REPAIR_TARGET_TYPE_ANYONE) {
+                break;
+            }
         }
 
         return -1;

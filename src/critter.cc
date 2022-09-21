@@ -1,5 +1,8 @@
 #include "critter.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "animation.h"
 #include "art.h"
 #include "character_editor.h"
@@ -26,10 +29,7 @@
 #include "stat.h"
 #include "tile.h"
 #include "trait.h"
-#include "world_map.h"
-
-#include <stdio.h>
-#include <string.h>
+#include "worldmap.h"
 
 // Maximum length of dude's name length.
 #define DUDE_NAME_MAX_LENGTH (32)
@@ -68,6 +68,7 @@ typedef enum RadiationLevel {
 } RadiationLevel;
 
 static int _get_rad_damage_level(Object* obj, void* data);
+static int critter_kill_count_clear();
 static int _critterClearObjDrugs(Object* obj, void* data);
 
 // 0x50141C
@@ -159,7 +160,8 @@ int critterInit()
 {
     dudeResetName();
 
-    memset(gKillsByType, 0, sizeof(gKillsByType));
+    // NOTE: Uninline;
+    critter_kill_count_clear();
 
     if (!messageListInit(&gCritterMessageList)) {
         debugPrint("\nError: Initing critter name message file!");
@@ -181,7 +183,9 @@ int critterInit()
 void critterReset()
 {
     dudeResetName();
-    memset(gKillsByType, 0, sizeof(gKillsByType));
+
+    // NOTE: Uninline;
+    critter_kill_count_clear();
 }
 
 // 0x42D004
@@ -568,6 +572,13 @@ void _process_rads(Object* obj, int radiationLevel, bool isHealing)
     if (obj == gDude) {
         // Radiation level message, higher is worse.
         messageListItem.num = 1000 + radiationLevelIndex;
+
+        // SFALL: Fix radiation message when removing radiation effects.
+        if (isHealing) {
+            // You feel better.
+            messageListItem.num = 3003;
+        }
+
         if (messageListGetItem(&gMiscMessageList, &messageListItem)) {
             displayMonitorAddMessage(messageListItem.text);
         }
@@ -579,15 +590,18 @@ void _process_rads(Object* obj, int radiationLevel, bool isHealing)
         critterSetBonusStat(obj, gRadiationEffectStats[effect], value);
     }
 
-    if ((obj->data.critter.combat.results & DAM_DEAD) == 0) {
-        // Loop thru effects affecting primary stats. If any of the primary stat
-        // dropped below minimal value, kill it.
-        for (int effect = 0; effect < RADIATION_EFFECT_PRIMARY_STAT_COUNT; effect++) {
-            int base = critterGetBaseStatWithTraitModifier(obj, gRadiationEffectStats[effect]);
-            int bonus = critterGetBonusStat(obj, gRadiationEffectStats[effect]);
-            if (base + bonus < PRIMARY_STAT_MIN) {
-                critterKill(obj, -1, 1);
-                break;
+    // SFALL: Prevent death when removing radiation effects.
+    if (!isHealing) {
+        if ((obj->data.critter.combat.results & DAM_DEAD) == 0) {
+            // Loop thru effects affecting primary stats. If any of the primary stat
+            // dropped below minimal value, kill it.
+            for (int effect = 0; effect < RADIATION_EFFECT_PRIMARY_STAT_COUNT; effect++) {
+                int base = critterGetBaseStatWithTraitModifier(obj, gRadiationEffectStats[effect]);
+                int bonus = critterGetBonusStat(obj, gRadiationEffectStats[effect]);
+                if (base + bonus < PRIMARY_STAT_MIN) {
+                    critterKill(obj, -1, 1);
+                    break;
+                }
             }
         }
     }
@@ -597,7 +611,8 @@ void _process_rads(Object* obj, int radiationLevel, bool isHealing)
             // You have died from radiation sickness.
             messageListItem.num = 1006;
             if (messageListGetItem(&gMiscMessageList, &messageListItem)) {
-                displayMonitorAddMessage(messageListItem.text);
+                // SFALL: Display a pop-up message box about death from radiation.
+                gameShowDeathDialog(messageListItem.text);
             }
         }
     }
@@ -667,6 +682,15 @@ int critterGetDamageType(Object* obj)
     }
 
     return proto->critter.data.damageType;
+}
+
+// NOTE: Inlined.
+//
+// 0x42D860
+static int critter_kill_count_clear()
+{
+    memset(gKillsByType, 0, sizeof(gKillsByType));
+    return 0;
 }
 
 // 0x42D878
@@ -873,7 +897,7 @@ void critterKill(Object* critter, int anim, bool a3)
     _critterClearObj = critter;
     _queue_clear_type(EVENT_TYPE_DRUG, _critterClearObjDrugs);
 
-    _item_destroy_all_hidden(critter);
+    itemDestroyAllHidden(critter);
 
     if (a3) {
         tileWindowRefreshRect(&updatedRect, elevation);
@@ -1279,7 +1303,7 @@ int _critter_set_who_hit_me(Object* a1, Object* a2)
 bool _critter_can_obj_dude_rest()
 {
     bool v1 = false;
-    if (!_wmMapCanRestHere(gElevation)) {
+    if (!wmMapCanRestHere(gElevation)) {
         v1 = true;
     }
 

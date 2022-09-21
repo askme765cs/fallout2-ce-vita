@@ -1,5 +1,8 @@
 #include "object.h"
 
+#include <assert.h>
+#include <string.h>
+
 #include "animation.h"
 #include "art.h"
 #include "color.h"
@@ -21,10 +24,7 @@
 #include "scripts.h"
 #include "text_object.h"
 #include "tile.h"
-#include "world_map.h"
-
-#include <assert.h>
-#include <string.h>
+#include "worldmap.h"
 
 static int objectLoadAllInternal(File* stream);
 static void _obj_fix_combat_cid_for_dude();
@@ -1088,7 +1088,7 @@ int _obj_copy(Object** a1, Object* a2)
         return -1;
     }
 
-    objectListNode->obj->flags &= ~OBJECT_USED;
+    objectListNode->obj->flags &= ~OBJECT_QUEUED;
 
     Inventory* newInventory = &(objectListNode->obj->data.inventory);
     newInventory->length = 0;
@@ -1484,7 +1484,7 @@ int objectSetLocation(Object* obj, int tile, int elevation, Rect* rect)
                         transition.rotation = data->misc.rotation;
                         mapSetTransition(&transition);
 
-                        _wmMapMarkMapEntranceState(transition.map, transition.elevation, 1);
+                        wmMapMarkMapEntranceState(transition.map, transition.elevation, 1);
                     }
                 }
             }
@@ -5221,4 +5221,17 @@ static int _obj_preload_sort(const void* a1, const void* a2)
 
     cmp = ((v1 & 0xFF0000) >> 16) - (((v2 & 0xFF0000) >> 16));
     return cmp;
+}
+
+Object* objectTypedFindById(int id, int type)
+{
+    Object* obj = objectFindFirst();
+    while (obj != NULL) {
+        if (obj->id == id && PID_TYPE(obj->pid) == type) {
+            return obj;
+        }
+        obj = objectFindNext();
+    }
+
+    return NULL;
 }

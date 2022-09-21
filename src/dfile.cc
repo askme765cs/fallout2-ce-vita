@@ -1,13 +1,13 @@
 #include "dfile.h"
 
-#include "platform_compat.h"
-
-#include <fpattern.h>
-
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <fpattern.h>
+
+#include "platform_compat.h"
 
 // The size of decompression buffer for reading compressed [DFile]s.
 #define DFILE_DECOMPRESSION_BUFFER_SIZE (0x400)
@@ -61,7 +61,7 @@ DBase* dbaseOpen(const char* filePath)
 
     // Get file size, and reposition stream to read footer, which contains two
     // 32-bits ints.
-    int fileSize = compat_filelength(fileno(stream));
+    int fileSize = getFileSize(stream);
     if (fseek(stream, fileSize - sizeof(int) * 2, SEEK_SET) != 0) {
         goto err;
     }
@@ -141,7 +141,7 @@ DBase* dbaseOpen(const char* filePath)
         goto err;
     }
 
-    dbase->path = strdup(filePath);
+    dbase->path = compat_strdup(filePath);
     dbase->dataOffset = fileSize - dbaseDataSize;
 
     fclose(stream);

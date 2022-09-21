@@ -1,5 +1,8 @@
 #include "game_sound.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "animation.h"
 #include "art.h"
 #include "audio.h"
@@ -19,10 +22,7 @@
 #include "sound_effects_cache.h"
 #include "stat.h"
 #include "window_manager.h"
-#include "world_map.h"
-
-#include <stdio.h>
-#include <string.h>
+#include "worldmap.h"
 
 typedef enum SoundEffectActionType {
     SOUND_EFFECT_ACTION_TYPE_ACTIVE,
@@ -1817,7 +1817,7 @@ int gameSoundFindBackgroundSoundPathWithCopy(char* dest, const char* src)
 int gameSoundFindBackgroundSoundPath(char* dest, const char* src)
 {
     char path[COMPAT_MAX_PATH];
-    int len;
+    size_t len;
 
     len = strlen(src) + strlen(".ACM");
     if (strlen(_sound_music_path1) + len > COMPAT_MAX_PATH || strlen(_sound_music_path2) + len > COMPAT_MAX_PATH) {
@@ -1962,7 +1962,7 @@ int speechPlay()
 // 0x452208
 int _gsound_get_music_path(char** out_value, const char* key)
 {
-    int v3;
+    size_t v3;
     char* v4;
     char* value;
 
@@ -2105,8 +2105,8 @@ int ambientSoundEffectEventProcess(Object* a1, void* data)
     if (soundEffectEvent != NULL) {
         ambientSoundEffectIndex = soundEffectEvent->ambientSoundEffectIndex;
     } else {
-        if (ambientSoundEffectGetLength() > 0) {
-            ambientSoundEffectIndex = ambientSoundEffectGetRandom();
+        if (wmSfxMaxCount() > 0) {
+            ambientSoundEffectIndex = wmSfxRollNextIdx();
         }
     }
 
@@ -2120,8 +2120,8 @@ int ambientSoundEffectEventProcess(Object* a1, void* data)
     }
 
     int delay = 10 * randomBetween(15, 20);
-    if (ambientSoundEffectGetLength() > 0) {
-        nextSoundEffectEvent->ambientSoundEffectIndex = ambientSoundEffectGetRandom();
+    if (wmSfxMaxCount() > 0) {
+        nextSoundEffectEvent->ambientSoundEffectIndex = wmSfxRollNextIdx();
         if (queueAddEvent(delay, NULL, nextSoundEffectEvent, EVENT_TYPE_GSOUND_SFX_EVENT) == -1) {
             return -1;
         }
@@ -2133,7 +2133,7 @@ int ambientSoundEffectEventProcess(Object* a1, void* data)
 
     if (ambientSoundEffectIndex != -1) {
         char* fileName;
-        if (ambientSoundEffectGetName(ambientSoundEffectIndex, &fileName) == 0) {
+        if (wmSfxIdxName(ambientSoundEffectIndex, &fileName) == 0) {
             int v7 = _get_bk_time();
             if (getTicksBetween(v7, _lastTime_1) >= 5000) {
                 if (soundPlayFile(fileName) == -1) {

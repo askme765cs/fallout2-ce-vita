@@ -1,5 +1,11 @@
 #include "window_manager.h"
 
+#include <string.h>
+
+#include <algorithm>
+
+#include <SDL.h>
+
 #include "color.h"
 #include "core.h"
 #include "debug.h"
@@ -10,11 +16,6 @@
 #include "text_font.h"
 #include "win32.h"
 #include "window_manager_private.h"
-
-#include <SDL.h>
-#include <string.h>
-
-#include <algorithm>
 
 #define MAX_WINDOW_COUNT (50)
 
@@ -35,6 +36,7 @@ static Button* buttonCreateInternal(int win, int x, int y, int width, int height
 static int _GNW_check_buttons(Window* window, int* out_a2);
 static bool _button_under_mouse(Button* button, Rect* rect);
 static void buttonFree(Button* ptr);
+static int button_new_id();
 static int _win_group_check_buttons(int a1, int* a2, int a3, void (*a4)(int));
 static int _button_check_group(Button* button);
 static void _button_draw(Button* button, Window* window, unsigned char* data, int a4, Rect* a5, int a6);
@@ -132,7 +134,7 @@ int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitP
         gOrderedWindowIds[index] = -1;
     }
 
-    if (!_db_total()) {
+    if (_db_total() == 0) {
         if (dbOpen(NULL, 0, _path_patches, 1) == -1) {
             return WINDOW_MANAGER_ERR_INITIALIZING_DEFAULT_DATABASE;
         }
@@ -1642,10 +1644,8 @@ Button* buttonCreateInternal(int win, int x, int y, int width, int height, int m
         }
     }
 
-    int buttonId = 1;
-    while (buttonGetButton(buttonId, NULL) != NULL) {
-        buttonId++;
-    }
+    // NOTE: Uninline.
+    int buttonId = button_new_id();
 
     button->id = buttonId;
     button->flags = flags;
@@ -2181,6 +2181,21 @@ void buttonFree(Button* button)
     }
 
     internal_free(button);
+}
+
+// NOTE: Inlined.
+//
+// 0x4D9458
+static int button_new_id()
+{
+    int btn;
+
+    btn = 1;
+    while (buttonGetButton(btn, NULL) != NULL) {
+        btn++;
+    }
+
+    return btn;
 }
 
 // 0x4D9474

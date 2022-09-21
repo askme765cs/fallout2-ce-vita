@@ -1,5 +1,10 @@
 #include "proto_instance.h"
 
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "animation.h"
 #include "art.h"
 #include "color.h"
@@ -8,6 +13,7 @@
 #include "debug.h"
 #include "display_monitor.h"
 #include "game.h"
+#include "game_dialog.h"
 #include "game_sound.h"
 #include "geometry.h"
 #include "interface.h"
@@ -24,12 +30,7 @@
 #include "skill.h"
 #include "stat.h"
 #include "tile.h"
-#include "world_map.h"
-
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "worldmap.h"
 
 static int _obj_remove_from_inven(Object* critter, Object* item);
 static int _obj_use_book(Object* item_obj);
@@ -472,7 +473,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
             }
 
             if (car != 0) {
-                sprintf(formattedText, carMessageListItem.text, 100 * carGetFuel() / 80000);
+                sprintf(formattedText, carMessageListItem.text, 100 * wmCarGasAmount() / 80000);
             } else {
                 strcpy(formattedText, carMessageListItem.text);
             }
@@ -499,6 +500,12 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                 fn(formattedText);
             }
         } else if (itemType == ITEM_TYPE_AMMO) {
+            // SFALL: Fix ammo details when examining in barter screen.
+            // CE: Underlying `gameDialogRenderSupplementaryMessage` cannot
+            // accumulate strings like `inventoryRenderItemDescription` does.
+            char ammoFormattedText[260 * 3];
+            ammoFormattedText[0] = '\0';
+
             MessageListItem ammoMessageListItem;
             ammoMessageListItem.num = 510;
 
@@ -510,7 +517,11 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
             sprintf(formattedText,
                 ammoMessageListItem.text,
                 ammoGetArmorClassModifier(target));
-            fn(formattedText);
+            if (fn == gameDialogRenderSupplementaryMessage) {
+                strcat(ammoFormattedText, formattedText);
+            } else {
+                fn(formattedText);
+            }
 
             ammoMessageListItem.num++;
             if (!messageListGetItem(&gProtoMessageList, &ammoMessageListItem)) {
@@ -521,7 +532,12 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
             sprintf(formattedText,
                 ammoMessageListItem.text,
                 ammoGetDamageResistanceModifier(target));
-            fn(formattedText);
+            if (fn == gameDialogRenderSupplementaryMessage) {
+                strcat(ammoFormattedText, ", ");
+                strcat(ammoFormattedText, formattedText);
+            } else {
+                fn(formattedText);
+            }
 
             ammoMessageListItem.num++;
             if (!messageListGetItem(&gProtoMessageList, &ammoMessageListItem)) {
@@ -533,7 +549,14 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                 ammoMessageListItem.text,
                 ammoGetDamageMultiplier(target),
                 ammoGetDamageDivisor(target));
-            fn(formattedText);
+            if (fn == gameDialogRenderSupplementaryMessage) {
+                strcat(ammoFormattedText, ", ");
+                strcat(ammoFormattedText, formattedText);
+                strcat(ammoFormattedText, ".");
+                fn(ammoFormattedText);
+            } else {
+                fn(formattedText);
+            }
         }
     }
 
@@ -793,7 +816,7 @@ static int _obj_use_flare(Object* critter_obj, Object* flare)
         return -1;
     }
 
-    if ((flare->flags & OBJECT_USED) != 0) {
+    if ((flare->flags & OBJECT_QUEUED) != 0) {
         if (critter_obj == gDude) {
             // The flare is already lit.
             messageListItem.num = 588;
@@ -849,7 +872,7 @@ static int _obj_use_explosive(Object* explosive)
         return -1;
     }
 
-    if ((explosive->flags & OBJECT_USED) != 0) {
+    if ((explosive->flags & OBJECT_QUEUED) != 0) {
         // The timer is already ticking.
         messageListItem.num = 590;
         if (messageListGetItem(&gProtoMessageList, &messageListItem)) {
@@ -931,12 +954,12 @@ static int _obj_use_power_on_car(Object* item)
     // SFALL: Fix for cells getting consumed even when the car is already fully
     // charged.
     int rc;
-    if (carGetFuel() < CAR_FUEL_MAX) {
+    if (wmCarGasAmount() < CAR_FUEL_MAX) {
         int energy = ammoGetQuantity(item) * energyDensity;
         int capacity = ammoGetCapacity(item);
 
         // NOTE: that function will never return -1
-        if (carAddFuel(energy / capacity) == -1) {
+        if (wmCarFillGas(energy / capacity) == -1) {
             return -1;
         }
 
@@ -1095,7 +1118,7 @@ int _obj_use_item(Object* a1, Object* a2)
         if (root != NULL) {
             int flags = a2->flags & OBJECT_IN_ANY_HAND;
             itemRemove(root, a2, 1);
-            Object* v8 = _item_replace(root, a2, flags);
+            Object* v8 = itemReplace(root, a2, flags);
             if (root == gDude) {
                 int leftItemAction;
                 int rightItemAction;
@@ -1337,7 +1360,7 @@ int _obj_use_item_on(Object* a1, Object* a2, Object* a3)
             int flags = a3->flags & OBJECT_IN_ANY_HAND;
             itemRemove(a1, a3, 1);
 
-            Object* v7 = _item_replace(a1, a3, flags);
+            Object* v7 = itemReplace(a1, a3, flags);
 
             int leftItemAction;
             int rightItemAction;
@@ -1497,7 +1520,7 @@ static int useLadderDown(Object* a1, Object* ladder, int a3)
 
         mapSetTransition(&transition);
 
-        _wmMapMarkMapEntranceState(transition.map, elevation, 1);
+        wmMapMarkMapEntranceState(transition.map, elevation, 1);
     } else {
         Rect updatedRect;
         if (objectSetLocation(a1, tile, elevation, &updatedRect) == -1) {
@@ -1531,7 +1554,7 @@ static int useLadderUp(Object* a1, Object* ladder, int a3)
 
         mapSetTransition(&transition);
 
-        _wmMapMarkMapEntranceState(transition.map, elevation, 1);
+        wmMapMarkMapEntranceState(transition.map, elevation, 1);
     } else {
         Rect updatedRect;
         if (objectSetLocation(a1, tile, elevation, &updatedRect) == -1) {
@@ -1565,7 +1588,7 @@ static int useStairs(Object* a1, Object* stairs, int a3)
 
         mapSetTransition(&transition);
 
-        _wmMapMarkMapEntranceState(transition.map, elevation, 1);
+        wmMapMarkMapEntranceState(transition.map, elevation, 1);
     } else {
         Rect updatedRect;
         if (objectSetLocation(a1, tile, elevation, &updatedRect) == -1) {
@@ -2218,13 +2241,13 @@ int _objPMAttemptPlacement(Object* obj, int tile, int elevation)
 
     int v9 = tile;
     int v7 = 0;
-    if (!_wmEvalTileNumForPlacement(tile)) {
+    if (!wmEvalTileNumForPlacement(tile)) {
         v9 = gDude->tile;
         for (int v4 = 1; v4 <= 100; v4++) {
             // TODO: Check.
             v7++;
             v9 = tileGetTileInDirection(v9, v7 % ROTATION_COUNT, 1);
-            if (_wmEvalTileNumForPlacement(v9) != 0) {
+            if (wmEvalTileNumForPlacement(v9) != 0) {
                 break;
             }
 

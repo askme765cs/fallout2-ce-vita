@@ -1,5 +1,10 @@
 #include "automap.h"
 
+#include <stdio.h>
+#include <string.h>
+
+#include <algorithm>
+
 #include "art.h"
 #include "color.h"
 #include "config.h"
@@ -19,11 +24,6 @@
 #include "platform_compat.h"
 #include "text_font.h"
 #include "window_manager.h"
-
-#include <stdio.h>
-#include <string.h>
-
-#include <algorithm>
 
 #define AUTOMAP_OFFSET_COUNT (AUTOMAP_MAP_COUNT * ELEVATION_COUNT)
 
@@ -66,7 +66,7 @@ static const int _defam[AUTOMAP_MAP_COUNT][ELEVATION_COUNT] = {
 };
 
 // 0x41B560
-static const int _displayMapList[AUTOMAP_MAP_COUNT] = {
+static int _displayMapList[AUTOMAP_MAP_COUNT] = {
     -1,
     -1,
     -1,
@@ -1152,4 +1152,11 @@ int automapGetHeader(AutomapHeader** automapHeaderPtr)
     *automapHeaderPtr = &gAutomapHeader;
 
     return 0;
+}
+
+void automapSetDisplayMap(int map, bool available)
+{
+    if (map >= 0 && map < AUTOMAP_MAP_COUNT) {
+        _displayMapList[map] = available ? 0 : -1;
+    }
 }

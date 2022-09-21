@@ -1,5 +1,9 @@
 #include "pipboy.h"
 
+#include <ctype.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "art.h"
 #include "automap.h"
 #include "color.h"
@@ -31,11 +35,7 @@
 #include "text_font.h"
 #include "window_manager.h"
 #include "word_wrap.h"
-#include "world_map.h"
-
-#include <ctype.h>
-#include <stdio.h>
-#include <string.h>
+#include "worldmap.h"
 
 #define PIPBOY_WINDOW_WIDTH (640)
 #define PIPBOY_WINDOW_HEIGHT (480)
@@ -401,7 +401,7 @@ static int gPipboyPrevTab;
 // 0x497004
 int pipboyOpen(int intent)
 {
-    if (!_wmMapPipboyActive()) {
+    if (!wmMapPipboyActive()) {
         // You aren't wearing the pipboy!
         const char* text = getmsg(&gMiscMessageList, &gPipboyMessageListItem, 7000);
         showDialogBox(text, NULL, 0, 192, 135, _colorTable[32328], NULL, _colorTable[32328], 1);
@@ -1504,7 +1504,7 @@ static int _PrintAMelevList(int a1)
         }
     }
 
-    int mapCount = mapGetCount();
+    int mapCount = wmMapMaxCount();
     for (int map = 0; map < mapCount; map++) {
         if (map == _amcty_indx) {
             continue;
@@ -1579,7 +1579,7 @@ static int _PrintAMList(int a1)
     int count = 0;
     int index = 0;
 
-    int mapCount = mapGetCount();
+    int mapCount = wmMapMaxCount();
     for (int map = 0; map < mapCount; map++) {
         int elevation;
         for (elevation = 0; elevation < ELEVATION_COUNT; elevation++) {

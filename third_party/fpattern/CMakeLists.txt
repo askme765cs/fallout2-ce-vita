@@ -25,7 +25,7 @@ add_library(fpattern STATIC
     "${fpattern_SOURCE_DIR}/fpattern.h"
 )
 
-if(APPLE)
+if(NOT WIN32)
     target_compile_definitions(fpattern PRIVATE
         "-Dunix"
     )
