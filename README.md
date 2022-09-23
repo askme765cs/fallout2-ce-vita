@@ -112,7 +112,7 @@ $ sudo apt install libsdl2-2.0-0
 
 - Download `fallout2-ce.apk` and copy it to your device. Open it with file explorer, follow instructions (install from unknown source).
 
-- When you run the game for the first time it will immediately present file picker. Select the folder from the first step. Wait until this data is copied. There is no fancy importing interface (yet), just wait for about 30 seconds. The game will start automatically.
+- When you run the game for the first time it will immediately present file picker. Select the folder from the first step. Wait until this data is copied. A loading dialog will appear, just wait for about 30 seconds. The game will start automatically.
 
 ## Contributing
 
@@ -122,6 +122,6 @@ Integrating Sfall goodies is the top priority. Quality of life updates are OK to
 
 There are literally hundreds if not thousands of fixes and features in sfall. I guess not all of them are needed in Community Edition, but for the sake of compatibility with big mods out there, let's integrate them all.
 
-## Legal & License
+## License
 
-See [Fallout 2 Reference Edition](https://github.com/alexbatalov/fallout2-re). Same conditions apply until the source code in this repository is changed significantly.
+The source code is this repository is available under the [Sustainable Use License](LICENSE.md).

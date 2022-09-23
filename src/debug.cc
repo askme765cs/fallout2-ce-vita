@@ -155,7 +155,7 @@ int debugPrint(const char* format, ...)
 #ifdef _WIN32
         OutputDebugStringA(string);
 #elif defined(__vita__)
-        sceClibPrintf("%s\n", string);
+        sceClibPrintf("%s", string);
 #else
         printf("%s", string);
 #endif

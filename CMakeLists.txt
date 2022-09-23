@@ -298,6 +298,13 @@ if(VITA)
     target_compile_definitions(${EXECUTABLE_NAME} PRIVATE _POSIX_C_SOURCE=200809)
 endif()
 
+if (WIN32)
+    target_sources(${EXECUTABLE_NAME} PUBLIC
+        "os/windows/fallout2-ce.ico"
+        "os/windows/fallout2-ce.rc"
+    )
+endif()
+
 if(APPLE)
     target_sources(${EXECUTABLE_NAME} PUBLIC "os/macos/fallout2-ce.icns")
     set_source_files_properties("os/macos/fallout2-ce.icns" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
@@ -307,6 +314,8 @@ if(APPLE)
     set(MACOSX_BUNDLE_BUNDLE_NAME "${EXECUTABLE_NAME}")
     set(MACOSX_BUNDLE_ICON_FILE "fallout2-ce.icns")
     set(MACOSX_BUNDLE_DISPLAY_NAME "Fallout 2")
+    set(MACOSX_BUNDLE_SHORT_VERSION_STRING "1.1.0")
+    set(MACOSX_BUNDLE_BUNDLE_VERSION "1.1.0")
 endif()
 
 add_subdirectory("third_party/fpattern")
