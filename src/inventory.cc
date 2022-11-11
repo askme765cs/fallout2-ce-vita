@@ -2890,14 +2890,14 @@ static void inventoryRenderSummary()
     bufferDrawLine(windowBuffer,
         INVENTORY_WINDOW_WIDTH,
         INVENTORY_SUMMARY_X,
-        3 * fontGetLineHeight() / 2 + INVENTORY_SUMMARY_Y,
+        3 * 10 / 2 + INVENTORY_SUMMARY_Y,
         INVENTORY_SUMMARY_MAX_X,
-        3 * fontGetLineHeight() / 2 + INVENTORY_SUMMARY_Y,
+        3 * 10 / 2 + INVENTORY_SUMMARY_Y,
         _colorTable[992]);
 
     MessageListItem messageListItem;
 
-    int offset = INVENTORY_WINDOW_WIDTH * 2 * fontGetLineHeight() + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X;
+    int offset = INVENTORY_WINDOW_WIDTH * 2 * 10 + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X;
     for (int stat = 0; stat < 7; stat++) {
         messageListItem.num = stat;
         if (messageListGetItem(&gInventoryMessageList, &messageListItem)) {
@@ -2908,10 +2908,10 @@ static void inventoryRenderSummary()
         sprintf(formattedText, "%d", value);
         fontDrawText(windowBuffer + offset + 24, formattedText, 80, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
 
-        offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += INVENTORY_WINDOW_WIDTH * 10;
     }
 
-    offset -= INVENTORY_WINDOW_WIDTH * 7 * fontGetLineHeight();
+    offset -= INVENTORY_WINDOW_WIDTH * 7 * 10;
 
     for (int index = 0; index < 7; index += 1) {
         messageListItem.num = 7 + index;
@@ -2931,11 +2931,11 @@ static void inventoryRenderSummary()
 
         fontDrawText(windowBuffer + offset + 104, formattedText, 80, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
 
-        offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += INVENTORY_WINDOW_WIDTH * 10;
     }
 
-    bufferDrawLine(windowBuffer, INVENTORY_WINDOW_WIDTH, INVENTORY_SUMMARY_X, 18 * fontGetLineHeight() / 2 + 48, INVENTORY_SUMMARY_MAX_X, 18 * fontGetLineHeight() / 2 + 48, _colorTable[992]);
-    bufferDrawLine(windowBuffer, INVENTORY_WINDOW_WIDTH, INVENTORY_SUMMARY_X, 26 * fontGetLineHeight() / 2 + 48, INVENTORY_SUMMARY_MAX_X, 26 * fontGetLineHeight() / 2 + 48, _colorTable[992]);
+    bufferDrawLine(windowBuffer, INVENTORY_WINDOW_WIDTH, INVENTORY_SUMMARY_X, 18 * 10 / 2 + 48, INVENTORY_SUMMARY_MAX_X, 18 * 10 / 2 + 48, _colorTable[992]);
+    bufferDrawLine(windowBuffer, INVENTORY_WINDOW_WIDTH, INVENTORY_SUMMARY_X, 26 * 10 / 2 + 48, INVENTORY_SUMMARY_MAX_X, 26 * 10 / 2 + 48, _colorTable[992]);
 
     Object* itemsInHands[2] = {
         gInventoryLeftHandItem,
@@ -2957,7 +2957,7 @@ static void inventoryRenderSummary()
         HIT_MODE_KICK,
     };
 
-    offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+    offset += INVENTORY_WINDOW_WIDTH * 10;
 
     for (int index = 0; index < 2; index += 1) {
         Object* item = itemsInHands[index];
@@ -2970,7 +2970,7 @@ static void inventoryRenderSummary()
                 fontDrawText(windowBuffer + offset, messageListItem.text, 120, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
             }
 
-            offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+            offset += INVENTORY_WINDOW_WIDTH * 10;
 
             // Unarmed dmg:
             messageListItem.num = 24;
@@ -3006,14 +3006,14 @@ static void inventoryRenderSummary()
 
             fontDrawText(windowBuffer + offset, formattedText, 120, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
 
-            offset += 3 * INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+            offset += 3 * INVENTORY_WINDOW_WIDTH * 10;
             continue;
         }
 
         const char* itemName = itemGetName(item);
         fontDrawText(windowBuffer + offset, itemName, 140, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
 
-        offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += INVENTORY_WINDOW_WIDTH * 10;
 
         int itemType = itemGetType(item);
         if (itemType != ITEM_TYPE_WEAPON) {
@@ -3025,7 +3025,7 @@ static void inventoryRenderSummary()
                 }
             }
 
-            offset += 3 * INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+            offset += 3 * INVENTORY_WINDOW_WIDTH * 10;
             continue;
         }
 
@@ -3104,7 +3104,7 @@ static void inventoryRenderSummary()
             fontDrawText(windowBuffer + offset, formattedText, 140, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
         }
 
-        offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += INVENTORY_WINDOW_WIDTH * 10;
 
         if (ammoGetCapacity(item) > 0) {
             int ammoTypePid = weaponGetAmmoTypePid(item);
@@ -3134,7 +3134,7 @@ static void inventoryRenderSummary()
             fontDrawText(windowBuffer + offset, formattedText, 140, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
         }
 
-        offset += 2 * INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += 2 * INVENTORY_WINDOW_WIDTH * 10;
     }
 
     // Total wt:
@@ -3633,7 +3633,7 @@ static void inventoryExamineItem(Object* critter, Object* item)
     if (backgroundFrmImage.lock(backgroundFid)) {
         blitBufferToBuffer(backgroundFrmImage.getData() + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X,
             152,
-            188,
+            200,
             INVENTORY_WINDOW_WIDTH,
             windowBuffer + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X,
             INVENTORY_WINDOW_WIDTH);

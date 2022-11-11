@@ -2383,7 +2383,9 @@ static void characterEditorDrawPcStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 32, stringBuffer, 640, 640, color);
 
     // EXPERIENCE
-    y += fontGetLineHeight() + 1;
+    //y += fontGetLineHeight() + 1;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 10 + 1;
     if (characterEditorSelectedItem != 8) {
         color = _colorTable[992];
     } else {
@@ -2397,7 +2399,9 @@ static void characterEditorDrawPcStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 32, stringBuffer, 640, 640, color);
 
     // EXP NEEDED TO NEXT LEVEL
-    y += fontGetLineHeight() + 1;
+    //y += fontGetLineHeight() + 1;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 10 + 1;
     if (characterEditorSelectedItem != 9) {
         color = _colorTable[992];
     } else {
@@ -2649,8 +2653,12 @@ static void characterEditorDrawDerivedStats()
     sprintf(t, "%d/%d", currHp, maxHp);
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 263, t, 640, 640, color);
 
+            
+
     // Poisoned
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_POISONED) {
         color = critterGetPoison(gDude) != 0 ? _colorTable[32747] : _colorTable[15845];
@@ -2663,7 +2671,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 194, t, 640, 640, color);
 
     // Radiated
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_RADIATED) {
         color = critterGetRadiation(gDude) != 0 ? _colorTable[32747] : _colorTable[15845];
@@ -2676,7 +2686,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 194, t, 640, 640, color);
 
     // Eye Damage
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_EYE_DAMAGE) {
         color = (conditions & DAM_BLIND) ? _colorTable[32747] : _colorTable[15845];
@@ -2689,7 +2701,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 194, t, 640, 640, color);
 
     // Crippled Right Arm
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_CRIPPLED_RIGHT_ARM) {
         color = (conditions & DAM_CRIP_ARM_RIGHT) ? _colorTable[32747] : _colorTable[15845];
@@ -2702,7 +2716,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 194, t, 640, 640, color);
 
     // Crippled Left Arm
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_CRIPPLED_LEFT_ARM) {
         color = (conditions & DAM_CRIP_ARM_LEFT) ? _colorTable[32747] : _colorTable[15845];
@@ -2715,7 +2731,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 194, t, 640, 640, color);
 
     // Crippled Right Leg
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_CRIPPLED_RIGHT_LEG) {
         color = (conditions & DAM_CRIP_LEG_RIGHT) ? _colorTable[32747] : _colorTable[15845];
@@ -2728,7 +2746,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 194, t, 640, 640, color);
 
     // Crippled Left Leg
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_CRIPPLED_LEFT_LEG) {
         color = (conditions & DAM_CRIP_LEG_LEFT) ? _colorTable[32747] : _colorTable[15845];
@@ -2759,7 +2779,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 288, t, 640, 640, color);
 
     // Action Points
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_ACTION_POINTS) {
         color = _colorTable[32747];
@@ -2775,7 +2797,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 288, t, 640, 640, color);
 
     // Carry Weight
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_CARRY_WEIGHT) {
         color = _colorTable[32747];
@@ -2791,7 +2815,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 288, t, 640, 640, critterIsEncumbered(gDude) ? _colorTable[31744] : color);
 
     // Melee Damage
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_MELEE_DAMAGE) {
         color = _colorTable[32747];
@@ -2813,7 +2839,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 288, t, 640, 640, color);
 
     // Damage Resistance
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_DAMAGE_RESISTANCE) {
         color = _colorTable[32747];
@@ -2829,7 +2857,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 288, t, 640, 640, color);
 
     // Poison Resistance
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_POISON_RESISTANCE) {
         color = _colorTable[32747];
@@ -2845,7 +2875,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 288, t, 640, 640, color);
 
     // Radiation Resistance
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_RADIATION_RESISTANCE) {
         color = _colorTable[32747];
@@ -2861,7 +2893,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 288, t, 640, 640, color);
 
     // Sequence
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_SEQUENCE) {
         color = _colorTable[32747];
@@ -2877,7 +2911,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 288, t, 640, 640, color);
 
     // Healing Rate
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_HEALING_RATE) {
         color = _colorTable[32747];
@@ -2893,7 +2929,9 @@ static void characterEditorDrawDerivedStats()
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 288, t, 640, 640, color);
 
     // Critical Chance
-    y += fontGetLineHeight() + 3;
+    //y += fontGetLineHeight() + 3;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    y += 13;
 
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_CRITICAL_CHANCE) {
         color = _colorTable[32747];
@@ -2987,11 +3025,15 @@ static void characterEditorDrawSkills(int a1)
 
         fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 573, valueString, 640, 640, color);
 
-        y += fontGetLineHeight() + 1;
+        // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+        //y += fontGetLineHeight() + 1;
+        y += 10 + 1;
     }
 
     if (!gCharacterEditorIsCreationMode) {
-        y = gCharacterEditorCurrentSkill * (fontGetLineHeight() + 1);
+        // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+        //y = gCharacterEditorCurrentSkill * (fontGetLineHeight() + 1);
+        y = gCharacterEditorCurrentSkill * (10 + 1);
         gCharacterEditorSkillValueAdjustmentSliderY = y + 27;
 
         blitBufferToBufferTrans(
@@ -5131,7 +5173,9 @@ static void characterEditorHandleInfoButtonPressed(int eventCode)
             double mouseY = gCharacterEditorMouseY;
             double fontLineHeight = fontGetLineHeight();
             double y = 353.0;
-            double step = fontGetLineHeight() + 3 + 0.56;
+            // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+            //double step = fontGetLineHeight() + 3 + 0.56;
+            double step = 10 + 3 + 0.56;
             int index;
             for (index = 0; index < 8; index++) {
                 if (mouseY >= y - 4.0 && mouseY <= y + fontLineHeight) {
@@ -5396,7 +5440,9 @@ static void characterEditorDrawOptionalTraits()
 
     traitsSetSelected(gCharacterEditorTempTraits[0], gCharacterEditorTempTraits[1]);
 
-    step = fontGetLineHeight() + 3 + 0.56;
+    //step = fontGetLineHeight() + 3 + 0.56;
+    // Adapt to other languages, because the pixels here are fixed, so the calculation of LineHeight brings trouble - replaces it with fixed pixel values
+    step = 10 + 3 + 0.56;
     y = 353;
     for (i = 0; i < 8; i++) {
         if (i == v0) {
@@ -6299,8 +6345,8 @@ static int perkDialogDrawPerks()
     qsort(gPerkDialogOptionList, count, sizeof(*gPerkDialogOptionList), perkDialogOptionCompare);
 
     int v16 = count - gPerkDialogTopLine;
-    if (v16 > 11) {
-        v16 = 11;
+    if (v16 > 11 * 12 / (fontGetLineHeight() + 2)) {
+        v16 = 11 * 12 / (fontGetLineHeight() + 2);
     }
 
     v16 += gPerkDialogTopLine;

@@ -418,8 +418,10 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
     int v23 = _ytable[dialogType];
 
     if ((flags & DIALOG_BOX_NO_VERTICAL_CENTERING) == 0) {
-        int v41 = _dblines[dialogType] * fontGetLineHeight() / 2 + v23;
-        v23 = v41 - ((bodyLength + 1) * fontGetLineHeight() / 2);
+        //int v41 = _dblines[dialogType] * fontGetLineHeight() / 2 + v23;
+        //v23 = v41 - ((bodyLength + 1) * fontGetLineHeight() / 2);
+        int v41 = _dblines[dialogType] * 10 / 2 + v23;
+        v23 = v41 - ((bodyLength + 1) * 10 / 2);
     }
 
     if (hasTitle) {
@@ -437,7 +439,8 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
                 backgroundFrmImage.getWidth(),
                 titleColor);
         }
-        v23 += fontGetLineHeight();
+        //v23 += fontGetLineHeight();
+        v23 += 10;
     }
 
     for (int v94 = 0; v94 < bodyLength; v94++) {
@@ -457,7 +460,8 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
                     backgroundFrmImage.getWidth(),
                     bodyColor);
             }
-            v23 += fontGetLineHeight();
+            //v23 += fontGetLineHeight();
+            v23 += 10;
         } else {
             short beginnings[WORD_WRAP_MAX_COUNT];
             short count;
@@ -489,7 +493,8 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
                         backgroundFrmImage.getWidth(),
                         bodyColor);
                 }
-                v23 += fontGetLineHeight();
+                //v23 += fontGetLineHeight();
+                v23 += 10;
             }
         }
     }
