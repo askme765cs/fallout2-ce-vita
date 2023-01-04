@@ -9,33 +9,38 @@
 #include "color.h"
 #include "combat.h"
 #include "config.h"
-#include "core.h"
 #include "critter.h"
 #include "cycle.h"
 #include "dbox.h"
 #include "debug.h"
 #include "draw.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_mouse.h"
 #include "game_movie.h"
 #include "game_sound.h"
 #include "geometry.h"
+#include "input.h"
 #include "interface.h"
+#include "kb.h"
 #include "map.h"
 #include "memory.h"
 #include "message.h"
+#include "mouse.h"
 #include "object.h"
 #include "party_member.h"
 #include "platform_compat.h"
 #include "queue.h"
 #include "random.h"
 #include "scripts.h"
+#include "settings.h"
 #include "stat.h"
+#include "svga.h"
 #include "text_font.h"
 #include "window_manager.h"
 #include "word_wrap.h"
 #include "worldmap.h"
+
+namespace fallout {
 
 #define PIPBOY_WINDOW_WIDTH (640)
 #define PIPBOY_WINDOW_HEIGHT (480)
@@ -285,9 +290,6 @@ PipboyRenderProc* _PipFnctn[5] = {
     pipboyHandleAlarmClock,
 };
 
-// 0x6642E0
-Size gPipboyFrmSizes[PIPBOY_FRM_COUNT];
-
 // 0x664338
 MessageListItem gPipboyMessageListItem;
 
@@ -309,9 +311,6 @@ int gPipboyQuestLocationsCount;
 
 // 0x66441C
 unsigned char* gPipboyWindowBuffer;
-
-// 0x664420
-unsigned char* gPipboyFrmData[PIPBOY_FRM_COUNT];
 
 // 0x66444C
 int gPipboyWindowHolodisksCount;
@@ -344,9 +343,6 @@ int gPipboyPreviousMouseY;
 
 // 0x6644C4
 int gPipboyWindow;
-
-// 0x6644C8
-CacheEntry* gPipboyFrmHandles[PIPBOY_FRM_COUNT];
 
 // 0x6644F4
 int _holodisk;
@@ -398,6 +394,12 @@ unsigned char _stat_flag;
 
 static int gPipboyPrevTab;
 
+static FrmImage _pipboyFrmImages[PIPBOY_FRM_COUNT];
+
+static int pipboyLineMax()
+{
+    return PIPBOY_HOLODISK_LINES_MAX * 10 / fontGetLineHeight();
+}
 // 0x497004
 int pipboyOpen(int intent)
 {
@@ -414,10 +416,12 @@ int pipboyOpen(int intent)
     }
 
     mouseGetPositionInWindow(gPipboyWindow, &gPipboyPreviousMouseX, &gPipboyPreviousMouseY);
-    gPipboyLastEventTimestamp = _get_time();
+    gPipboyLastEventTimestamp = getTicks();
 
     while (true) {
-        int keyCode = _get_input();
+        sharedFpsLimiter.mark();
+
+        int keyCode = inputGetInput();
 
         if (intent == PIPBOY_OPEN_INTENT_REST) {
             keyCode = 504;
@@ -427,14 +431,14 @@ int pipboyOpen(int intent)
         mouseGetPositionInWindow(gPipboyWindow, &gPipboyMouseX, &gPipboyMouseY);
 
         if (keyCode != -1 || gPipboyMouseX != gPipboyPreviousMouseX || gPipboyMouseY != gPipboyPreviousMouseY) {
-            gPipboyLastEventTimestamp = _get_time();
+            gPipboyLastEventTimestamp = getTicks();
             gPipboyPreviousMouseX = gPipboyMouseX;
             gPipboyPreviousMouseY = gPipboyMouseY;
         } else {
-            if (_get_time() - gPipboyLastEventTimestamp > PIPBOY_IDLE_TIMEOUT) {
+            if (getTicks() - gPipboyLastEventTimestamp > PIPBOY_IDLE_TIMEOUT) {
                 pipboyRenderScreensaver();
 
-                gPipboyLastEventTimestamp = _get_time();
+                gPipboyLastEventTimestamp = getTicks();
                 mouseGetPositionInWindow(gPipboyWindow, &gPipboyPreviousMouseX, &gPipboyPreviousMouseY);
             }
         }
@@ -471,6 +475,9 @@ int pipboyOpen(int intent)
         if (_proc_bail_flag) {
             break;
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     pipboyWindowFree();
@@ -501,7 +508,8 @@ static int pipboyWindowInit(int intent)
     _rest_time = 0;
     gPipboyCurrentLine = 0;
     gPipboyWindowButtonCount = 0;
-    gPipboyLinesCount = PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT / fontGetLineHeight() - 1;
+    //gPipboyLinesCount = PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT / fontGetLineHeight() - 1;
+    gPipboyLinesCount = PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT / 10 - 1;
     gPipboyWindowButtonStart = 0;
     _hot_back_line = 0;
 
@@ -523,8 +531,7 @@ static int pipboyWindowInit(int intent)
     int index;
     for (index = 0; index < PIPBOY_FRM_COUNT; index++) {
         int fid = buildFid(OBJ_TYPE_INTERFACE, gPipboyFrmIds[index], 0, 0, 0);
-        gPipboyFrmData[index] = artLockFrameDataReturningSize(fid, &(gPipboyFrmHandles[index]), &(gPipboyFrmSizes[index].width), &(gPipboyFrmSizes[index].height));
-        if (gPipboyFrmData[index] == NULL) {
+        if (!_pipboyFrmImages[index].lock(fid)) {
             break;
         }
     }
@@ -533,7 +540,7 @@ static int pipboyWindowInit(int intent)
         debugPrint("\n** Error loading pipboy graphics! **\n");
 
         while (--index >= 0) {
-            artUnlock(gPipboyFrmHandles[index]);
+            _pipboyFrmImages[index].unlock();
         }
 
         return -1;
@@ -545,13 +552,13 @@ static int pipboyWindowInit(int intent)
     if (gPipboyWindow == -1) {
         debugPrint("\n** Error opening pipboy window! **\n");
         for (int index = 0; index < PIPBOY_FRM_COUNT; index++) {
-            artUnlock(gPipboyFrmHandles[index]);
+            _pipboyFrmImages[index].unlock();
         }
         return -1;
     }
 
     gPipboyWindowBuffer = windowGetBuffer(gPipboyWindow);
-    memcpy(gPipboyWindowBuffer, gPipboyFrmData[PIPBOY_FRM_BACKGROUND], PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_HEIGHT);
+    memcpy(gPipboyWindowBuffer, _pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData(), PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_HEIGHT);
 
     pipboyDrawNumber(gameTimeGetHour(), 4, PIPBOY_WINDOW_TIME_X, PIPBOY_WINDOW_TIME_Y);
     pipboyDrawDate();
@@ -559,14 +566,14 @@ static int pipboyWindowInit(int intent)
     int alarmButton = buttonCreate(gPipboyWindow,
         124,
         13,
-        gPipboyFrmSizes[PIPBOY_FRM_ALARM_UP].width,
-        gPipboyFrmSizes[PIPBOY_FRM_ALARM_UP].height,
+        _pipboyFrmImages[PIPBOY_FRM_ALARM_UP].getWidth(),
+        _pipboyFrmImages[PIPBOY_FRM_ALARM_UP].getHeight(),
         -1,
         -1,
         -1,
         504,
-        gPipboyFrmData[PIPBOY_FRM_ALARM_UP],
-        gPipboyFrmData[PIPBOY_FRM_ALARM_DOWN],
+        _pipboyFrmImages[PIPBOY_FRM_ALARM_UP].getData(),
+        _pipboyFrmImages[PIPBOY_FRM_ALARM_DOWN].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (alarmButton != -1) {
@@ -580,14 +587,14 @@ static int pipboyWindowInit(int intent)
             int btn = buttonCreate(gPipboyWindow,
                 53,
                 y,
-                gPipboyFrmSizes[PIPBOY_FRM_LITTLE_RED_BUTTON_UP].width,
-                gPipboyFrmSizes[PIPBOY_FRM_LITTLE_RED_BUTTON_UP].height,
+                _pipboyFrmImages[PIPBOY_FRM_LITTLE_RED_BUTTON_UP].getWidth(),
+                _pipboyFrmImages[PIPBOY_FRM_LITTLE_RED_BUTTON_UP].getHeight(),
                 -1,
                 -1,
                 -1,
                 eventCode,
-                gPipboyFrmData[PIPBOY_FRM_LITTLE_RED_BUTTON_UP],
-                gPipboyFrmData[PIPBOY_FRM_LITTLE_RED_BUTTON_DOWN],
+                _pipboyFrmImages[PIPBOY_FRM_LITTLE_RED_BUTTON_UP].getData(),
+                _pipboyFrmImages[PIPBOY_FRM_LITTLE_RED_BUTTON_DOWN].getData(),
                 NULL,
                 BUTTON_FLAG_TRANSPARENT);
             if (btn != -1) {
@@ -603,10 +610,10 @@ static int pipboyWindowInit(int intent)
     if (intent == PIPBOY_OPEN_INTENT_REST) {
         if (!_critter_can_obj_dude_rest()) {
             blitBufferToBufferTrans(
-                gPipboyFrmData[PIPBOY_FRM_LOGO],
-                gPipboyFrmSizes[PIPBOY_FRM_LOGO].width,
-                gPipboyFrmSizes[PIPBOY_FRM_LOGO].height,
-                gPipboyFrmSizes[PIPBOY_FRM_LOGO].width,
+                _pipboyFrmImages[PIPBOY_FRM_LOGO].getData(),
+                _pipboyFrmImages[PIPBOY_FRM_LOGO].getWidth(),
+                _pipboyFrmImages[PIPBOY_FRM_LOGO].getHeight(),
+                _pipboyFrmImages[PIPBOY_FRM_LOGO].getWidth(),
                 gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 156 + 323,
                 PIPBOY_WINDOW_WIDTH);
 
@@ -630,7 +637,7 @@ static int pipboyWindowInit(int intent)
                 strcpy(holidayNameCopy, holidayName);
 
                 int len = fontGetStringWidth(holidayNameCopy);
-                fontDrawText(gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * (gPipboyFrmSizes[PIPBOY_FRM_LOGO].height + 174) + 6 + gPipboyFrmSizes[PIPBOY_FRM_LOGO].width / 2 + 323 - len / 2,
+                fontDrawText(gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * (_pipboyFrmImages[PIPBOY_FRM_LOGO].getHeight() + 174) + 6 + _pipboyFrmImages[PIPBOY_FRM_LOGO].getWidth() / 2 + 323 - len / 2,
                     holidayNameCopy,
                     350,
                     PIPBOY_WINDOW_WIDTH,
@@ -648,10 +655,10 @@ static int pipboyWindowInit(int intent)
         }
     } else {
         blitBufferToBufferTrans(
-            gPipboyFrmData[PIPBOY_FRM_LOGO],
-            gPipboyFrmSizes[PIPBOY_FRM_LOGO].width,
-            gPipboyFrmSizes[PIPBOY_FRM_LOGO].height,
-            gPipboyFrmSizes[PIPBOY_FRM_LOGO].width,
+            _pipboyFrmImages[PIPBOY_FRM_LOGO].getData(),
+            _pipboyFrmImages[PIPBOY_FRM_LOGO].getWidth(),
+            _pipboyFrmImages[PIPBOY_FRM_LOGO].getHeight(),
+            _pipboyFrmImages[PIPBOY_FRM_LOGO].getWidth(),
             gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 156 + 323,
             PIPBOY_WINDOW_WIDTH);
 
@@ -675,7 +682,7 @@ static int pipboyWindowInit(int intent)
             strcpy(holidayNameCopy, holidayName);
 
             int length = fontGetStringWidth(holidayNameCopy);
-            fontDrawText(gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * (gPipboyFrmSizes[PIPBOY_FRM_LOGO].height + 174) + 6 + gPipboyFrmSizes[PIPBOY_FRM_LOGO].width / 2 + 323 - length / 2,
+            fontDrawText(gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * (_pipboyFrmImages[PIPBOY_FRM_LOGO].getHeight() + 174) + 6 + _pipboyFrmImages[PIPBOY_FRM_LOGO].getWidth() / 2 + 323 - length / 2,
                 holidayNameCopy,
                 350,
                 PIPBOY_WINDOW_WIDTH,
@@ -698,10 +705,7 @@ static int pipboyWindowInit(int intent)
 // 0x497828
 static void pipboyWindowFree()
 {
-    bool showScriptMessages = false;
-    configGetBool(&gGameConfig, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_SHOW_SCRIPT_MESSAGES_KEY, &showScriptMessages);
-
-    if (showScriptMessages) {
+    if (settings.debug.show_script_messages) {
         debugPrint("\nScript <Map Update>");
     }
 
@@ -715,7 +719,7 @@ static void pipboyWindowFree()
     holodiskFree();
 
     for (int index = 0; index < PIPBOY_FRM_COUNT; index++) {
-        artUnlock(gPipboyFrmHandles[index]);
+        _pipboyFrmImages[index].unlock();
     }
 
     pipboyWindowDestroyButtons();
@@ -762,7 +766,7 @@ static void pipboyDrawNumber(int value, int digits, int x, int y)
     int offset = PIPBOY_WINDOW_WIDTH * y + x + 9 * (digits - 1);
 
     for (int index = 0; index < digits; index++) {
-        blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_NUMBERS] + 9 * (value % 10), 9, 17, 360, gPipboyWindowBuffer + offset, PIPBOY_WINDOW_WIDTH);
+        blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_NUMBERS].getData() + 9 * (value % 10), 9, 17, 360, gPipboyWindowBuffer + offset, PIPBOY_WINDOW_WIDTH);
         offset -= 9;
         value /= 10;
     }
@@ -778,13 +782,50 @@ static void pipboyDrawDate()
     gameTimeGetDate(&month, &day, &year);
     pipboyDrawNumber(day, 2, PIPBOY_WINDOW_DAY_X, PIPBOY_WINDOW_DAY_Y);
 
-    blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_MONTHS] + 435 * (month - 1), 29, 14, 29, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_MONTH_Y + PIPBOY_WINDOW_MONTH_X, PIPBOY_WINDOW_WIDTH);
+    blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_MONTHS].getData() + 435 * (month - 1), 29, 14, 29, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_MONTH_Y + PIPBOY_WINDOW_MONTH_X, PIPBOY_WINDOW_WIDTH);
 
     pipboyDrawNumber(year, 4, PIPBOY_WINDOW_YEAR_X, PIPBOY_WINDOW_YEAR_Y);
 }
 
 // 0x497A40
 static void pipboyDrawText(const char* text, int flags, int color)
+{
+    if ((flags & PIPBOY_TEXT_STYLE_UNDERLINE) != 0) {
+        color |= FONT_UNDERLINE;
+    }
+
+    int left = 8;
+    if ((flags & PIPBOY_TEXT_NO_INDENT) != 0) {
+        left -= 7;
+    }
+
+    int length = fontGetStringWidth(text);
+
+    if ((flags & PIPBOY_TEXT_ALIGNMENT_CENTER) != 0) {
+        left = (350 - length) / 2;
+    } else if ((flags & PIPBOY_TEXT_ALIGNMENT_RIGHT_COLUMN) != 0) {
+        left += 175;
+    } else if ((flags & PIPBOY_TEXT_ALIGNMENT_LEFT_COLUMN_CENTER) != 0) {
+        left += 86 - length + 16;
+    } else if ((flags & PIPBOY_TEXT_ALIGNMENT_RIGHT_COLUMN_CENTER) != 0) {
+        left += 260 - length;
+    }
+
+    //fontDrawText(gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * (gPipboyCurrentLine * fontGetLineHeight() + PIPBOY_WINDOW_CONTENT_VIEW_Y) + PIPBOY_WINDOW_CONTENT_VIEW_X + left, text, PIPBOY_WINDOW_WIDTH, PIPBOY_WINDOW_WIDTH, color);
+    fontDrawText(gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * (gPipboyCurrentLine * 10 + PIPBOY_WINDOW_CONTENT_VIEW_Y) + PIPBOY_WINDOW_CONTENT_VIEW_X + left, text, PIPBOY_WINDOW_WIDTH, PIPBOY_WINDOW_WIDTH, color);
+
+    if ((flags & PIPBOY_TEXT_STYLE_STRIKE_THROUGH) != 0) {
+        //int top = gPipboyCurrentLine * fontGetLineHeight() + 49;
+        int top = gPipboyCurrentLine * 10 + 49;
+        bufferDrawLine(gPipboyWindowBuffer, PIPBOY_WINDOW_WIDTH, PIPBOY_WINDOW_CONTENT_VIEW_X + left, top, PIPBOY_WINDOW_CONTENT_VIEW_X + left + length, top, color);
+    }
+
+    if (gPipboyCurrentLine < gPipboyLinesCount) {
+        gPipboyCurrentLine += 1;
+    }
+}
+
+static void pipboyDrawTextLegacy(const char* text, int flags, int color)
 {
     if ((flags & PIPBOY_TEXT_STYLE_UNDERLINE) != 0) {
         color |= FONT_UNDERLINE;
@@ -826,7 +867,7 @@ static void pipboyDrawBackButton(int color)
         gPipboyCurrentLine = gPipboyLinesCount;
     }
 
-    blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
+    blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
 
     // BACK
     const char* text = getmsg(&gPipboyMessageList, &gPipboyMessageListItem, 201);
@@ -858,7 +899,7 @@ static void pipboyWindowHandleStatus(int a1)
 {
     if (a1 == 1024) {
         pipboyWindowDestroyButtons();
-        blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+        blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
             PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
             PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
             PIPBOY_WINDOW_WIDTH,
@@ -900,7 +941,7 @@ static void pipboyWindowHandleStatus(int a1)
     if (_stat_flag == 0 && _holo_flag == 0) {
         if (gPipboyQuestLocationsCount != 0 && gPipboyMouseX < 429) {
             soundPlayFile("ib1p1xx1");
-            blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+            blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
                 PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
                 PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
                 PIPBOY_WINDOW_WIDTH,
@@ -909,7 +950,7 @@ static void pipboyWindowHandleStatus(int a1)
             pipboyWindowRenderQuestLocationList(a1);
             pipboyWindowRenderHolodiskList(-1);
             windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
-            coreDelayProcessingEvents(200);
+            inputPauseForTocks(200);
             _stat_flag = 1;
         } else {
             if (gPipboyWindowHolodisksCount != 0 && gPipboyWindowHolodisksCount >= a1 && gPipboyMouseX > 429) {
@@ -928,7 +969,7 @@ static void pipboyWindowHandleStatus(int a1)
                 }
                 _holodisk = index;
 
-                blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+                blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
                     PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
                     PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
                     PIPBOY_WINDOW_WIDTH,
@@ -939,7 +980,7 @@ static void pipboyWindowHandleStatus(int a1)
                 pipboyWindowRenderHolodiskList(a1);
                 pipboyWindowRenderQuestLocationList(-1);
                 windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
-                coreDelayProcessingEvents(200);
+                inputPauseForTocks(200);
                 pipboyWindowDestroyButtons();
                 pipboyRenderHolodiskText();
                 pipboyWindowCreateButtons(0, 0, true);
@@ -957,7 +998,7 @@ static void pipboyWindowHandleStatus(int a1)
             if (gPipboyHolodiskLastPage <= _view_page) {
                 if (a1 != 1026) {
                     soundPlayFile("ib1p1xx1");
-                    blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
+                    blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
 
                     if (gPipboyLinesCount >= 0) {
                         gPipboyCurrentLine = gPipboyLinesCount;
@@ -976,12 +1017,12 @@ static void pipboyWindowHandleStatus(int a1)
                     pipboyDrawText(text2, PIPBOY_TEXT_ALIGNMENT_RIGHT_COLUMN_CENTER, _colorTable[992]);
 
                     windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
-                    coreDelayProcessingEvents(200);
+                    inputPauseForTocks(200);
                     pipboyWindowHandleStatus(1024);
                 }
             } else {
                 soundPlayFile("ib1p1xx1");
-                blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
+                blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
 
                 if (gPipboyLinesCount >= 0) {
                     gPipboyCurrentLine = gPipboyLinesCount;
@@ -1000,7 +1041,7 @@ static void pipboyWindowHandleStatus(int a1)
                 pipboyDrawText(text2, PIPBOY_TEXT_ALIGNMENT_RIGHT_COLUMN_CENTER, _colorTable[992]);
 
                 windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
-                coreDelayProcessingEvents(200);
+                inputPauseForTocks(200);
 
                 _view_page += 1;
 
@@ -1011,7 +1052,7 @@ static void pipboyWindowHandleStatus(int a1)
 
         if (a1 == 1027) {
             soundPlayFile("ib1p1xx1");
-            blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
+            blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
 
             if (gPipboyLinesCount >= 0) {
                 gPipboyCurrentLine = gPipboyLinesCount;
@@ -1030,7 +1071,7 @@ static void pipboyWindowHandleStatus(int a1)
             pipboyDrawText(text2, PIPBOY_TEXT_ALIGNMENT_RIGHT_COLUMN_CENTER, _colorTable[992]);
 
             windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
-            coreDelayProcessingEvents(200);
+            inputPauseForTocks(200);
 
             _view_page -= 1;
 
@@ -1044,7 +1085,7 @@ static void pipboyWindowHandleStatus(int a1)
             }
 
             soundPlayFile("ib1p1xx1");
-            blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
+            blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * 436 + 254, 350, 20, PIPBOY_WINDOW_WIDTH, gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 436 + 254, PIPBOY_WINDOW_WIDTH);
 
             if (gPipboyLinesCount >= 0) {
                 gPipboyCurrentLine = gPipboyLinesCount;
@@ -1063,7 +1104,7 @@ static void pipboyWindowHandleStatus(int a1)
             pipboyDrawText(text2, PIPBOY_TEXT_ALIGNMENT_RIGHT_COLUMN_CENTER, _colorTable[992]);
 
             windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
-            coreDelayProcessingEvents(200);
+            inputPauseForTocks(200);
 
             if (_view_page <= 0) {
                 pipboyWindowHandleStatus(1024);
@@ -1081,7 +1122,7 @@ static void pipboyWindowHandleStatus(int a1)
         soundPlayFile("ib1p1xx1");
         pipboyDrawBackButton(_colorTable[32747]);
         windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
-        coreDelayProcessingEvents(200);
+        inputPauseForTocks(200);
         pipboyWindowHandleStatus(1024);
     }
 
@@ -1113,7 +1154,7 @@ static void pipboyWindowHandleStatus(int a1)
         }
 
         pipboyWindowDestroyButtons();
-        blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+        blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
             PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
             PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
             PIPBOY_WINDOW_WIDTH,
@@ -1248,7 +1289,7 @@ static void pipboyWindowRenderQuestLocationList(int a1)
 // 0x4988A0
 static void pipboyRenderHolodiskText()
 {
-    blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+    blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
         PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
         PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
         PIPBOY_WINDOW_WIDTH,
@@ -1273,7 +1314,7 @@ static void pipboyRenderHolodiskText()
         }
 
         linesCount += 1;
-        if (linesCount >= PIPBOY_HOLODISK_LINES_MAX) {
+        if (linesCount >= pipboyLineMax()) {
             linesCount = 0;
             gPipboyHolodiskLastPage += 1;
         }
@@ -1296,7 +1337,7 @@ static void pipboyRenderHolodiskText()
             }
 
             numberOfLines += 1;
-            if (numberOfLines >= PIPBOY_HOLODISK_LINES_MAX) {
+            if (numberOfLines >= pipboyLineMax()) {
                 page += 1;
                 if (page >= _view_page) {
                     break;
@@ -1330,7 +1371,7 @@ static void pipboyRenderHolodiskText()
         gPipboyCurrentLine = 3;
     }
 
-    for (int line = 0; line < PIPBOY_HOLODISK_LINES_MAX; line += 1) {
+    for (int line = 0; line < pipboyLineMax(); line += 1) {
         const char* text = getmsg(&gPipboyMessageList, &gPipboyMessageListItem, holodiskTextId);
         if (strcmp(text, "**END-DISK**") == 0) {
             break;
@@ -1339,7 +1380,7 @@ static void pipboyRenderHolodiskText()
         if (strcmp(text, "**END-PAR**") == 0) {
             gPipboyCurrentLine += 1;
         } else {
-            pipboyDrawText(text, PIPBOY_TEXT_NO_INDENT, _colorTable[992]);
+            pipboyDrawTextLegacy(text, PIPBOY_TEXT_NO_INDENT, _colorTable[992]);
         }
 
         holodiskTextId += 1;
@@ -1433,7 +1474,7 @@ static void pipboyWindowHandleAutomaps(int a1)
 {
     if (a1 == 1024) {
         pipboyWindowDestroyButtons();
-        blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+        blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
             PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
             PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
             PIPBOY_WINDOW_WIDTH,
@@ -1524,7 +1565,7 @@ static int _PrintAMelevList(int a1)
         }
     }
 
-    blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+    blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
         PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
         PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
         PIPBOY_WINDOW_WIDTH,
@@ -1618,7 +1659,7 @@ static int _PrintAMList(int a1)
             qsort(_sortlist, count, sizeof(*_sortlist), _qscmp);
         }
 
-        blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+        blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
             PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
             PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
             PIPBOY_WINDOW_WIDTH,
@@ -1682,7 +1723,7 @@ static void pipboyHandleVideoArchive(int a1)
 
         fontSetCurrent(101);
 
-        gPipboyLastEventTimestamp = _get_time();
+        gPipboyLastEventTimestamp = getTicks();
         pipboyRenderVideoArchive(-1);
     }
 }
@@ -1698,7 +1739,7 @@ static int pipboyRenderVideoArchive(int a1)
     int v8;
     int v9;
 
-    blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+    blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
         PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
         PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
         PIPBOY_WINDOW_WIDTH,
@@ -1828,7 +1869,7 @@ static void pipboyWindowRenderRestOptions(int a1)
 {
     const char* text;
 
-    blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+    blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
         PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
         PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
         PIPBOY_WINDOW_WIDTH,
@@ -1875,7 +1916,7 @@ static void pipboyDrawHitPoints()
     char msg[64];
     int len;
 
-    blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + 66 * PIPBOY_WINDOW_WIDTH + 254,
+    blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + 66 * PIPBOY_WINDOW_WIDTH + 254,
         350,
         10,
         PIPBOY_WINDOW_WIDTH,
@@ -1895,7 +1936,8 @@ static void pipboyWindowCreateButtons(int start, int count, bool a3)
 {
     fontSetCurrent(101);
 
-    int height = fontGetLineHeight();
+    //int height = fontGetLineHeight();
+    int height = 10;
 
     gPipboyWindowButtonStart = start;
     gPipboyWindowButtonCount = count;
@@ -1966,11 +2008,13 @@ static bool pipboyRest(int hours, int minutes, int duration)
             double v4 = v3 * 20.0;
             int v5 = 0;
             for (int v5 = 0; v5 < (int)v4; v5++) {
+                sharedFpsLimiter.mark();
+
                 if (rc) {
                     break;
                 }
 
-                unsigned int start = _get_time();
+                unsigned int start = getTicks();
 
                 unsigned int v6 = (unsigned int)((double)v5 / v4 * ((double)minutes * 600.0) + (double)gameTime);
                 unsigned int nextEventTime = queueGetNextEventTime();
@@ -1990,7 +2034,7 @@ static bool pipboyRest(int hours, int minutes, int duration)
 
                 if (!rc) {
                     gameTimeSetTime(v6);
-                    if (_get_input() == KEY_ESCAPE || _game_user_wants_to_quit != 0) {
+                    if (inputGetInput() == KEY_ESCAPE || _game_user_wants_to_quit != 0) {
                         rc = true;
                     }
 
@@ -2001,6 +2045,9 @@ static bool pipboyRest(int hours, int minutes, int duration)
                     while (getTicksSince(start) < 50) {
                     }
                 }
+
+                renderPresent();
+                sharedFpsLimiter.throttle();
             }
 
             if (!rc) {
@@ -2023,13 +2070,15 @@ static bool pipboyRest(int hours, int minutes, int duration)
             double v7 = (v2 - v3) * 20.0;
 
             for (int hour = 0; hour < (int)v7; hour++) {
+                sharedFpsLimiter.mark();
+
                 if (rc) {
                     break;
                 }
 
-                unsigned int start = _get_time();
+                unsigned int start = getTicks();
 
-                if (_get_input() == KEY_ESCAPE || _game_user_wants_to_quit != 0) {
+                if (inputGetInput() == KEY_ESCAPE || _game_user_wants_to_quit != 0) {
                     rc = true;
                 }
 
@@ -2067,6 +2116,9 @@ static bool pipboyRest(int hours, int minutes, int duration)
                     while (getTicksSince(start) < 50) {
                     }
                 }
+
+                renderPresent();
+                sharedFpsLimiter.throttle();
             }
 
             if (!rc) {
@@ -2231,7 +2283,7 @@ static int pipboyRenderScreensaver()
         buf,
         PIPBOY_WINDOW_CONTENT_VIEW_WIDTH);
 
-    blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+    blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
         PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
         PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
         PIPBOY_WINDOW_WIDTH,
@@ -2240,10 +2292,12 @@ static int pipboyRenderScreensaver()
 
     int v31 = 50;
     while (true) {
-        unsigned int time = _get_time();
+        sharedFpsLimiter.mark();
+
+        unsigned int time = getTicks();
 
         mouseGetPositionInWindow(gPipboyWindow, &gPipboyMouseX, &gPipboyMouseY);
-        if (_get_input() != -1 || gPipboyPreviousMouseX != gPipboyMouseX || gPipboyPreviousMouseY != gPipboyMouseY) {
+        if (inputGetInput() != -1 || gPipboyPreviousMouseX != gPipboyMouseX || gPipboyPreviousMouseY != gPipboyMouseY) {
             break;
         }
 
@@ -2261,15 +2315,15 @@ static int pipboyRenderScreensaver()
 
             if (index < PIPBOY_BOMB_COUNT) {
                 PipboyBomb* bomb = &(bombs[index]);
-                int v27 = (350 - gPipboyFrmSizes[PIPBOY_FRM_BOMB].width / 4) + (406 - gPipboyFrmSizes[PIPBOY_FRM_BOMB].height / 4);
+                int v27 = (350 - _pipboyFrmImages[PIPBOY_FRM_BOMB].getWidth() / 4) + (406 - _pipboyFrmImages[PIPBOY_FRM_BOMB].getHeight() / 4);
                 int v5 = (int)((double)randomBetween(0, PIPBOY_RAND_MAX) / (double)PIPBOY_RAND_MAX * (double)v27);
-                int v6 = gPipboyFrmSizes[PIPBOY_FRM_BOMB].height / 4;
+                int v6 = _pipboyFrmImages[PIPBOY_FRM_BOMB].getHeight() / 4;
                 if (PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT - v6 >= v5) {
                     bomb->x = 602;
                     bomb->y = v5 + 48;
                 } else {
-                    bomb->x = v5 - (PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT - v6) + PIPBOY_WINDOW_CONTENT_VIEW_X + gPipboyFrmSizes[PIPBOY_FRM_BOMB].width / 4;
-                    bomb->y = PIPBOY_WINDOW_CONTENT_VIEW_Y - gPipboyFrmSizes[PIPBOY_FRM_BOMB].height + 2;
+                    bomb->x = v5 - (PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT - v6) + PIPBOY_WINDOW_CONTENT_VIEW_X + _pipboyFrmImages[PIPBOY_FRM_BOMB].getWidth() / 4;
+                    bomb->y = PIPBOY_WINDOW_CONTENT_VIEW_Y - _pipboyFrmImages[PIPBOY_FRM_BOMB].getHeight() + 2;
                 }
 
                 bomb->field_10 = 1;
@@ -2279,7 +2333,7 @@ static int pipboyRenderScreensaver()
         }
 
         if (v31 == 0) {
-            blitBufferToBuffer(gPipboyFrmData[PIPBOY_FRM_BACKGROUND] + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
+            blitBufferToBuffer(_pipboyFrmImages[PIPBOY_FRM_BACKGROUND].getData() + PIPBOY_WINDOW_WIDTH * PIPBOY_WINDOW_CONTENT_VIEW_Y + PIPBOY_WINDOW_CONTENT_VIEW_X,
                 PIPBOY_WINDOW_CONTENT_VIEW_WIDTH,
                 PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT,
                 PIPBOY_WINDOW_WIDTH,
@@ -2293,15 +2347,15 @@ static int pipboyRenderScreensaver()
                 continue;
             }
 
-            int srcWidth = gPipboyFrmSizes[PIPBOY_FRM_BOMB].width;
-            int srcHeight = gPipboyFrmSizes[PIPBOY_FRM_BOMB].height;
+            int srcWidth = _pipboyFrmImages[PIPBOY_FRM_BOMB].getWidth();
+            int srcHeight = _pipboyFrmImages[PIPBOY_FRM_BOMB].getHeight();
             int destX = bomb->x;
             int destY = bomb->y;
             int srcY = 0;
             int srcX = 0;
 
             if (destX >= PIPBOY_WINDOW_CONTENT_VIEW_X) {
-                if (destX + gPipboyFrmSizes[PIPBOY_FRM_BOMB].width >= 604) {
+                if (destX + _pipboyFrmImages[PIPBOY_FRM_BOMB].getWidth() >= 604) {
                     srcWidth = 604 - destX;
                     if (srcWidth < 1) {
                         bomb->field_10 = 0;
@@ -2309,36 +2363,36 @@ static int pipboyRenderScreensaver()
                 }
             } else {
                 srcX = PIPBOY_WINDOW_CONTENT_VIEW_X - destX;
-                if (srcX >= gPipboyFrmSizes[PIPBOY_FRM_BOMB].width) {
+                if (srcX >= _pipboyFrmImages[PIPBOY_FRM_BOMB].getWidth()) {
                     bomb->field_10 = 0;
                 }
                 destX = PIPBOY_WINDOW_CONTENT_VIEW_X;
-                srcWidth = gPipboyFrmSizes[PIPBOY_FRM_BOMB].width - srcX;
+                srcWidth = _pipboyFrmImages[PIPBOY_FRM_BOMB].getWidth() - srcX;
             }
 
             if (destY >= PIPBOY_WINDOW_CONTENT_VIEW_Y) {
-                if (destY + gPipboyFrmSizes[PIPBOY_FRM_BOMB].height >= 452) {
+                if (destY + _pipboyFrmImages[PIPBOY_FRM_BOMB].getHeight() >= 452) {
                     srcHeight = 452 - destY;
                     if (srcHeight < 1) {
                         bomb->field_10 = 0;
                     }
                 }
             } else {
-                if (destY + gPipboyFrmSizes[PIPBOY_FRM_BOMB].height < PIPBOY_WINDOW_CONTENT_VIEW_Y) {
+                if (destY + _pipboyFrmImages[PIPBOY_FRM_BOMB].getHeight() < PIPBOY_WINDOW_CONTENT_VIEW_Y) {
                     bomb->field_10 = 0;
                 }
 
                 srcY = PIPBOY_WINDOW_CONTENT_VIEW_Y - destY;
-                srcHeight = gPipboyFrmSizes[PIPBOY_FRM_BOMB].height - srcY;
+                srcHeight = _pipboyFrmImages[PIPBOY_FRM_BOMB].getHeight() - srcY;
                 destY = PIPBOY_WINDOW_CONTENT_VIEW_Y;
             }
 
             if (bomb->field_10 == 1 && v31 == 0) {
                 blitBufferToBufferTrans(
-                    gPipboyFrmData[PIPBOY_FRM_BOMB] + gPipboyFrmSizes[PIPBOY_FRM_BOMB].width * srcY + srcX,
+                    _pipboyFrmImages[PIPBOY_FRM_BOMB].getData() + _pipboyFrmImages[PIPBOY_FRM_BOMB].getWidth() * srcY + srcX,
                     srcWidth,
                     srcHeight,
-                    gPipboyFrmSizes[PIPBOY_FRM_BOMB].width,
+                    _pipboyFrmImages[PIPBOY_FRM_BOMB].getWidth(),
                     gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * destY + destX,
                     PIPBOY_WINDOW_WIDTH);
             }
@@ -2358,6 +2412,9 @@ static int pipboyRenderScreensaver()
             while (getTicksSince(time) < 50) {
             }
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     blitBufferToBuffer(buf,
@@ -2578,3 +2635,5 @@ static void holodiskFree()
 
     gHolodisksCount = 0;
 }
+
+} // namespace fallout

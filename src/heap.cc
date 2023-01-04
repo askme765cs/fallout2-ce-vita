@@ -7,6 +7,8 @@
 #include "debug.h"
 #include "memory.h"
 
+namespace fallout {
+
 #define HEAP_BLOCK_HEADER_GUARD (0xDEADC0DE)
 #define HEAP_BLOCK_FOOTER_GUARD (0xACDCACDC)
 
@@ -304,6 +306,8 @@ bool heapBlockAllocate(Heap* heap, int* handleIndexPtr, int size, int a4)
     int state;
     int blockSize;
     HeapHandle* handle;
+
+    size += 4 - size % 4;
 
     if (heap == NULL || handleIndexPtr == NULL || size == 0) {
         goto err;
@@ -1245,3 +1249,5 @@ bool heapValidate(Heap* heap)
 
     return true;
 }
+
+} // namespace fallout

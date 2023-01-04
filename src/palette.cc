@@ -3,10 +3,13 @@
 #include <string.h>
 
 #include "color.h"
-#include "core.h"
 #include "cycle.h"
 #include "debug.h"
 #include "game_sound.h"
+#include "input.h"
+#include "svga.h"
+
+namespace fallout {
 
 static void _palette_reset_();
 
@@ -29,7 +32,7 @@ void paletteInit()
     memset(gPaletteWhite, 63, 256 * 3);
     memcpy(gPalette, _cmap, 256 * 3);
 
-    unsigned int tick = _get_time();
+    unsigned int tick = getTicks();
     if (backgroundSoundIsEnabled() || speechIsEnabled()) {
         colorPaletteSetTransitionCallback(soundContinueAll);
     }
@@ -38,20 +41,14 @@ void paletteInit()
 
     colorPaletteSetTransitionCallback(NULL);
 
-    unsigned int diff = getTicksSince(tick);
+    // Actual fade duration will never be 0 since |colorPaletteFadeBetween| uses
+    // frame rate throttling.
+    unsigned int actualFadeDuration = getTicksSince(tick);
 
-    // NOTE: Modern CPUs are super fast, so it's possible that less than 10ms
-    // (the resolution of underlying GetTicks) is needed to fade between two
-    // palettes, which leads to zero diff, which in turn leads to unpredictable
-    // number of fade steps. To fix that the fallback value is used (46). This
-    // value is commonly seen when running the game in 1 core VM.
-    if (diff == 0) {
-        diff = 46;
-    }
+    // Calculate fade steps needed to perform fading in about 700 ms.
+    gPaletteFadeSteps = 60 * 700 / actualFadeDuration;
 
-    gPaletteFadeSteps = (int)(60.0 / (diff * (1.0 / 700.0)));
-
-    debugPrint("\nFade time is %u\nFade steps are %d\n", diff, gPaletteFadeSteps);
+    debugPrint("\nFade time is %u\nFade steps are %d\n", actualFadeDuration, gPaletteFadeSteps);
 }
 
 // NOTE: Collapsed.
@@ -106,3 +103,5 @@ void paletteSetEntriesInRange(unsigned char* palette, int start, int end)
     memcpy(gPalette + 3 * start, palette, 3 * (end - start + 1));
     _setSystemPaletteEntries(palette, start, end);
 }
+
+} // namespace fallout

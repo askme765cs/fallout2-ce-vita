@@ -33,6 +33,8 @@
 #include "tile.h"
 #include "trait.h"
 
+namespace fallout {
+
 #define ADDICTION_COUNT (9)
 
 // Max number of books that can be loaded from books.ini. This limit is imposed
@@ -199,6 +201,8 @@ int itemsInit()
         return -1;
     }
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_ITEM, &gItemsMessageList);
+
     // SFALL
     booksInit();
     explosionsInit();
@@ -217,6 +221,7 @@ void itemsReset()
 // 0x477148
 void itemsExit()
 {
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_ITEM, nullptr);
     messageListFree(&gItemsMessageList);
 
     // SFALL
@@ -1027,11 +1032,15 @@ int itemGetQuantity(Object* obj, Object* item)
         InventoryItem* inventoryItem = &(inventory->items[index]);
         if (inventoryItem->item == item) {
             quantity = inventoryItem->quantity;
+
+            // SFALL: Fix incorrect value being returned if there is a container
+            // item in the inventory.
+            break;
         } else {
             if (itemGetType(inventoryItem->item) == ITEM_TYPE_CONTAINER) {
                 quantity = itemGetQuantity(inventoryItem->item, item);
                 if (quantity > 0) {
-                    return quantity;
+                    break;
                 }
             }
         }
@@ -1605,7 +1614,7 @@ int weaponGetRange(Object* critter, int hitMode)
         return range;
     }
 
-    if (_critter_flag_check(critter->pid, CRITTER_FLAG_0x2000)) {
+    if (_critter_flag_check(critter->pid, CRITTER_LONG_LIMBS)) {
         return 2;
     }
 
@@ -3603,3 +3612,5 @@ bool itemIsHealing(int pid)
 
     return false;
 }
+
+} // namespace fallout

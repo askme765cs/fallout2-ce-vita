@@ -3,6 +3,8 @@
 
 #include "config.h"
 
+namespace fallout {
+
 #define SFALL_CONFIG_FILE_NAME "ddraw.ini"
 
 #define SFALL_CONFIG_MISC_KEY "Misc"
@@ -56,7 +58,8 @@
 #define SFALL_CONFIG_GAME_DIALOG_FIX_KEY "DialogueFix"
 #define SFALL_CONFIG_TWEAKS_FILE_KEY "TweaksFile"
 #define SFALL_CONFIG_GAME_DIALOG_GENDER_WORDS_KEY "DialogGenderWords"
-#define SFALL_CONFIG_TOWN_MAP_HOTKEYS_FIX "TownMapHotkeysFix"
+#define SFALL_CONFIG_TOWN_MAP_HOTKEYS_FIX_KEY "TownMapHotkeysFix"
+#define SFALL_CONFIG_EXTRA_MESSAGE_LISTS_KEY "ExtraGameMsgFileList"
 
 #define SFALL_CONFIG_BURST_MOD_DEFAULT_CENTER_MULTIPLIER 1
 #define SFALL_CONFIG_BURST_MOD_DEFAULT_CENTER_DIVISOR 3
@@ -68,5 +71,7 @@ extern Config gSfallConfig;
 
 bool sfallConfigInit(int argc, char** argv);
 void sfallConfigExit();
+
+} // namespace fallout
 
 #endif /* SFALL_CONFIG_H */

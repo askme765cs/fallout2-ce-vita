@@ -4,13 +4,16 @@
 #include <string.h>
 
 #include "audio.h"
-#include "core.h"
 #include "db.h"
 #include "debug.h"
 #include "game_sound.h"
+#include "input.h"
 #include "memory.h"
 #include "platform_compat.h"
 #include "sound.h"
+#include "svga.h"
+
+namespace fallout {
 
 static char* _lips_fix_string(const char* fileName, size_t length);
 static int lipsReadV1(LipsData* a1, File* stream);
@@ -168,7 +171,7 @@ int lipsStart()
     int speechVolume = speechGetVolume();
     soundSetVolume(gLipsData.sound, (int)(speechVolume * 0.69));
 
-    _speechStartTime = _get_time();
+    _speechStartTime = getTicks();
 
     if (soundPlay(gLipsData.sound) != 0) {
         debugPrint("Failed play!\n");
@@ -467,3 +470,5 @@ int lipsFree()
 
     return 0;
 }
+
+} // namespace fallout

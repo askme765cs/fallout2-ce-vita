@@ -11,7 +11,6 @@
 #include "debug.h"
 #include "display_monitor.h"
 #include "game.h"
-#include "game_config.h"
 #include "interface.h"
 #include "item.h"
 #include "message.h"
@@ -24,8 +23,11 @@
 #include "proto.h"
 #include "random.h"
 #include "scripts.h"
+#include "settings.h"
 #include "stat.h"
 #include "trait.h"
+
+namespace fallout {
 
 #define SKILLS_MAX_USES_PER_DAY (3)
 
@@ -156,6 +158,8 @@ int skillsInit()
     // NOTE: Uninline.
     skill_use_slot_clear();
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SKILL, &gSkillsMessageList);
+
     return 0;
 }
 
@@ -173,6 +177,7 @@ void skillsReset()
 // 0x4AA478
 void skillsExit()
 {
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SKILL, nullptr);
     messageListFree(&gSkillsMessageList);
 }
 
@@ -710,7 +715,7 @@ int skillUse(Object* obj, Object* a2, int skill, int criticalChanceModifier)
                         // 533: crippled right leg
                         // 534: crippled left leg
                         messageListItem.num = 530 + index;
-                        if (messageListGetItem(&gSkillsMessageList, &messageListItem)) {
+                        if (!messageListGetItem(&gSkillsMessageList, &messageListItem)) {
                             return -1;
                         }
 
@@ -1123,8 +1128,7 @@ int skillGetGameDifficultyModifier(int skill)
     case SKILL_GAMBLING:
     case SKILL_OUTDOORSMAN:
         if (1) {
-            int gameDifficulty = GAME_DIFFICULTY_NORMAL;
-            configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_GAME_DIFFICULTY_KEY, &gameDifficulty);
+            int gameDifficulty = settings.preferences.game_difficulty;
 
             if (gameDifficulty == GAME_DIFFICULTY_HARD) {
                 return -10;
@@ -1216,3 +1220,5 @@ char* skillsGetGenericResponse(Object* critter, bool isDude)
     char* msg = getmsg(&gSkillsMessageList, &messageListItem, baseMessageId + messageId);
     return msg;
 }
+
+} // namespace fallout

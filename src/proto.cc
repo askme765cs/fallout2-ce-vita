@@ -11,16 +11,18 @@
 #include "debug.h"
 #include "dialog.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_movie.h"
 #include "interface.h"
 #include "map.h"
 #include "memory.h"
 #include "object.h"
 #include "perk.h"
+#include "settings.h"
 #include "skill.h"
 #include "stat.h"
 #include "trait.h"
+
+namespace fallout {
 
 static int _proto_critter_init(Proto* a1, int a2);
 static int objectCritterCombatDataRead(CritterCombatData* data, File* stream);
@@ -237,7 +239,7 @@ int _proto_list_str(int pid, char* proto_path)
         *pch = '\0';
     }
 
-    pch = strchr(string, '\n');
+    pch = strpbrk(string, "\r\n");
     if (pch != NULL) {
         *pch = '\0';
     }
@@ -1058,17 +1060,12 @@ int protoGetDataMember(int pid, int member, ProtoDataMemberValue* value)
 // 0x4A0390
 int protoInit()
 {
-    char* master_patches;
     size_t len;
     MessageListItem messageListItem;
     char path[COMPAT_MAX_PATH];
     int i;
 
-    if (!configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &master_patches)) {
-        return -1;
-    }
-
-    sprintf(path, "%s\\proto", master_patches);
+    sprintf(path, "%s\\proto", settings.system.master_patches_path.c_str());
     len = strlen(path);
 
     compat_mkdir(path);
@@ -1112,6 +1109,10 @@ int protoInit()
             debugPrint("\nError: Loading proto message files!");
             return -1;
         }
+    }
+
+    for (i = 0; i < 6; i++) {
+        messageListRepositorySetProtoMessageList(i, &(_proto_msg_files[i]));
     }
 
     _mp_critter_stats_list = _aDrugStatSpecia;
@@ -1184,6 +1185,8 @@ int protoInit()
         gBodyTypeNames[i] = getmsg(&gProtoMessageList, &messageListItem, 400 + i);
     }
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_PROTO, &gProtoMessageList);
+
     return 0;
 }
 
@@ -1221,9 +1224,11 @@ void protoExit()
     }
 
     for (i = 0; i < 6; i++) {
+        messageListRepositorySetProtoMessageList(i, nullptr);
         messageListFree(&(_proto_msg_files[i]));
     }
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_PROTO, nullptr);
     messageListFree(&gProtoMessageList);
 }
 
@@ -1876,3 +1881,5 @@ int _ResetPlayer()
     critterUpdateDerivedStats(gDude);
     return 0;
 }
+
+} // namespace fallout

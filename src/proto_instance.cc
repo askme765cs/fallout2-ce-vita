@@ -32,6 +32,8 @@
 #include "tile.h"
 #include "worldmap.h"
 
+namespace fallout {
+
 static int _obj_remove_from_inven(Object* critter, Object* item);
 static int _obj_use_book(Object* item_obj);
 static int _obj_use_flare(Object* critter_obj, Object* item_obj);
@@ -1360,26 +1362,29 @@ int _obj_use_item_on(Object* a1, Object* a2, Object* a3)
             int flags = a3->flags & OBJECT_IN_ANY_HAND;
             itemRemove(a1, a3, 1);
 
-            Object* v7 = itemReplace(a1, a3, flags);
+            Object* replacedItem = itemReplace(a1, a3, flags);
 
-            int leftItemAction;
-            int rightItemAction;
+            // CE: Fix rare crash when using uninitialized action variables. The
+            // following code is on par with |_obj_use_item| which does not
+            // crash.
             if (a1 == gDude) {
+                int leftItemAction;
+                int rightItemAction;
                 interfaceGetItemActions(&leftItemAction, &rightItemAction);
-            }
 
-            if (v7 == NULL) {
-                if ((flags & OBJECT_IN_LEFT_HAND) != 0) {
-                    leftItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
-                } else if ((flags & OBJECT_IN_RIGHT_HAND) != 0) {
-                    rightItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
-                } else {
-                    leftItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
-                    rightItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                if (replacedItem == NULL) {
+                    if ((flags & OBJECT_IN_LEFT_HAND) != 0) {
+                        leftItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                    } else if ((flags & OBJECT_IN_RIGHT_HAND) != 0) {
+                        rightItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                    } else {
+                        leftItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                        rightItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                    }
                 }
-            }
 
-            interfaceUpdateItems(false, leftItemAction, rightItemAction);
+                interfaceUpdateItems(false, leftItemAction, rightItemAction);
+            }
         }
 
         _obj_destroy(a3);
@@ -2263,3 +2268,5 @@ int _objPMAttemptPlacement(Object* obj, int tile, int elevation)
 
     return 0;
 }
+
+} // namespace fallout

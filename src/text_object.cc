@@ -2,15 +2,18 @@
 
 #include <string.h>
 
-#include "core.h"
 #include "debug.h"
 #include "draw.h"
-#include "game_config.h"
+#include "input.h"
 #include "memory.h"
 #include "object.h"
+#include "settings.h"
+#include "svga.h"
 #include "text_font.h"
 #include "tile.h"
 #include "word_wrap.h"
+
+namespace fallout {
 
 // The maximum number of text objects that can exist at the same time.
 #define TEXT_OBJECTS_MAX_COUNT (20)
@@ -79,18 +82,8 @@ int textObjectsInit(unsigned char* windowBuffer, int width, int height)
 
     tickersAdd(textObjectsTicker);
 
-    double textBaseDelay;
-    if (!configGetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_TEXT_BASE_DELAY_KEY, &textBaseDelay)) {
-        textBaseDelay = 3.5;
-    }
-
-    double textLineDelay;
-    if (!configGetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_TEXT_LINE_DELAY_KEY, &textLineDelay)) {
-        textLineDelay = 1.399993896484375;
-    }
-
-    gTextObjectsBaseDelay = (unsigned int)(textBaseDelay * 1000.0);
-    gTextObjectsLineDelay = (unsigned int)(textLineDelay * 1000.0);
+    gTextObjectsBaseDelay = (unsigned int)(settings.preferences.text_base_delay * 1000.0);
+    gTextObjectsLineDelay = (unsigned int)(settings.preferences.text_line_delay * 1000.0);
 
     gTextObjectsEnabled = true;
     gTextObjectsInitialized = true;
@@ -475,3 +468,5 @@ void textObjectsRemoveByOwner(Object* object)
         }
     }
 }
+
+} // namespace fallout

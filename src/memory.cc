@@ -6,6 +6,8 @@
 
 #include "debug.h"
 
+namespace fallout {
+
 // A special value that denotes a beginning of a memory block data.
 #define MEMORY_BLOCK_HEADER_GUARD (0xFEEDFACE)
 
@@ -79,6 +81,7 @@ static void* memoryBlockMallocImpl(size_t size)
 
     if (size != 0) {
         size += sizeof(MemoryBlockHeader) + sizeof(MemoryBlockFooter);
+        size += sizeof(int) - size % sizeof(int);
 
         unsigned char* block = (unsigned char*)malloc(size);
         if (block != NULL) {
@@ -121,6 +124,7 @@ static void* memoryBlockReallocImpl(void* ptr, size_t size)
 
         if (size != 0) {
             size += sizeof(MemoryBlockHeader) + sizeof(MemoryBlockFooter);
+            size += sizeof(int) - size % sizeof(int);
         }
 
         unsigned char* newBlock = (unsigned char*)realloc(block, size);
@@ -218,3 +222,5 @@ static void memoryBlockValidate(void* block)
         debugPrint("Memory footer stomped.\n");
     }
 }
+
+} // namespace fallout

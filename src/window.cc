@@ -5,18 +5,23 @@
 #include <string.h>
 
 #include "color.h"
-#include "core.h"
 #include "datafile.h"
 #include "draw.h"
 #include "game.h"
+#include "input.h"
 #include "interpreter_lib.h"
+#include "kb.h"
 #include "memory_manager.h"
+#include "mouse.h"
 #include "mouse_manager.h"
 #include "movie.h"
 #include "platform_compat.h"
+#include "svga.h"
 #include "text_font.h"
 #include "widget.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 #define MANAGED_WINDOW_COUNT (16)
 
@@ -486,7 +491,7 @@ bool _windowActivateRegion(const char* regionName, int a2)
 // 0x4B6ED0
 int _getInput()
 {
-    int keyCode = _get_input();
+    int keyCode = inputGetInput();
     if (keyCode == KEY_CTRL_Q || keyCode == KEY_CTRL_X || keyCode == KEY_F10) {
         showQuitConfirmationDialog();
     }
@@ -882,7 +887,7 @@ int _selectWindow(const char* windowName)
         }
     }
 
-    if (!_selectWindowID(index)) {
+    if (_selectWindowID(index)) {
         return index;
     }
 
@@ -1720,7 +1725,7 @@ bool _windowAddButtonGfx(const char* buttonName, char* pressedFileName, char* no
 // 0x4BA11C
 bool _windowAddButtonProc(const char* buttonName, Program* program, int mouseEnterProc, int mouseExitProc, int mouseDownProc, int mouseUpProc)
 {
-    if (gCurrentManagedWindowIndex != -1) {
+    if (gCurrentManagedWindowIndex == -1) {
         return false;
     }
 
@@ -2639,3 +2644,5 @@ void _fillBuf3x3(unsigned char* src, int srcWidth, int srcHeight, unsigned char*
         dest + destWidth * (destHeight - chunkHeight) + (destWidth - chunkWidth),
         destWidth);
 }
+
+} // namespace fallout

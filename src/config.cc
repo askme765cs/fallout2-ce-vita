@@ -11,6 +11,8 @@
 #include "memory.h"
 #include "platform_compat.h"
 
+namespace fallout {
+
 #define CONFIG_FILE_MAX_LINE_LENGTH (256)
 
 // The initial number of sections (or key-value) pairs in the config.
@@ -377,10 +379,25 @@ static bool configParseLine(Config* config, char* string)
         *pch = '\0';
     }
 
-    // Find opening bracket.
-    pch = strchr(string, '[');
-    if (pch != NULL) {
-        char* sectionKey = pch + 1;
+    // CE: Original implementation treats any line with brackets as section key.
+    // The problem can be seen when loading Olympus settings (ddraw.ini), which
+    // contains the following line:
+    //
+    //  ```ini
+    //  VersionString=Olympus 2207 [Complete].
+    //  ```
+    //
+    // It thinks that [Complete] is a start of new section, and puts remaining
+    // keys there.
+
+    // Skip leading whitespace.
+    while (isspace(*string)) {
+        string++;
+    }
+
+    // Check if it's a section key.
+    if (*string == '[') {
+        char* sectionKey = string + 1;
 
         // Find closing bracket.
         pch = strchr(sectionKey, ']');
@@ -469,7 +486,7 @@ static bool configTrimString(char* string)
         return false;
     }
 
-    int length = strlen(string);
+    size_t length = strlen(string);
     if (length == 0) {
         return true;
     }
@@ -547,3 +564,5 @@ bool configSetBool(Config* config, const char* sectionKey, const char* key, bool
 {
     return configSetInt(config, sectionKey, key, value ? 1 : 0);
 }
+
+} // namespace fallout

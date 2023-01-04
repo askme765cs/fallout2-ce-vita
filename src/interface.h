@@ -4,6 +4,8 @@
 #include "db.h"
 #include "obj_types.h"
 
+namespace fallout {
+
 typedef enum Hand {
     // Item1 (Punch)
     HAND_LEFT,
@@ -31,6 +33,11 @@ typedef enum InterfaceItemAction {
 
 extern int gInterfaceBarWindow;
 extern bool gInterfaceBarMode;
+extern int gInterfaceBarWidth;
+extern bool gInterfaceBarIsCustom;
+extern int gInterfaceBarContentOffset;
+extern int gInterfaceSidePanelsImageId;
+extern bool gInterfaceSidePanelsExtendFromScreenEdge;
 
 int interfaceInit();
 void interfaceReset();
@@ -62,5 +69,9 @@ void interfaceBarEndButtonsRenderRedLights();
 int indicatorBarRefresh();
 bool indicatorBarShow();
 bool indicatorBarHide();
+
+unsigned char* customInterfaceBarGetBackgroundImageData();
+
+} // namespace fallout
 
 #endif /* INTERFACE_H */
