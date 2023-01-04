@@ -21,7 +21,16 @@
 #include "window_manager.h"
 #include "window_manager_private.h"
 
+#ifdef __vita__
+#include "input.h"
+#endif
+
 namespace fallout {
+
+#ifdef __vita__
+vita2d_texture *texBuffer;
+uint8_t *palettedTexturePointer;
+#endif
 
 static bool createRenderer(int width, int height);
 static void destroyRenderer();
@@ -290,6 +299,7 @@ int _init_vesa_mode(int width, int height)
 int _GNW95_init_window(int width, int height, bool fullscreen)
 {
 #ifdef __vita__
+
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         return -1;
     }
@@ -339,8 +349,8 @@ int _GNW95_init_window(int width, int height, bool fullscreen)
             return -1;
         }
     }
-
     return 0;
+#endif
 }
 
 // calculate shift for mask
@@ -620,6 +630,7 @@ void _GNW95_MouseShowRect16(unsigned char* src, int srcPitch, int a3, int srcX, 
     destRect.x = destX;
     destRect.y = destY;
     SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
+#endif
 }
 
 // 0x4CBA44

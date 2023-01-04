@@ -28,6 +28,14 @@ namespace fallout {
 
 #define BUTTON_REPEAT_TIME 250
 
+// 0x51E2A0
+extern double gMouseSensitivity;
+
+// 0x6AC7A8
+extern int gMouseCursorX;
+// 0x6AC7A4
+extern int gMouseCursorY;
+
 extern WindowDrawingProc2* _mouse_blit_trans;
 extern WINDOWDRAWINGPROC _mouse_blit;
 

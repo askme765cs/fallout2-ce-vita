@@ -51,7 +51,7 @@ static unsigned char* _mouse_shape = NULL;
 static unsigned char* _mouse_fptr = NULL;
 
 // 0x51E2A0
-static double gMouseSensitivity = 1.0;
+double gMouseSensitivity = 1.0;
 
 // 0x51E2AC
 static int gMouseButtonsState = 0;
@@ -72,10 +72,10 @@ static int _raw_y;
 static int _raw_buttons;
 
 // 0x6AC7A4
-static int gMouseCursorY;
+int gMouseCursorY;
 
 // 0x6AC7A8
-static int gMouseCursorX;
+int gMouseCursorX;
 
 // 0x6AC7AC
 static int _mouse_disabled;

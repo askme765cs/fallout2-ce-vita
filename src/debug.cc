@@ -150,6 +150,8 @@ int debugPrint(const char* format, ...)
     } else {
 #ifdef _DEBUG
 #if defined(__vita__)
+        char string[260];
+        vsprintf(string, format, args);
         sceClibPrintf("%s", string);
 #else
         SDL_LogMessageV(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO, format, args);

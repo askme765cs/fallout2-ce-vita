@@ -1,4 +1,5 @@
 #include "dinput.h"
+#include "mouse.h"
 
 namespace fallout {
 
@@ -32,7 +33,6 @@ extern int screenGetHeight();
 
 #ifdef __vita__
 #include <psp2/kernel/clib.h>
-#include "core.h"
 
 const uint8_t TOUCH_DELAY = 2;
 
