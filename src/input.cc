@@ -1,0 +1,1664 @@
+#include "input.h"
+
+#include <SDL.h>
+
+#include "audio_engine.h"
+#include "color.h"
+#include "dinput.h"
+#include "draw.h"
+#include "kb.h"
+#include "memory.h"
+#include "mouse.h"
+#include "svga.h"
+#include "text_font.h"
+#include "vcr.h"
+#include "win32.h"
+
+namespace fallout {
+
+typedef struct InputEvent {
+    // This is either logical key or input event id, which can be either
+    // character code pressed or some other numbers used throughout the
+    // game interface.
+    int logicalKey;
+    int mouseX;
+    int mouseY;
+} InputEvent;
+
+typedef struct RepeatInfo {
+    // Time when appropriate key was pressed down or -1 if it's up.
+    int tick;
+    int repeatCount;
+} RepeatInfo;
+
+typedef struct TickerListNode {
+    int flags;
+    TickerProc* proc;
+    struct TickerListNode* next;
+} TickerListNode;
+
+static int dequeueInputEvent();
+static void pauseGame();
+static int pauseHandlerDefaultImpl();
+static void screenshotBlitter(unsigned char* src, int src_pitch, int a3, int x, int y, int width, int height, int dest_x, int dest_y);
+static void buildNormalizedQwertyKeys();
+static void _GNW95_process_key(KeyboardData* data);
+
+static void idleImpl();
+
+// 0x51E234
+static IdleFunc* _idle_func = NULL;
+
+// 0x51E238
+static FocusFunc* _focus_func = NULL;
+
+// 0x51E23C
+static int gKeyboardKeyRepeatRate = 80;
+
+// 0x51E240
+static int gKeyboardKeyRepeatDelay = 500;
+
+// A map of SDL_SCANCODE_* constants normalized for QWERTY keyboard.
+//
+// 0x6ABC70
+static int gNormalizedQwertyKeys[SDL_NUM_SCANCODES];
+
+// Ring buffer of input events.
+//
+// Looks like this buffer does not support overwriting of values. Once the
+// buffer is full it will not overwrite values until they are dequeued.
+//
+// 0x6ABD70
+static InputEvent gInputEventQueue[40];
+
+// 0x6ABF50
+static RepeatInfo _GNW95_key_time_stamps[SDL_NUM_SCANCODES];
+
+// 0x6AC750
+static int _input_mx;
+
+// 0x6AC754
+static int _input_my;
+
+// 0x6AC75C
+static bool gPaused;
+
+// 0x6AC760
+static int gScreenshotKeyCode;
+
+// 0x6AC764
+static int _using_msec_timer;
+
+// 0x6AC768
+static int gPauseKeyCode;
+
+// 0x6AC76C
+static ScreenshotHandler* gScreenshotHandler;
+
+// 0x6AC770
+static int gInputEventQueueReadIndex;
+
+// 0x6AC774
+static unsigned char* gScreenshotBuffer;
+
+// 0x6AC778
+static PauseHandler* gPauseHandler;
+
+// 0x6AC77C
+static int gInputEventQueueWriteIndex;
+
+// 0x6AC780
+static bool gRunLoopDisabled;
+
+// 0x6AC784
+static TickerListNode* gTickerListHead;
+
+// 0x6AC788
+static unsigned int gTickerLastTimestamp;
+
+// 0x4C8A70
+int inputInit(int a1)
+{
+    if (!directInputInit()) {
+        return -1;
+    }
+
+    if (keyboardInit() == -1) {
+        return -1;
+    }
+
+    if (mouseInit() == -1) {
+        return -1;
+    }
+
+    if (_GNW95_input_init() == -1) {
+        return -1;
+    }
+
+#ifdef __vita__
+    openController();
+#endif
+
+    buildNormalizedQwertyKeys();
+    _GNW95_clear_time_stamps();
+
+    _using_msec_timer = a1;
+    gInputEventQueueWriteIndex = 0;
+    gInputEventQueueReadIndex = -1;
+    _input_mx = -1;
+    _input_my = -1;
+    gRunLoopDisabled = 0;
+    gPaused = false;
+    gPauseKeyCode = KEY_ALT_P;
+    gPauseHandler = pauseHandlerDefaultImpl;
+    gScreenshotHandler = screenshotHandlerDefaultImpl;
+    gTickerListHead = NULL;
+    gScreenshotKeyCode = KEY_ALT_C;
+
+    // SFALL: Set idle function.
+    // CE: Prevents frying CPU when window is not focused.
+    inputSetIdleFunc(idleImpl);
+
+    return 0;
+}
+
+// 0x4C8B40
+void inputExit()
+{
+    _GNW95_input_init();
+    mouseFree();
+    keyboardFree();
+    directInputFree();
+
+#ifdef __vita__
+    closeController();
+
+    if ( gSdlWindow != nullptr ) {
+        SDL_DestroyWindow( gSdlWindow );
+        gSdlWindow = nullptr;
+    }
+
+    if ( vitaPaletteSurface != nullptr ) {
+        SDL_FreeSurface( vitaPaletteSurface );
+        vitaPaletteSurface = nullptr;
+    }
+
+    vita2d_fini();
+
+    if ( texBuffer != nullptr ) {
+        vita2d_free_texture( texBuffer );
+        texBuffer = nullptr;
+    }
+#endif
+
+    TickerListNode* curr = gTickerListHead;
+    while (curr != NULL) {
+        TickerListNode* next = curr->next;
+        internal_free(curr);
+        curr = next;
+    }
+}
+
+// 0x4C8B78
+int inputGetInput()
+{
+    int v3;
+
+    _GNW95_process_message();
+
+    if (!gProgramIsActive) {
+        _GNW95_lost_focus();
+    }
+
+    _process_bk();
+
+    v3 = dequeueInputEvent();
+    if (v3 == -1 && mouseGetEvent() & 0x33) {
+        mouseGetPosition(&_input_mx, &_input_my);
+        return -2;
+    } else {
+        return _GNW_check_menu_bars(v3);
+    }
+
+    return -1;
+}
+
+// 0x4C8BDC
+void _process_bk()
+{
+    int v1;
+
+    tickersExecute();
+
+    if (vcrUpdate() != 3) {
+        _mouse_info();
+    }
+
+    v1 = _win_check_all_buttons();
+    if (v1 != -1) {
+        enqueueInputEvent(v1);
+        return;
+    }
+
+    v1 = _kb_getch();
+    if (v1 != -1) {
+        enqueueInputEvent(v1);
+        return;
+    }
+}
+
+// 0x4C8C04
+void enqueueInputEvent(int a1)
+{
+    if (a1 == -1) {
+        return;
+    }
+
+    if (a1 == gPauseKeyCode) {
+        pauseGame();
+        return;
+    }
+
+    if (a1 == gScreenshotKeyCode) {
+        takeScreenshot();
+        return;
+    }
+
+    if (gInputEventQueueWriteIndex == gInputEventQueueReadIndex) {
+        return;
+    }
+
+    InputEvent* inputEvent = &(gInputEventQueue[gInputEventQueueWriteIndex]);
+    inputEvent->logicalKey = a1;
+
+    mouseGetPosition(&(inputEvent->mouseX), &(inputEvent->mouseY));
+
+    gInputEventQueueWriteIndex++;
+
+    if (gInputEventQueueWriteIndex == 40) {
+        gInputEventQueueWriteIndex = 0;
+        return;
+    }
+
+    if (gInputEventQueueReadIndex == -1) {
+        gInputEventQueueReadIndex = 0;
+    }
+}
+
+// 0x4C8C9C
+static int dequeueInputEvent()
+{
+    if (gInputEventQueueReadIndex == -1) {
+        return -1;
+    }
+
+    InputEvent* inputEvent = &(gInputEventQueue[gInputEventQueueReadIndex]);
+    int eventCode = inputEvent->logicalKey;
+    _input_mx = inputEvent->mouseX;
+    _input_my = inputEvent->mouseY;
+
+    gInputEventQueueReadIndex++;
+
+    if (gInputEventQueueReadIndex == 40) {
+        gInputEventQueueReadIndex = 0;
+    }
+
+    if (gInputEventQueueReadIndex == gInputEventQueueWriteIndex) {
+        gInputEventQueueReadIndex = -1;
+        gInputEventQueueWriteIndex = 0;
+    }
+
+    return eventCode;
+}
+
+// 0x4C8D04
+void inputEventQueueReset()
+{
+    gInputEventQueueReadIndex = -1;
+    gInputEventQueueWriteIndex = 0;
+}
+
+// 0x4C8D1C
+void tickersExecute()
+{
+    if (gPaused) {
+        return;
+    }
+
+    if (gRunLoopDisabled) {
+        return;
+    }
+
+    gTickerLastTimestamp = SDL_GetTicks();
+
+    TickerListNode* curr = gTickerListHead;
+    TickerListNode** currPtr = &(gTickerListHead);
+
+    while (curr != NULL) {
+        TickerListNode* next = curr->next;
+        if (curr->flags & 1) {
+            *currPtr = next;
+
+            internal_free(curr);
+        } else {
+            curr->proc();
+            currPtr = &(curr->next);
+        }
+        curr = next;
+    }
+}
+
+// 0x4C8D74
+void tickersAdd(TickerProc* proc)
+{
+    TickerListNode* curr = gTickerListHead;
+    while (curr != NULL) {
+        if (curr->proc == proc) {
+            if ((curr->flags & 0x01) != 0) {
+                curr->flags &= ~0x01;
+                return;
+            }
+        }
+        curr = curr->next;
+    }
+
+    curr = (TickerListNode*)internal_malloc(sizeof(*curr));
+    curr->flags = 0;
+    curr->proc = proc;
+    curr->next = gTickerListHead;
+    gTickerListHead = curr;
+}
+
+// 0x4C8DC4
+void tickersRemove(TickerProc* proc)
+{
+    TickerListNode* curr = gTickerListHead;
+    while (curr != NULL) {
+        if (curr->proc == proc) {
+            curr->flags |= 0x01;
+            return;
+        }
+        curr = curr->next;
+    }
+}
+
+// 0x4C8DE4
+void tickersEnable()
+{
+    gRunLoopDisabled = false;
+}
+
+// 0x4C8DF0
+void tickersDisable()
+{
+    gRunLoopDisabled = true;
+}
+
+// 0x4C8DFC
+static void pauseGame()
+{
+    if (!gPaused) {
+        gPaused = true;
+
+        int win = gPauseHandler();
+
+        while (inputGetInput() != KEY_ESCAPE) {
+        }
+
+        gPaused = false;
+        windowDestroy(win);
+    }
+}
+
+// 0x4C8E38
+static int pauseHandlerDefaultImpl()
+{
+    int windowWidth = fontGetStringWidth("Paused") + 32;
+    int windowHeight = 3 * fontGetLineHeight() + 16;
+
+    int win = windowCreate((rectGetWidth(&_scr_size) - windowWidth) / 2,
+        (rectGetHeight(&_scr_size) - windowHeight) / 2,
+        windowWidth,
+        windowHeight,
+        256,
+        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+    if (win == -1) {
+        return -1;
+    }
+
+    windowDrawBorder(win);
+
+    unsigned char* windowBuffer = windowGetBuffer(win);
+    fontDrawText(windowBuffer + 8 * windowWidth + 16,
+        "Paused",
+        windowWidth,
+        windowWidth,
+        _colorTable[31744]);
+
+    _win_register_text_button(win,
+        (windowWidth - fontGetStringWidth("Done") - 16) / 2,
+        windowHeight - 8 - fontGetLineHeight() - 6,
+        -1,
+        -1,
+        -1,
+        KEY_ESCAPE,
+        "Done",
+        0);
+
+    windowRefresh(win);
+
+    return win;
+}
+
+// 0x4C8F34
+void pauseHandlerConfigure(int keyCode, PauseHandler* handler)
+{
+    gPauseKeyCode = keyCode;
+
+    if (handler == NULL) {
+        handler = pauseHandlerDefaultImpl;
+    }
+
+    gPauseHandler = handler;
+}
+
+// 0x4C8F4C
+void takeScreenshot()
+{
+    int width = _scr_size.right - _scr_size.left + 1;
+    int height = _scr_size.bottom - _scr_size.top + 1;
+    gScreenshotBuffer = (unsigned char*)internal_malloc(width * height);
+    if (gScreenshotBuffer == NULL) {
+        return;
+    }
+
+    WINDOWDRAWINGPROC v0 = _scr_blit;
+    _scr_blit = screenshotBlitter;
+
+    WINDOWDRAWINGPROC v2 = _mouse_blit;
+    _mouse_blit = screenshotBlitter;
+
+    WindowDrawingProc2* v1 = _mouse_blit_trans;
+    _mouse_blit_trans = NULL;
+
+    windowRefreshAll(&_scr_size);
+
+    _mouse_blit_trans = v1;
+    _mouse_blit = v2;
+    _scr_blit = v0;
+
+    unsigned char* palette = _getSystemPalette();
+    gScreenshotHandler(width, height, gScreenshotBuffer, palette);
+    internal_free(gScreenshotBuffer);
+}
+
+// 0x4C8FF0
+static void screenshotBlitter(unsigned char* src, int srcPitch, int a3, int srcX, int srcY, int width, int height, int destX, int destY)
+{
+    int destWidth = _scr_size.right - _scr_size.left + 1;
+    blitBufferToBuffer(src + srcPitch * srcY + srcX, width, height, srcPitch, gScreenshotBuffer + destWidth * destY + destX, destWidth);
+}
+
+// 0x4C9048
+int screenshotHandlerDefaultImpl(int width, int height, unsigned char* data, unsigned char* palette)
+{
+    char fileName[16];
+    FILE* stream;
+    int index;
+    unsigned int intValue;
+    unsigned short shortValue;
+
+    for (index = 0; index < 100000; index++) {
+        sprintf(fileName, "scr%.5d.bmp", index);
+
+        stream = compat_fopen(fileName, "rb");
+        if (stream == NULL) {
+            break;
+        }
+
+        fclose(stream);
+    }
+
+    if (index == 100000) {
+        return -1;
+    }
+
+    stream = compat_fopen(fileName, "wb");
+    if (stream == NULL) {
+        return -1;
+    }
+
+    // bfType
+    shortValue = 0x4D42;
+    fwrite(&shortValue, sizeof(shortValue), 1, stream);
+
+    // bfSize
+    // 14 - sizeof(BITMAPFILEHEADER)
+    // 40 - sizeof(BITMAPINFOHEADER)
+    // 1024 - sizeof(RGBQUAD) * 256
+    intValue = width * height + 14 + 40 + 1024;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // bfReserved1
+    shortValue = 0;
+    fwrite(&shortValue, sizeof(shortValue), 1, stream);
+
+    // bfReserved2
+    shortValue = 0;
+    fwrite(&shortValue, sizeof(shortValue), 1, stream);
+
+    // bfOffBits
+    intValue = 14 + 40 + 1024;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // biSize
+    intValue = 40;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // biWidth
+    intValue = width;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // biHeight
+    intValue = height;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // biPlanes
+    shortValue = 1;
+    fwrite(&shortValue, sizeof(shortValue), 1, stream);
+
+    // biBitCount
+    shortValue = 8;
+    fwrite(&shortValue, sizeof(shortValue), 1, stream);
+
+    // biCompression
+    intValue = 0;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // biSizeImage
+    intValue = 0;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // biXPelsPerMeter
+    intValue = 0;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // biYPelsPerMeter
+    intValue = 0;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // biClrUsed
+    intValue = 0;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    // biClrImportant
+    intValue = 0;
+    fwrite(&intValue, sizeof(intValue), 1, stream);
+
+    for (int index = 0; index < 256; index++) {
+        unsigned char rgbReserved = 0;
+        unsigned char rgbRed = palette[index * 3] << 2;
+        unsigned char rgbGreen = palette[index * 3 + 1] << 2;
+        unsigned char rgbBlue = palette[index * 3 + 2] << 2;
+
+        fwrite(&rgbBlue, sizeof(rgbBlue), 1, stream);
+        fwrite(&rgbGreen, sizeof(rgbGreen), 1, stream);
+        fwrite(&rgbRed, sizeof(rgbRed), 1, stream);
+        fwrite(&rgbReserved, sizeof(rgbReserved), 1, stream);
+    }
+
+    for (int y = height - 1; y >= 0; y--) {
+        unsigned char* dataPtr = data + y * width;
+        fwrite(dataPtr, 1, width, stream);
+    }
+
+    fflush(stream);
+    fclose(stream);
+
+    return 0;
+}
+
+// 0x4C9358
+void screenshotHandlerConfigure(int keyCode, ScreenshotHandler* handler)
+{
+    gScreenshotKeyCode = keyCode;
+
+    if (handler == NULL) {
+        handler = screenshotHandlerDefaultImpl;
+    }
+
+    gScreenshotHandler = handler;
+}
+
+// 0x4C9370
+unsigned int getTicks()
+{
+    return SDL_GetTicks();
+}
+
+// 0x4C937C
+void inputPauseForTocks(unsigned int delay)
+{
+    // NOTE: Uninline.
+    unsigned int start = getTicks();
+    unsigned int end = getTicks();
+
+    // NOTE: Uninline.
+    unsigned int diff = getTicksBetween(end, start);
+    while (diff < delay) {
+        _process_bk();
+
+        end = getTicks();
+
+        // NOTE: Uninline.
+        diff = getTicksBetween(end, start);
+    }
+}
+
+// 0x4C93B8
+void inputBlockForTocks(unsigned int ms)
+{
+    unsigned int start = SDL_GetTicks();
+    unsigned int diff;
+    do {
+        // NOTE: Uninline
+        diff = getTicksSince(start);
+    } while (diff < ms);
+}
+
+// 0x4C93E0
+unsigned int getTicksSince(unsigned int start)
+{
+    unsigned int end = SDL_GetTicks();
+
+    // NOTE: Uninline.
+    return getTicksBetween(end, start);
+}
+
+// 0x4C9400
+unsigned int getTicksBetween(unsigned int end, unsigned int start)
+{
+    if (start > end) {
+        return INT_MAX;
+    } else {
+        return end - start;
+    }
+}
+
+// 0x4C9410
+unsigned int _get_bk_time()
+{
+    return gTickerLastTimestamp;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9418
+void inputSetKeyboardKeyRepeatRate(int value)
+{
+    gKeyboardKeyRepeatRate = value;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9420
+int inputGetKeyboardKeyRepeatRate()
+{
+    return gKeyboardKeyRepeatRate;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9428
+void inputSetKeyboardKeyRepeatDelay(int value)
+{
+    gKeyboardKeyRepeatDelay = value;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9430
+int inputGetKeyboardKeyRepeatDelay()
+{
+    return gKeyboardKeyRepeatDelay;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9438
+void inputSetFocusFunc(FocusFunc* func)
+{
+    _focus_func = func;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9440
+FocusFunc* inputGetFocusFunc()
+{
+    return _focus_func;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9448
+void inputSetIdleFunc(IdleFunc* func)
+{
+    _idle_func = func;
+}
+
+// NOTE: Unused.
+//
+// 0x4C9450
+IdleFunc* inputGetIdleFunc()
+{
+    return _idle_func;
+}
+
+// 0x4C9490
+static void buildNormalizedQwertyKeys()
+{
+    int* keys = gNormalizedQwertyKeys;
+    int k;
+
+    keys[SDL_SCANCODE_ESCAPE] = SDL_SCANCODE_ESCAPE;
+    keys[SDL_SCANCODE_1] = SDL_SCANCODE_1;
+    keys[SDL_SCANCODE_2] = SDL_SCANCODE_2;
+    keys[SDL_SCANCODE_3] = SDL_SCANCODE_3;
+    keys[SDL_SCANCODE_4] = SDL_SCANCODE_4;
+    keys[SDL_SCANCODE_5] = SDL_SCANCODE_5;
+    keys[SDL_SCANCODE_6] = SDL_SCANCODE_6;
+    keys[SDL_SCANCODE_7] = SDL_SCANCODE_7;
+    keys[SDL_SCANCODE_8] = SDL_SCANCODE_8;
+    keys[SDL_SCANCODE_9] = SDL_SCANCODE_9;
+    keys[SDL_SCANCODE_0] = SDL_SCANCODE_0;
+
+    switch (gKeyboardLayout) {
+    case 0:
+        k = SDL_SCANCODE_MINUS;
+        break;
+    case 1:
+        k = SDL_SCANCODE_6;
+        break;
+    default:
+        k = SDL_SCANCODE_SLASH;
+        break;
+    }
+    keys[SDL_SCANCODE_MINUS] = k;
+
+    switch (gKeyboardLayout) {
+    case 1:
+        k = SDL_SCANCODE_0;
+        break;
+    default:
+        k = SDL_SCANCODE_EQUALS;
+        break;
+    }
+    keys[SDL_SCANCODE_EQUALS] = k;
+
+    keys[SDL_SCANCODE_BACKSPACE] = SDL_SCANCODE_BACKSPACE;
+    keys[SDL_SCANCODE_TAB] = SDL_SCANCODE_TAB;
+
+    switch (gKeyboardLayout) {
+    case 1:
+        k = SDL_SCANCODE_A;
+        break;
+    default:
+        k = SDL_SCANCODE_Q;
+        break;
+    }
+    keys[SDL_SCANCODE_Q] = k;
+
+    switch (gKeyboardLayout) {
+    case 1:
+        k = SDL_SCANCODE_Z;
+        break;
+    default:
+        k = SDL_SCANCODE_W;
+        break;
+    }
+    keys[SDL_SCANCODE_W] = k;
+
+    keys[SDL_SCANCODE_E] = SDL_SCANCODE_E;
+    keys[SDL_SCANCODE_R] = SDL_SCANCODE_R;
+    keys[SDL_SCANCODE_T] = SDL_SCANCODE_T;
+
+    switch (gKeyboardLayout) {
+    case 0:
+    case 1:
+    case 3:
+    case 4:
+        k = SDL_SCANCODE_Y;
+        break;
+    default:
+        k = SDL_SCANCODE_Z;
+        break;
+    }
+    keys[SDL_SCANCODE_Y] = k;
+
+    keys[SDL_SCANCODE_U] = SDL_SCANCODE_U;
+    keys[SDL_SCANCODE_I] = SDL_SCANCODE_I;
+    keys[SDL_SCANCODE_O] = SDL_SCANCODE_O;
+    keys[SDL_SCANCODE_P] = SDL_SCANCODE_P;
+
+    switch (gKeyboardLayout) {
+    case 0:
+    case 3:
+    case 4:
+        k = SDL_SCANCODE_LEFTBRACKET;
+        break;
+    case 1:
+        k = SDL_SCANCODE_5;
+        break;
+    default:
+        k = SDL_SCANCODE_8;
+        break;
+    }
+    keys[SDL_SCANCODE_LEFTBRACKET] = k;
+
+    switch (gKeyboardLayout) {
+    case 0:
+    case 3:
+    case 4:
+        k = SDL_SCANCODE_RIGHTBRACKET;
+        break;
+    case 1:
+        k = SDL_SCANCODE_MINUS;
+        break;
+    default:
+        k = SDL_SCANCODE_9;
+        break;
+    }
+    keys[SDL_SCANCODE_RIGHTBRACKET] = k;
+
+    keys[SDL_SCANCODE_RETURN] = SDL_SCANCODE_RETURN;
+    keys[SDL_SCANCODE_LCTRL] = SDL_SCANCODE_LCTRL;
+
+    switch (gKeyboardLayout) {
+    case 1:
+        k = SDL_SCANCODE_Q;
+        break;
+    default:
+        k = SDL_SCANCODE_A;
+        break;
+    }
+    keys[SDL_SCANCODE_A] = k;
+
+    keys[SDL_SCANCODE_S] = SDL_SCANCODE_S;
+    keys[SDL_SCANCODE_D] = SDL_SCANCODE_D;
+    keys[SDL_SCANCODE_F] = SDL_SCANCODE_F;
+    keys[SDL_SCANCODE_G] = SDL_SCANCODE_G;
+    keys[SDL_SCANCODE_H] = SDL_SCANCODE_H;
+    keys[SDL_SCANCODE_J] = SDL_SCANCODE_J;
+    keys[SDL_SCANCODE_K] = SDL_SCANCODE_K;
+    keys[SDL_SCANCODE_L] = SDL_SCANCODE_L;
+
+    switch (gKeyboardLayout) {
+    case 0:
+        k = SDL_SCANCODE_SEMICOLON;
+        break;
+    default:
+        k = SDL_SCANCODE_COMMA;
+        break;
+    }
+    keys[SDL_SCANCODE_SEMICOLON] = k;
+
+    switch (gKeyboardLayout) {
+    case 0:
+        k = SDL_SCANCODE_APOSTROPHE;
+        break;
+    case 1:
+        k = SDL_SCANCODE_4;
+        break;
+    default:
+        k = SDL_SCANCODE_MINUS;
+        break;
+    }
+    keys[SDL_SCANCODE_APOSTROPHE] = k;
+
+    switch (gKeyboardLayout) {
+    case 0:
+        k = SDL_SCANCODE_GRAVE;
+        break;
+    case 1:
+        k = SDL_SCANCODE_2;
+        break;
+    case 3:
+    case 4:
+        k = 0;
+        break;
+    default:
+        k = SDL_SCANCODE_RIGHTBRACKET;
+        break;
+    }
+    keys[SDL_SCANCODE_GRAVE] = k;
+
+    keys[SDL_SCANCODE_LSHIFT] = SDL_SCANCODE_LSHIFT;
+
+    switch (gKeyboardLayout) {
+    case 0:
+        k = SDL_SCANCODE_BACKSLASH;
+        break;
+    case 1:
+        k = SDL_SCANCODE_8;
+        break;
+    case 3:
+    case 4:
+        k = SDL_SCANCODE_GRAVE;
+        break;
+    default:
+        k = SDL_SCANCODE_Y;
+        break;
+    }
+    keys[SDL_SCANCODE_BACKSLASH] = k;
+
+    switch (gKeyboardLayout) {
+    case 0:
+    case 3:
+    case 4:
+        k = SDL_SCANCODE_Z;
+        break;
+    case 1:
+        k = SDL_SCANCODE_W;
+        break;
+    default:
+        k = SDL_SCANCODE_Y;
+        break;
+    }
+    keys[SDL_SCANCODE_Z] = k;
+
+    keys[SDL_SCANCODE_X] = SDL_SCANCODE_X;
+    keys[SDL_SCANCODE_C] = SDL_SCANCODE_C;
+    keys[SDL_SCANCODE_V] = SDL_SCANCODE_V;
+    keys[SDL_SCANCODE_B] = SDL_SCANCODE_B;
+    keys[SDL_SCANCODE_N] = SDL_SCANCODE_N;
+
+    switch (gKeyboardLayout) {
+    case 1:
+        k = SDL_SCANCODE_SEMICOLON;
+        break;
+    default:
+        k = SDL_SCANCODE_M;
+        break;
+    }
+    keys[SDL_SCANCODE_M] = k;
+
+    switch (gKeyboardLayout) {
+    case 1:
+        k = SDL_SCANCODE_M;
+        break;
+    default:
+        k = SDL_SCANCODE_COMMA;
+        break;
+    }
+    keys[SDL_SCANCODE_COMMA] = k;
+
+    switch (gKeyboardLayout) {
+    case 1:
+        k = SDL_SCANCODE_COMMA;
+        break;
+    default:
+        k = SDL_SCANCODE_PERIOD;
+        break;
+    }
+    keys[SDL_SCANCODE_PERIOD] = k;
+
+    switch (gKeyboardLayout) {
+    case 0:
+        k = SDL_SCANCODE_SLASH;
+        break;
+    case 1:
+        k = SDL_SCANCODE_PERIOD;
+        break;
+    default:
+        k = SDL_SCANCODE_7;
+        break;
+    }
+    keys[SDL_SCANCODE_SLASH] = k;
+
+    keys[SDL_SCANCODE_RSHIFT] = SDL_SCANCODE_RSHIFT;
+    keys[SDL_SCANCODE_KP_MULTIPLY] = SDL_SCANCODE_KP_MULTIPLY;
+    keys[SDL_SCANCODE_SPACE] = SDL_SCANCODE_SPACE;
+    keys[SDL_SCANCODE_LALT] = SDL_SCANCODE_LALT;
+    keys[SDL_SCANCODE_CAPSLOCK] = SDL_SCANCODE_CAPSLOCK;
+    keys[SDL_SCANCODE_F1] = SDL_SCANCODE_F1;
+    keys[SDL_SCANCODE_F2] = SDL_SCANCODE_F2;
+    keys[SDL_SCANCODE_F3] = SDL_SCANCODE_F3;
+    keys[SDL_SCANCODE_F4] = SDL_SCANCODE_F4;
+    keys[SDL_SCANCODE_F5] = SDL_SCANCODE_F5;
+    keys[SDL_SCANCODE_F6] = SDL_SCANCODE_F6;
+    keys[SDL_SCANCODE_F7] = SDL_SCANCODE_F7;
+    keys[SDL_SCANCODE_F8] = SDL_SCANCODE_F8;
+    keys[SDL_SCANCODE_F9] = SDL_SCANCODE_F9;
+    keys[SDL_SCANCODE_F10] = SDL_SCANCODE_F10;
+    keys[SDL_SCANCODE_NUMLOCKCLEAR] = SDL_SCANCODE_NUMLOCKCLEAR;
+    keys[SDL_SCANCODE_SCROLLLOCK] = SDL_SCANCODE_SCROLLLOCK;
+    keys[SDL_SCANCODE_KP_7] = SDL_SCANCODE_KP_7;
+    keys[SDL_SCANCODE_KP_9] = SDL_SCANCODE_KP_9;
+    keys[SDL_SCANCODE_KP_8] = SDL_SCANCODE_KP_8;
+    keys[SDL_SCANCODE_KP_MINUS] = SDL_SCANCODE_KP_MINUS;
+    keys[SDL_SCANCODE_KP_4] = SDL_SCANCODE_KP_4;
+    keys[SDL_SCANCODE_KP_5] = SDL_SCANCODE_KP_5;
+    keys[SDL_SCANCODE_KP_6] = SDL_SCANCODE_KP_6;
+    keys[SDL_SCANCODE_KP_PLUS] = SDL_SCANCODE_KP_PLUS;
+    keys[SDL_SCANCODE_KP_1] = SDL_SCANCODE_KP_1;
+    keys[SDL_SCANCODE_KP_2] = SDL_SCANCODE_KP_2;
+    keys[SDL_SCANCODE_KP_3] = SDL_SCANCODE_KP_3;
+    keys[SDL_SCANCODE_KP_0] = SDL_SCANCODE_KP_0;
+    keys[SDL_SCANCODE_KP_DECIMAL] = SDL_SCANCODE_KP_DECIMAL;
+    keys[SDL_SCANCODE_F11] = SDL_SCANCODE_F11;
+    keys[SDL_SCANCODE_F12] = SDL_SCANCODE_F12;
+    keys[SDL_SCANCODE_F13] = -1;
+    keys[SDL_SCANCODE_F14] = -1;
+    keys[SDL_SCANCODE_F15] = -1;
+    //keys[DIK_KANA] = -1;
+    //keys[DIK_CONVERT] = -1;
+    //keys[DIK_NOCONVERT] = -1;
+    //keys[DIK_YEN] = -1;
+    keys[SDL_SCANCODE_KP_EQUALS] = -1;
+    //keys[DIK_PREVTRACK] = -1;
+    //keys[DIK_AT] = -1;
+    //keys[DIK_COLON] = -1;
+    //keys[DIK_UNDERLINE] = -1;
+    //keys[DIK_KANJI] = -1;
+    keys[SDL_SCANCODE_STOP] = -1;
+    //keys[DIK_AX] = -1;
+    //keys[DIK_UNLABELED] = -1;
+    keys[SDL_SCANCODE_KP_ENTER] = SDL_SCANCODE_KP_ENTER;
+    keys[SDL_SCANCODE_RCTRL] = SDL_SCANCODE_RCTRL;
+    keys[SDL_SCANCODE_KP_COMMA] = -1;
+    keys[SDL_SCANCODE_KP_DIVIDE] = SDL_SCANCODE_KP_DIVIDE;
+    //keys[DIK_SYSRQ] = 84;
+    keys[SDL_SCANCODE_RALT] = SDL_SCANCODE_RALT;
+    keys[SDL_SCANCODE_HOME] = SDL_SCANCODE_HOME;
+    keys[SDL_SCANCODE_UP] = SDL_SCANCODE_UP;
+    keys[SDL_SCANCODE_PRIOR] = SDL_SCANCODE_PRIOR;
+    keys[SDL_SCANCODE_LEFT] = SDL_SCANCODE_LEFT;
+    keys[SDL_SCANCODE_RIGHT] = SDL_SCANCODE_RIGHT;
+    keys[SDL_SCANCODE_END] = SDL_SCANCODE_END;
+    keys[SDL_SCANCODE_DOWN] = SDL_SCANCODE_DOWN;
+    keys[SDL_SCANCODE_PAGEDOWN] = SDL_SCANCODE_PAGEDOWN;
+    keys[SDL_SCANCODE_INSERT] = SDL_SCANCODE_INSERT;
+    keys[SDL_SCANCODE_DELETE] = SDL_SCANCODE_DELETE;
+    keys[SDL_SCANCODE_LGUI] = -1;
+    keys[SDL_SCANCODE_RGUI] = -1;
+    keys[SDL_SCANCODE_APPLICATION] = -1;
+}
+
+// 0x4C9C20
+int _GNW95_input_init()
+{
+    return 0;
+}
+
+// 0x4C9CF0
+void _GNW95_process_message()
+{
+    // We need to process event loop even if program is not active or keyboard
+    // is disabled, because if we ignore it, we'll never be able to reactivate
+    // it again.
+
+    KeyboardData keyboardData;
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        switch (e.type) {
+        case SDL_MOUSEMOTION:
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_MOUSEBUTTONUP:
+        case SDL_MOUSEWHEEL:
+            handleMouseEvent(&e);
+            break;
+        case SDL_FINGERDOWN:
+        case SDL_FINGERMOTION:
+        case SDL_FINGERUP:
+#ifdef __vita__
+            handleTouchEventDirect(e.tfinger);
+#endif
+            handleTouchEvent(&e);
+            break;
+        case SDL_KEYDOWN:
+        case SDL_KEYUP:
+            if (!keyboardIsDisabled()) {
+                keyboardData.key = e.key.keysym.scancode;
+                keyboardData.down = (e.key.state & SDL_PRESSED) != 0;
+                _GNW95_process_key(&keyboardData);
+            }
+            break;
+        case SDL_WINDOWEVENT:
+            switch (e.window.event) {
+            case SDL_WINDOWEVENT_EXPOSED:
+                windowRefreshAll(&_scr_size);
+                break;
+            case SDL_WINDOWEVENT_SIZE_CHANGED:
+                handleWindowSizeChanged();
+                break;
+            case SDL_WINDOWEVENT_FOCUS_GAINED:
+                gProgramIsActive = true;
+                windowRefreshAll(&_scr_size);
+                audioEngineResume();
+                break;
+            case SDL_WINDOWEVENT_FOCUS_LOST:
+                gProgramIsActive = false;
+                audioEnginePause();
+                break;
+            }
+            break;
+        case SDL_QUIT:
+            exit(EXIT_SUCCESS);
+            break;
+#ifdef __vita__
+        case SDL_CONTROLLERDEVICEREMOVED:
+            if (gameController != nullptr) {
+                const SDL_GameController* removedController = SDL_GameControllerFromInstanceID(e.jdevice.which);
+                if (removedController == gameController) {
+                    SDL_GameControllerClose(gameController);
+                    gameController = nullptr;
+                }
+            }
+            break;
+        case SDL_CONTROLLERDEVICEADDED:
+            if (gameController == nullptr) {
+                gameController = SDL_GameControllerOpen(e.jdevice.which);
+            }
+            break;
+        case SDL_CONTROLLERAXISMOTION:
+            handleControllerAxisEvent(e.caxis);
+            break;
+        case SDL_CONTROLLERBUTTONDOWN:
+        case SDL_CONTROLLERBUTTONUP:
+            handleControllerButtonEvent(e.cbutton);
+            break;
+#endif
+        }
+    }
+
+#ifdef __vita__
+    if (ime_active) {
+        sceImeUpdate();
+    }
+    mapScroll(mapXScroll, mapYScroll);
+#endif
+
+    if (gProgramIsActive && !keyboardIsDisabled()) {
+        // NOTE: Uninline
+        int tick = getTicks();
+
+        for (int key = 0; key < SDL_NUM_SCANCODES; key++) {
+            RepeatInfo* ptr = &(_GNW95_key_time_stamps[key]);
+            if (ptr->tick != -1) {
+                int elapsedTime = ptr->tick > tick ? INT_MAX : tick - ptr->tick;
+                int delay = ptr->repeatCount == 0 ? gKeyboardKeyRepeatDelay : gKeyboardKeyRepeatRate;
+                if (elapsedTime > delay) {
+                    keyboardData.key = key;
+                    keyboardData.down = 1;
+                    _GNW95_process_key(&keyboardData);
+
+                    ptr->tick = tick;
+                    ptr->repeatCount++;
+                }
+            }
+        }
+    }
+}
+
+// 0x4C9DF0
+void _GNW95_clear_time_stamps()
+{
+    for (int index = 0; index < SDL_NUM_SCANCODES; index++) {
+        _GNW95_key_time_stamps[index].tick = -1;
+        _GNW95_key_time_stamps[index].repeatCount = 0;
+    }
+}
+
+// 0x4C9E14
+static void _GNW95_process_key(KeyboardData* data)
+{
+    // Use originally pressed scancode, not qwerty-remapped one, for tracking
+    // timestamps, see usage from |_GNW95_process_message|.
+    int scanCode = data->key;
+
+    data->key = gNormalizedQwertyKeys[data->key];
+
+    if (gVcrState == VCR_STATE_PLAYING) {
+        if ((gVcrTerminateFlags & VCR_TERMINATE_ON_KEY_PRESS) != 0) {
+            gVcrPlaybackCompletionReason = VCR_PLAYBACK_COMPLETION_REASON_TERMINATED;
+            vcrStop();
+        }
+    } else {
+        RepeatInfo* ptr = &(_GNW95_key_time_stamps[scanCode]);
+        if (data->down == 1) {
+            ptr->tick = getTicks();
+            ptr->repeatCount = 0;
+        } else {
+            ptr->tick = -1;
+        }
+
+        // Ignore keys which were remapped to -1.
+        if (data->key == -1) {
+            return;
+        }
+
+        _kb_simulate_key(data);
+    }
+}
+
+// 0x4C9EEC
+void _GNW95_lost_focus()
+{
+    if (_focus_func != NULL) {
+        _focus_func(false);
+    }
+
+    while (!gProgramIsActive) {
+        _GNW95_process_message();
+
+        if (_idle_func != NULL) {
+            _idle_func();
+        }
+    }
+
+    if (_focus_func != NULL) {
+        _focus_func(true);
+    }
+}
+
+static void idleImpl()
+{
+    SDL_Delay(125);
+}
+
+#ifdef __vita__
+void renderVita2dFrame(SDL_Surface *surface)
+{
+    memcpy(palettedTexturePointer, surface->pixels, surface->w * surface->h * sizeof(uint8_t));
+    vita2d_start_drawing();
+    vita2d_draw_rectangle(0, 0, VITA_FULLSCREEN_WIDTH, VITA_FULLSCREEN_HEIGHT, 0xff000000);
+    vita2d_draw_texture_scale(texBuffer, renderRect.x, renderRect.y, (float)(renderRect.w) / surface->w, (float)(renderRect.h) / surface->h);
+    vita2d_end_drawing();
+    vita2d_swap_buffers();
+}
+
+void updateVita2dPalette(SDL_Color *colors, int start, int count)
+{
+    uint32_t palette32Bit[count];
+
+    if (vitaPaletteSurface == NULL) {
+        vitaPaletteSurface = SDL_CreateRGBSurface(0, 1, 1, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
+    }
+
+    for ( size_t i = 0; i < count; ++i ) {
+        palette32Bit[i] = SDL_MapRGBA(vitaPaletteSurface->format, colors[i].r, colors[i].g, colors[i].b, colors[i].a);
+    }
+
+    memcpy(vita2d_texture_get_palette(texBuffer) + start * sizeof(uint32_t), palette32Bit, sizeof(uint32_t) * count);
+}
+
+void setRenderRect(int width, int height, bool fullscreen)
+{
+    renderRect.x = 0;
+    renderRect.y = 0;
+    renderRect.w = width;
+    renderRect.h = height;
+    vita2d_texture_set_filters(texBuffer, SCE_GXM_TEXTURE_FILTER_POINT, SCE_GXM_TEXTURE_FILTER_POINT);
+
+    if (width != VITA_FULLSCREEN_WIDTH || height != VITA_FULLSCREEN_HEIGHT)	{
+        if (fullscreen) {
+            //resize to fullscreen
+            if ((static_cast<float>(VITA_FULLSCREEN_WIDTH) / VITA_FULLSCREEN_HEIGHT) >= (static_cast<float>(width) / height)) {
+                float scale = static_cast<float>(VITA_FULLSCREEN_HEIGHT) / height;
+                renderRect.w = width * scale;
+                renderRect.h = VITA_FULLSCREEN_HEIGHT;
+                renderRect.x = (VITA_FULLSCREEN_WIDTH - renderRect.w) / 2;
+            } else {
+                float scale = static_cast<float>(VITA_FULLSCREEN_WIDTH) / width;
+                renderRect.w = VITA_FULLSCREEN_WIDTH;
+                renderRect.h = height * scale;
+                renderRect.y = (VITA_FULLSCREEN_HEIGHT - renderRect.h) / 2;
+            }
+
+            vita2d_texture_set_filters(texBuffer, SCE_GXM_TEXTURE_FILTER_LINEAR, SCE_GXM_TEXTURE_FILTER_LINEAR);
+        } else {
+            //center game area
+            renderRect.x = (VITA_FULLSCREEN_WIDTH - width) / 2;
+            renderRect.y = (VITA_FULLSCREEN_HEIGHT - height) / 2;
+        }
+    }
+}
+
+void openController()
+{
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (SDL_IsGameController(i)) {
+            gameController = SDL_GameControllerOpen(i);
+        }
+    }
+}
+
+void closeController()
+{
+    if (SDL_GameControllerGetAttached(gameController)) {
+        SDL_GameControllerClose(gameController);
+        gameController = nullptr;
+    }
+}
+
+void handleTouchEventDirect(const SDL_TouchFingerEvent& event)
+{
+    // ignore back touchpad
+    if (event.touchId == 0 && frontTouchpadMode != TouchpadMode::TOUCH_DIRECT || event.touchId == 1) {
+        return;
+    }
+
+    if (event.type == SDL_FINGERDOWN) {
+        ++numTouches;
+        if (numTouches == 1) {
+            delayedTouch = 0;
+            firstFingerId = event.fingerId;
+        }
+    } else if (event.type == SDL_FINGERUP) {
+        --numTouches;
+    }
+
+    if (firstFingerId == event.fingerId) {
+        int width = screenGetWidth();
+        int height = screenGetHeight();
+
+        int touchPosX = static_cast<float>(VITA_FULLSCREEN_WIDTH * event.x - renderRect.x) *
+                                    (static_cast<float>(width) / renderRect.w);
+        int touchPosY = static_cast<float>(VITA_FULLSCREEN_HEIGHT * event.y - renderRect.y) *
+                                    (static_cast<float>(height) / renderRect.h);
+
+        gTouchMouseDeltaX = touchPosX - gMouseCursorX;
+        gTouchMouseDeltaY = touchPosY - gMouseCursorY;
+    }
+}
+
+void processControllerAxisMotion()
+{
+    const uint32_t currentTime = SDL_GetTicks();
+    const float deltaTime = currentTime - lastControllerTime;
+    lastControllerTime = currentTime;
+
+    if (controllerLeftXAxis != 0 || controllerLeftYAxis != 0) {
+        const int16_t xSign = (controllerLeftXAxis > 0) - (controllerLeftXAxis < 0);
+        const int16_t ySign = (controllerLeftYAxis > 0) - (controllerLeftYAxis < 0);
+
+        gTouchMouseDeltaX += std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
+                            * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
+        gTouchMouseDeltaY += std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
+                            * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
+    }
+}
+
+void handleControllerAxisEvent(const SDL_ControllerAxisEvent& motion)
+{
+    if (motion.axis == SDL_CONTROLLER_AXIS_LEFTX) {
+        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE)
+            controllerLeftXAxis = motion.value;
+        else
+            controllerLeftXAxis = 0;
+    } else if (motion.axis == SDL_CONTROLLER_AXIS_LEFTY) {
+        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE)
+            controllerLeftYAxis = motion.value;
+        else
+            controllerLeftYAxis = 0;
+    } else if (motion.axis == SDL_CONTROLLER_AXIS_RIGHTX) {
+        if (std::abs(motion.value) > CONTROLLER_R_DEADZONE)
+            controllerRightXAxis = motion.value;
+        else
+            controllerRightXAxis = 0;
+    } else if (motion.axis == SDL_CONTROLLER_AXIS_RIGHTY) {
+        if (std::abs(motion.value) > CONTROLLER_R_DEADZONE)
+            controllerRightYAxis = motion.value;
+        else
+            controllerRightYAxis = 0;
+    }
+
+    //map scroll
+    if (controllerRightXAxis > CONTROLLER_R_DEADZONE)
+    {
+        mapXScroll = 1;
+    }
+    else if (mapXScroll == 1)
+    {
+        mapXScroll = 0;
+    }
+
+    if (controllerRightXAxis < -CONTROLLER_R_DEADZONE)
+    {
+        mapXScroll = -1;
+    }
+    else if (mapXScroll == -1)
+    {
+        mapXScroll = 0;
+    }
+
+    if (controllerRightYAxis > CONTROLLER_R_DEADZONE)
+    {
+        mapYScroll = 1;
+    }
+    else if (mapYScroll == 1)
+    {
+        mapYScroll = 0;
+    }
+
+    if (controllerRightYAxis < -CONTROLLER_R_DEADZONE)
+    {
+        mapYScroll = -1;
+    }
+    else if (mapYScroll == -1)
+    {
+        mapYScroll = 0;
+    }
+}
+
+void handleControllerButtonEvent(const SDL_ControllerButtonEvent& button)
+{
+    KeyboardData keyboardData;
+
+    switch (button.button) {
+    case SDL_CONTROLLER_BUTTON_X:
+        // skills
+        keyboardData.key = SDL_SCANCODE_S;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
+        break;
+    case SDL_CONTROLLER_BUTTON_Y:
+        // inventory
+        keyboardData.key = SDL_SCANCODE_I;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
+        break;
+    case SDL_CONTROLLER_BUTTON_BACK:
+        // Esc (menu)
+        keyboardData.key = SDL_SCANCODE_ESCAPE;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
+        break;
+    case SDL_CONTROLLER_BUTTON_START:
+        // virtual keyboard
+        if (button.type == SDL_CONTROLLERBUTTONUP)
+        {
+            vitaActivateIme();
+        }
+        break;
+    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+        if (SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B))
+        {
+            if (button.state == SDL_PRESSED)
+            {
+                // Quick save
+                keyboardData.key = SDL_SCANCODE_F6;
+                keyboardData.down = 1;
+                _GNW95_process_key(&keyboardData);
+                keyboardData.down = 0;
+                _GNW95_process_key(&keyboardData);
+            }
+        }
+        else
+        {
+            // change active item
+            keyboardData.key = SDL_SCANCODE_B;
+            keyboardData.down = (button.state & SDL_PRESSED) != 0;
+            _GNW95_process_key(&keyboardData);
+        }
+        break;
+    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+        if (SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B))
+        {
+            if (button.state == SDL_PRESSED)
+            {
+                // Quick load
+                keyboardData.key = SDL_SCANCODE_F7;
+                keyboardData.down = 1;
+                _GNW95_process_key(&keyboardData);
+                keyboardData.down = 0;
+                _GNW95_process_key(&keyboardData);
+            }
+        }
+
+        // cursor speedup
+        if (button.type == SDL_CONTROLLERBUTTONDOWN) {
+            cursorSpeedup = 2.0f;
+        } else {
+            cursorSpeedup = 1.0f;
+        }
+        break;
+    case SDL_CONTROLLER_BUTTON_DPAD_UP:
+        // character sheet
+        keyboardData.key = SDL_SCANCODE_C;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
+        break;
+    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+        // pipboy
+        keyboardData.key = SDL_SCANCODE_P;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
+        break;
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+        // start combat
+        keyboardData.key = SDL_SCANCODE_A;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
+        break;
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+        // newt turn
+        keyboardData.key = SDL_SCANCODE_SPACE;
+        keyboardData.down = (button.state & SDL_PRESSED) != 0;
+        _GNW95_process_key(&keyboardData);
+        break;
+    default:
+        break;
+    }
+}
+
+void vitaActivateIme()
+{
+    if (!ime_active)
+    {
+        SceUInt32 libime_work[SCE_IME_WORK_BUFFER_SIZE / sizeof(SceInt32)];
+        SceImeParam param;
+
+        sceImeParamInit(&param);
+
+        SDL_memset(libime_out, 0, ((SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1) * sizeof(SceWChar16)));
+
+        param.supportedLanguages = SCE_IME_LANGUAGE_ENGLISH_US;
+        param.languagesForced = SCE_FALSE;
+        param.type = SCE_IME_TYPE_BASIC_LATIN;
+        param.option = SCE_IME_OPTION_NO_ASSISTANCE;
+        param.inputTextBuffer = libime_out;
+        param.maxTextLength = SCE_IME_MAX_TEXT_LENGTH;
+        param.handler = vitaImeEventHandler;
+        param.filter = NULL;
+        param.initialText = (SceWChar16 *)libime_initval;
+        param.arg = NULL;
+        param.work = libime_work;
+
+        int res = sceImeOpen(&param);
+        if (res < 0) {
+            sceClibPrintf("Failed to init IME\n");
+        }
+        ime_active = 1;
+    }
+}
+
+void vitaImeEventHandler(void *arg, const SceImeEventData *e)
+{
+    switch (e->id) {
+        case SCE_IME_EVENT_UPDATE_TEXT:
+            if (e->param.text.caretIndex == 0)
+            {
+                SDL_Event nevent;
+                nevent.type = SDL_KEYDOWN;
+                nevent.key.state = SDL_PRESSED;
+                nevent.key.keysym.sym = SDLK_BACKSPACE;
+                nevent.key.keysym.scancode = SDL_SCANCODE_BACKSPACE;
+                nevent.key.keysym.mod = KMOD_NONE;
+                SDL_PushEvent(&nevent);
+
+                nevent.type = SDL_KEYUP;
+                nevent.key.state = SDL_RELEASED;
+                nevent.key.keysym.sym = SDLK_BACKSPACE;
+                nevent.key.keysym.scancode = SDL_SCANCODE_BACKSPACE;
+                nevent.key.keysym.mod = KMOD_NONE;
+                SDL_PushEvent(&nevent);
+                sceImeSetText((SceWChar16 *)libime_initval, 4);
+            }
+            else
+            {
+                uint16_t lower = sceClibTolower(*(SceWChar16 *)&libime_out[1]);
+
+                if (lower > 0)
+                {
+                    SDL_Event nevent;
+                    nevent.type = SDL_KEYDOWN;
+                    nevent.key.state = SDL_PRESSED;
+                    nevent.key.keysym.sym = lower;
+                    nevent.key.keysym.scancode = SDL_GetScancodeFromKey(lower);
+                    nevent.key.keysym.mod = KMOD_NONE;
+                    SDL_PushEvent(&nevent);
+
+                    nevent.type = SDL_KEYUP;
+                    nevent.key.state = SDL_RELEASED;
+                    nevent.key.keysym.sym = lower;
+                    nevent.key.keysym.scancode = SDL_GetScancodeFromKey(lower);
+                    nevent.key.keysym.mod = KMOD_NONE;
+                    SDL_PushEvent(&nevent);
+                }
+
+                SDL_memset(&caret_rev, 0, sizeof(SceImeCaret));
+                SDL_memset(libime_out, 0, ((SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1) * sizeof(SceWChar16)));
+                caret_rev.index = 1;
+                sceImeSetCaret(&caret_rev);
+                sceImeSetText((SceWChar16 *)libime_initval, 4);
+            }
+            break;
+        case SCE_IME_EVENT_PRESS_ENTER:
+        {
+            SDL_Event nevent;
+            nevent.type = SDL_KEYDOWN;
+            nevent.key.state = SDL_PRESSED;
+            nevent.key.keysym.sym = SDLK_RETURN;
+            nevent.key.keysym.scancode = SDL_SCANCODE_RETURN;
+            nevent.key.keysym.mod = KMOD_NONE;
+            SDL_PushEvent(&nevent);
+
+            nevent.type = SDL_KEYUP;
+            nevent.key.state = SDL_RELEASED;
+            nevent.key.keysym.sym = SDLK_RETURN;
+            nevent.key.keysym.scancode = SDL_SCANCODE_RETURN;
+            nevent.key.keysym.mod = KMOD_NONE;
+            SDL_PushEvent(&nevent);
+            break;
+        }
+        case SCE_IME_EVENT_PRESS_CLOSE:
+            sceImeClose();
+            ime_active = 0;
+            break;
+    }
+}
+#endif
+
+} // namespace fallout
