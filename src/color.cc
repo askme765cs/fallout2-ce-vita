@@ -211,13 +211,17 @@ void colorPaletteFadeBetween(unsigned char* oldPalette, unsigned char* newPalett
         }
 
         _setSystemPalette(palette);
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
     sharedFpsLimiter.mark();
     _setSystemPalette(newPalette);
-    renderPresent();
+    #ifndef __vita__
+            renderPresent();
+#endif
     sharedFpsLimiter.throttle();
 }
 

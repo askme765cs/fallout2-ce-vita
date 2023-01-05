@@ -130,7 +130,9 @@ int skilldexOpen()
             rc = keyCode - 500;
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

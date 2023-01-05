@@ -1471,7 +1471,9 @@ int gameDialogShowReview()
             }
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -1976,7 +1978,9 @@ int _gdProcess()
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -2525,7 +2529,9 @@ void gameDialogWaitForFidgetToComplete()
             gGameDialogFidgetFrmCurrentFrame++;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -2923,7 +2929,9 @@ void _gdialog_scroll_subwin(int win, int a2, unsigned char* a3, unsigned char* a
             while (getTicksSince(tick) < 33) {
             }
 
+    #ifndef __vita__
             renderPresent();
+#endif
             sharedFpsLimiter.throttle();
         }
     } else {
@@ -2963,7 +2971,9 @@ void _gdialog_scroll_subwin(int win, int a2, unsigned char* a3, unsigned char* a
             while (getTicksSince(tick) < 33) {
             }
 
+    #ifndef __vita__
             renderPresent();
+#endif
             sharedFpsLimiter.throttle();
         }
     }
@@ -3667,7 +3677,9 @@ void partyMemberControlWindowHandleEvents()
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 }
@@ -3864,7 +3876,9 @@ void partyMemberCustomizationWindowHandleEvents()
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 }
@@ -4126,7 +4140,9 @@ int _gdCustomSelect(int a1)
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

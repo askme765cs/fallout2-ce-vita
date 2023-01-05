@@ -479,8 +479,9 @@ void automapShow(bool isInGame, bool isUsingScanner)
             automapRenderInMapWindow(window, elevation, frmImages[AUTOMAP_FRM_BACKGROUND].getData(), gAutomapFlags);
             needsRefresh = false;
         }
-
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

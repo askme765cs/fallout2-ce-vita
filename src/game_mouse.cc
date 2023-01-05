@@ -1161,7 +1161,9 @@ void _gmouse_handle_event(int mouseX, int mouseY, int mouseState)
                             v33 = v47;
                         }
 
+#ifndef __vita__
                         renderPresent();
+#endif
                         sharedFpsLimiter.throttle();
                     }
 
@@ -2458,7 +2460,9 @@ static void customMouseModeFrmsInit()
 void gameMouseRefreshImmediately()
 {
     gameMouseRefresh();
-    renderPresent();
+    #ifndef __vita__
+            renderPresent();
+#endif
 }
 
 } // namespace fallout

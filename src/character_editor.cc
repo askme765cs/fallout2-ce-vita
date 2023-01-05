@@ -1169,7 +1169,9 @@ int characterEditorShow(bool isCreationMode)
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -1993,7 +1995,9 @@ static int _get_input_str(int win, int cancelKeyCode, char* text, int maxLength,
 
         while (getTicksSince(_frame_time) < 1000 / 24) { }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -2278,7 +2282,9 @@ static void characterEditorDrawBigNumber(int x, int y, int flags, int value, int
                     onesBufferPtr,
                     windowWidth);
                 windowRefreshRect(windowHandle, &rect);
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 while (getTicksSince(_frame_time) < BIG_NUM_ANIMATION_DELAY)
                     ;
             }
@@ -2290,7 +2296,9 @@ static void characterEditorDrawBigNumber(int x, int y, int flags, int value, int
                 onesBufferPtr,
                 windowWidth);
             windowRefreshRect(windowHandle, &rect);
+    #ifndef __vita__
             renderPresent();
+#endif
 
             if (previousValue / 10 != tens) {
                 _frame_time = getTicks();
@@ -2301,7 +2309,9 @@ static void characterEditorDrawBigNumber(int x, int y, int flags, int value, int
                     tensBufferPtr,
                     windowWidth);
                 windowRefreshRect(windowHandle, &rect);
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 while (getTicksSince(_frame_time) < BIG_NUM_ANIMATION_DELAY)
                     ;
             }
@@ -2313,7 +2323,9 @@ static void characterEditorDrawBigNumber(int x, int y, int flags, int value, int
                 tensBufferPtr,
                 windowWidth);
             windowRefreshRect(windowHandle, &rect);
+    #ifndef __vita__
             renderPresent();
+#endif
         } else {
             blitBufferToBuffer(numbersGraphicBufferPtr + BIG_NUM_WIDTH * tens,
                 BIG_NUM_WIDTH,
@@ -3582,7 +3594,9 @@ static int characterEditorEditAge()
                     break;
                 }
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             }
         } else {
@@ -3592,7 +3606,9 @@ static int characterEditorEditAge()
                 ;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -3742,7 +3758,9 @@ static void characterEditorEditGender()
         while (getTicksSince(_frame_time) < 41)
             ;
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -3826,7 +3844,9 @@ static void characterEditorAdjustPrimaryStat(int eventCode)
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     } while (inputGetInput() != 518 && cont);
 
@@ -4224,8 +4244,9 @@ static int characterEditorShowOptions()
             }
 
             windowRefresh(win);
-
+    #ifndef __vita__
             renderPresent();
+#endif
             sharedFpsLimiter.throttle();
         }
 
@@ -5336,7 +5357,9 @@ static void characterEditorHandleAdjustSkillButtonPressed(int keyCode)
 
             int keyCode = inputGetInput();
             if (keyCode != 522 && keyCode != 524 && rc != -1) {
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
                 continue;
             }
@@ -6198,7 +6221,9 @@ static int perkDialogHandleInput(int count, void (*refreshProc)())
                         }
                     }
 
-                    renderPresent();
+    #ifndef __vita__
+            renderPresent();
+#endif
                     sharedFpsLimiter.throttle();
                 } while (inputGetInput() != 574);
 
@@ -6245,7 +6270,9 @@ static int perkDialogHandleInput(int count, void (*refreshProc)())
                             }
                         }
 
-                        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                         sharedFpsLimiter.throttle();
                     } while (inputGetInput() != 575);
                 } else {
@@ -6281,7 +6308,9 @@ static int perkDialogHandleInput(int count, void (*refreshProc)())
                             }
                         }
 
-                        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                         sharedFpsLimiter.throttle();
                     } while (inputGetInput() != 575);
                 }
@@ -6311,7 +6340,9 @@ static int perkDialogHandleInput(int count, void (*refreshProc)())
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

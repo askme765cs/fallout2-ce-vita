@@ -240,7 +240,9 @@ int characterSelectorOpen()
             break;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

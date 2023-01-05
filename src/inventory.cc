@@ -686,7 +686,9 @@ void inventoryOpen()
             }
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -2361,7 +2363,9 @@ static void _inven_pickup(int keyCode, int a2)
         inputGetInput();
         _display_body(-1, INVENTORY_WINDOW_TYPE_NORMAL);
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     } while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0);
 
@@ -2739,7 +2743,9 @@ void inventoryOpenUseItemOn(Object* a1)
             break;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -3721,7 +3727,9 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
             return;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     } while ((mouseState & MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT) != MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT);
 
@@ -3851,7 +3859,9 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
             previousMouseY = y;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -4415,7 +4425,9 @@ int inventoryOpenLooting(Object* a1, Object* a2)
             break;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -4574,7 +4586,9 @@ static int _move_inventory(Object* a1, int a2, Object* a3, bool a4)
 
         inputGetInput();
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     } while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0);
 
@@ -4794,7 +4808,9 @@ static void _barter_move_inventory(Object* a1, int quantity, int a3, int a4, Obj
 
         inputGetInput();
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     } while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0);
 
@@ -4881,7 +4897,9 @@ static void _barter_move_from_table_inventory(Object* a1, int quantity, int a3, 
 
         inputGetInput();
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     } while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0);
 
@@ -5317,7 +5335,9 @@ void inventoryOpenTrade(int win, Object* a2, Object* a3, Object* a4, int a5)
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -5631,7 +5651,9 @@ static int inventoryQuantitySelect(int inventoryWindowType, Object* item, int ma
                                 inputPauseForTocks(delay);
                             }
 
-                            renderPresent();
+    #ifndef __vita__
+            renderPresent();
+#endif
                             sharedFpsLimiter.throttle();
                         }
                     } else {
@@ -5669,7 +5691,9 @@ static int inventoryQuantitySelect(int inventoryWindowType, Object* item, int ma
                                 inputPauseForTocks(delay);
                             }
 
-                            renderPresent();
+    #ifndef __vita__
+            renderPresent();
+#endif
                             sharedFpsLimiter.throttle();
                         }
                     } else {
@@ -5711,7 +5735,9 @@ static int inventoryQuantitySelect(int inventoryWindowType, Object* item, int ma
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

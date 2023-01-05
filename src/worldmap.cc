@@ -3098,7 +3098,9 @@ static int wmWorldMapFunc(int a1)
                 if (!wmGenData.isWalking && !wmGenData.mousePressed && abs(wmGenData.worldPosX - v4) < 5 && abs(wmGenData.worldPosY - v5) < 5) {
                     wmGenData.mousePressed = true;
                     wmInterfaceRefresh();
-                    renderPresent();
+    #ifndef __vita__
+            renderPresent();
+#endif
                 }
             } else {
                 continue;
@@ -3230,7 +3232,9 @@ static int wmWorldMapFunc(int a1)
             break;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -3336,7 +3340,9 @@ static int wmRndEncounterOccurred()
                     return -1;
                 }
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 inputBlockForTocks(200);
             }
 
@@ -3416,7 +3422,9 @@ static int wmRndEncounterOccurred()
             return -1;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         inputBlockForTocks(200);
     }
 
@@ -5820,7 +5828,9 @@ static int wmTownMapFunc(int* mapIdxPtr)
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

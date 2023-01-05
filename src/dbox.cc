@@ -528,7 +528,9 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
             rc = 1;
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -877,7 +879,9 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
                     break;
                 }
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
             }
         } else {
             windowRefresh(win);
@@ -896,7 +900,9 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
             rc = 1;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -1325,7 +1331,9 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
                     break;
                 }
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
             }
         } else {
             blinkingCounter -= 1;
@@ -1354,7 +1362,9 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
             rc = 1;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

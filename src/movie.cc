@@ -330,7 +330,9 @@ static void movieDirectImpl(SDL_Surface* surface, int srcWidth, int srcHeight, i
     renderVita2dFrame(gSdlSurface);
 #else
     SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
+#ifndef __vita__
     renderPresent();
+#endif
 #endif
 }
 

@@ -542,7 +542,9 @@ int showOptionsWithInitialKeyCode(int initialKeyCode)
             }
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -848,7 +850,9 @@ int showPause(bool a1)
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -1748,7 +1752,9 @@ static int _do_prefscreen()
             break;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -1920,7 +1926,9 @@ static void _DoThing(int eventCode)
                 soundPlayFile("ib1lu1x1");
                 _UpdateThing(preferenceIndex);
                 windowRefresh(gPreferencesWindow);
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 _changed = true;
                 return;
             }
@@ -2051,7 +2059,9 @@ static void _DoThing(int eventCode)
             while (getTicksSince(tick) < 35)
                 ;
 
+    #ifndef __vita__
             renderPresent();
+#endif
             sharedFpsLimiter.throttle();
         }
     } else if (preferenceIndex == 19) {

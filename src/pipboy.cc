@@ -476,7 +476,9 @@ int pipboyOpen(int intent)
             break;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -2046,7 +2048,9 @@ static bool pipboyRest(int hours, int minutes, int duration)
                     }
                 }
 
+#ifndef __vita__
                 renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             }
 
@@ -2117,7 +2121,9 @@ static bool pipboyRest(int hours, int minutes, int duration)
                     }
                 }
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             }
 
@@ -2413,7 +2419,9 @@ static int pipboyRenderScreensaver()
             }
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

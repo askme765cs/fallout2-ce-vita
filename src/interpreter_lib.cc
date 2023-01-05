@@ -424,7 +424,9 @@ static void _interpretFadePaletteBK(unsigned char* oldPalette, unsigned char* ne
                 }
 
                 _setSystemPalette(palette);
+#ifndef __vita__
                 renderPresent();
+#endif
 
                 previousTime = time;
                 step += delta;
@@ -440,7 +442,9 @@ static void _interpretFadePaletteBK(unsigned char* oldPalette, unsigned char* ne
     }
 
     _setSystemPalette(newPalette);
-    renderPresent();
+    #ifndef __vita__
+            renderPresent();
+#endif
 }
 
 // NOTE: Unused.

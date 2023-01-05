@@ -416,7 +416,9 @@ static void endgameEndingRenderPanningScene(int direction, const char* narratorF
                 break;
             }
 
+#ifndef __vita__
             renderPresent();
+#endif
             sharedFpsLimiter.throttle();
         }
 
@@ -433,7 +435,9 @@ static void endgameEndingRenderPanningScene(int direction, const char* narratorF
 
         inputGetInput();
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 }
@@ -499,7 +503,9 @@ static void endgameEndingRenderStaticScene(int fid, const char* narratorFileName
             windowRefresh(gEndgameEndingSlideshowWindow);
             soundContinueAll();
 
+    #ifndef __vita__
             renderPresent();
+#endif
             sharedFpsLimiter.throttle();
         }
 
@@ -521,7 +527,9 @@ static void endgameEndingRenderStaticScene(int fid, const char* narratorFileName
 
             inputGetInput();
 
+    #ifndef __vita__
             renderPresent();
+#endif
             sharedFpsLimiter.throttle();
         }
     }

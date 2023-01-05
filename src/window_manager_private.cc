@@ -530,7 +530,9 @@ int _win_list_select_at(const char* title, char** items, int itemsLength, ListSe
             }
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -669,7 +671,9 @@ int _win_msg(const char* string, int x, int y, int flags)
 
     while (inputGetInput() != KEY_ESCAPE) {
         sharedFpsLimiter.mark();
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -1110,7 +1114,9 @@ int _win_input_str(int win, char* dest, int maxLength, int x, int y, int textCol
             cursorPos--;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

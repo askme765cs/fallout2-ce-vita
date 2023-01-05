@@ -187,7 +187,9 @@ void creditsOpen(const char* filePath, int backgroundFid, bool useReversedStyle)
                                         src += CREDITS_WINDOW_WIDTH;
 
                                         sharedFpsLimiter.throttle();
+#ifndef __vita__
                                         renderPresent();
+#endif
                                     }
 
                                     if (stop) {
@@ -228,7 +230,9 @@ void creditsOpen(const char* filePath, int backgroundFid, bool useReversedStyle)
                                         windowRefresh(window);
 
                                         sharedFpsLimiter.throttle();
+                #ifndef __vita__
                                         renderPresent();
+#endif
                                     }
                                 }
 

@@ -178,7 +178,7 @@ int falloutMain(int argc, char** argv)
     if (!autorunMutexCreate()) {
         return 1;
     }
-
+    
     if (!falloutInit(argc, argv)) {
         return 1;
     }
@@ -336,7 +336,7 @@ static bool falloutInit(int argc, char** argv)
     if (gameInitWithOptions("FALLOUT II", false, 0, 0, argc, argv) == -1) {
         return false;
     }
-
+    
     if (_main_selfrun_list != NULL) {
         _main_selfrun_exit();
     }
@@ -457,7 +457,9 @@ static void mainLoop()
             _game_user_wants_to_quit = 2;
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -616,7 +618,9 @@ static void showDeath()
 
                 inputGetInput();
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             }
 
@@ -675,7 +679,9 @@ static void showDeath()
 
                 keyCode = inputGetInput();
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             } while (keyCode == -1 && !_main_death_voiceover_done && getTicksSince(time) < delay);
 
@@ -688,7 +694,9 @@ static void showDeath()
 
                 inputGetInput();
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             }
 
@@ -1078,7 +1086,9 @@ static int mainMenuWindowHandleEvents()
             }
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

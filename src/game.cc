@@ -133,11 +133,11 @@ int _critter_db_handle;
 int gameInitWithOptions(const char* windowTitle, bool isMapper, int font, int a4, int argc, char** argv)
 {
     char path[COMPAT_MAX_PATH];
-
+    
     if (gameMemoryInit() == -1) {
         return -1;
     }
-
+    
     // Sfall config should be initialized before game config, since it can
     // override it's file name.
     sfallConfigInit(argc, argv);
@@ -1184,7 +1184,9 @@ static void showHelp()
 
                 while (inputGetInput() == -1 && _game_user_wants_to_quit == 0) {
                     sharedFpsLimiter.mark();
+#ifndef __vita__
                     renderPresent();
+#endif
                     sharedFpsLimiter.throttle();
                 }
 
@@ -1193,7 +1195,9 @@ static void showHelp()
 
                     inputGetInput();
 
-                    renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                     sharedFpsLimiter.throttle();
                 }
 

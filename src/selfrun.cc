@@ -97,7 +97,9 @@ void selfrunPlaybackLoop(SelfrunData* selfrunData)
                     gameHandleKey(keyCode, false);
                 }
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             }
 
@@ -106,7 +108,9 @@ void selfrunPlaybackLoop(SelfrunData* selfrunData)
 
                 inputGetInput();
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             }
 
@@ -177,7 +181,9 @@ void selfrunRecordingLoop(SelfrunData* selfrunData)
                     gameHandleKey(keyCode, false);
                 }
 
-                renderPresent();
+#ifndef __vita__
+        renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             }
         }

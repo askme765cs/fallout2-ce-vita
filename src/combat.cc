@@ -3123,7 +3123,9 @@ void _combat_turn_run()
 
         _process_bk();
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 }
@@ -3171,7 +3173,9 @@ static int _combat_input()
             gameHandleKey(keyCode, true);
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -5599,7 +5603,9 @@ static int calledShotSelectHitLocation(Object* critter, int* hitLocation, int hi
             break;
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

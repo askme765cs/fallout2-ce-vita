@@ -656,7 +656,9 @@ int lsgSaveGame(int mode)
 
                 keyCode = inputGetInput();
 
+#ifndef __vita__
                 renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             } while (keyCode != 505 && keyCode != 503);
         } else {
@@ -792,7 +794,9 @@ int lsgSaveGame(int mode)
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -878,7 +882,9 @@ int lsgLoadGame(int mode)
             unsigned char* windowBuffer = windowGetBuffer(window);
             bufferFill(windowBuffer, LS_WINDOW_WIDTH, LS_WINDOW_HEIGHT, LS_WINDOW_WIDTH, _colorTable[0]);
             windowRefresh(window);
+    #ifndef __vita__
             renderPresent();
+#endif
         }
 
         if (lsgLoadGameInSlot(_slot_cursor) != -1) {
@@ -941,7 +947,9 @@ int lsgLoadGame(int mode)
     if (_GetSlotList() == -1) {
         gameMouseSetCursor(MOUSE_CURSOR_ARROW);
         windowRefresh(gLoadSaveWindow);
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         soundPlayFile("iisxxxx1");
         strcpy(_str0, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 106));
         strcpy(_str1, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 107));
@@ -976,7 +984,9 @@ int lsgLoadGame(int mode)
     _ShowSlotList(2);
     _DrawInfoBox(_slot_cursor);
     windowRefresh(gLoadSaveWindow);
-    renderPresent();
+    #ifndef __vita__
+            renderPresent();
+#endif
     _dbleclkcntr = 24;
 
     int rc = -1;
@@ -1158,7 +1168,9 @@ int lsgLoadGame(int mode)
 
                 keyCode = inputGetInput();
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             } while (keyCode != 505 && keyCode != 503);
         } else {
@@ -1238,7 +1250,9 @@ int lsgLoadGame(int mode)
             }
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -2213,7 +2227,9 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
     fontDrawText(windowBuffer + windowWidth * y + x, text, windowWidth, windowWidth, textColor);
 
     windowRefresh(win);
-    renderPresent();
+    #ifndef __vita__
+            renderPresent();
+#endif
 
     int blinkCounter = 3;
     bool blink = false;
@@ -2285,7 +2301,9 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
         while (getTicksSince(tick) < 1000 / 24) {
         }
 
-        renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 

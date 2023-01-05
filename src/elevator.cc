@@ -413,7 +413,9 @@ int elevatorSelectLevel(int elevator, int* mapPtr, int* elevationPtr, int* tileP
             }
         }
 
+#ifndef __vita__
         renderPresent();
+#endif
         sharedFpsLimiter.throttle();
     }
 
@@ -456,7 +458,9 @@ int elevatorSelectLevel(int elevator, int* mapPtr, int* elevationPtr, int* tileP
                 while (getTicksSince(tick) < delay) {
                 }
 
-                renderPresent();
+#ifndef __vita__
+            renderPresent();
+#endif
                 sharedFpsLimiter.throttle();
             } while ((v43 <= 0.0 || v44 < v41) && (v43 > 0.0 || v44 > v41));
 
