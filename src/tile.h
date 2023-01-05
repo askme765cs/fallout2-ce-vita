@@ -4,8 +4,10 @@
 #include "geometry.h"
 #include "map.h"
 
-#define TILE_SET_CENTER_FLAG_0x01 0x01
-#define TILE_SET_CENTER_FLAG_0x02 0x02
+namespace fallout {
+
+#define TILE_SET_CENTER_REFRESH_WINDOW 0x01
+#define TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS 0x02
 
 typedef void(TileWindowRefreshProc)(Rect* rect);
 typedef void(TileWindowRefreshElevationProc)(Rect* rect, int elevation);
@@ -56,5 +58,7 @@ static bool tileIsValid(int tile)
 {
     return tile >= 0 && tile < gHexGridSize;
 }
+
+} // namespace fallout
 
 #endif /* TILE_H */

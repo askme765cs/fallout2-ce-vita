@@ -10,7 +10,6 @@
 #include "art.h"
 #include "automap.h"
 #include "combat.h"
-#include "core.h"
 #include "critter.h"
 #include "debug.h"
 #include "dialog.h"
@@ -21,6 +20,7 @@
 #include "game_dialog.h"
 #include "game_mouse.h"
 #include "game_movie.h"
+#include "input.h"
 #include "memory.h"
 #include "message.h"
 #include "object.h"
@@ -30,10 +30,13 @@
 #include "proto_instance.h"
 #include "queue.h"
 #include "stat.h"
+#include "svga.h"
 #include "tile.h"
 #include "window_manager.h"
 #include "window_manager_private.h"
 #include "worldmap.h"
+
+namespace fallout {
 
 #define SCRIPT_LIST_EXTENT_SIZE 16
 
@@ -77,8 +80,6 @@ static int scriptRead(Script* scr, File* stream);
 static int scriptListExtentRead(ScriptListExtent* a1, File* stream);
 static int scriptGetNewId(int scriptType);
 static int scriptsRemoveLocalVars(Script* script);
-static Script* scriptGetFirstSpatialScript(int a1);
-static Script* scriptGetNextSpatialScript();
 static int scriptsGetMessageList(int a1, MessageList** out_message_list);
 
 // 0x50D6B8
@@ -744,7 +745,7 @@ static void _script_chk_timed_events()
         v1 = true;
     }
 
-    if (_game_state() != GAME_STATE_4) {
+    if (gameGetState() != GAME_STATE_4) {
         if (getTicksBetween(v0, _last_light_time) >= 30000) {
             _last_light_time = v0;
             scriptsExecMapUpdateScripts(SCRIPT_PROC_MAP_UPDATE);
@@ -1520,6 +1521,8 @@ int scriptsInit()
         return -1;
     }
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRIPT, &gScrMessageList);
+
     return 0;
 }
 
@@ -1575,6 +1578,8 @@ int _scr_game_init()
     // NOTE: Uninline.
     scriptsClearPendingRequests();
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRIPT, &gScrMessageList);
+
     return 0;
 }
 
@@ -1594,6 +1599,8 @@ int scriptsExit()
 {
     gScriptsEnabled = false;
     _script_engine_run_critters = 0;
+
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRIPT, nullptr);
     if (!messageListFree(&gScrMessageList)) {
         debugPrint("\nError exiting script message file!");
         return -1;
@@ -1645,6 +1652,7 @@ int _scr_game_exit()
     _scr_remove_all();
     programListFree();
     tickersRemove(_doBkProcesses);
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRIPT, nullptr);
     messageListFree(&gScrMessageList);
     if (scriptsClearDudeScript() == -1) {
         return -1;
@@ -2351,6 +2359,11 @@ int _scr_remove_all()
                     } else {
                         next = scriptListExtent->next;
                         scriptRemove(script->sid);
+
+                        // CE: Current extent is freed in |scriptRemove|. Break
+                        // to prevent next iteration which needs to dereference
+                        // extent to obtain it's length.
+                        break;
                     }
                 }
             }
@@ -2401,7 +2414,7 @@ int _scr_remove_all_force()
 }
 
 // 0x4A6524
-static Script* scriptGetFirstSpatialScript(int elevation)
+Script* scriptGetFirstSpatialScript(int elevation)
 {
     gScriptsEnumerationElevation = elevation;
     gScriptsEnumerationScriptIndex = 0;
@@ -2420,7 +2433,7 @@ static Script* scriptGetFirstSpatialScript(int elevation)
 }
 
 // 0x4A6564
-static Script* scriptGetNextSpatialScript()
+Script* scriptGetNextSpatialScript()
 {
     ScriptListExtent* scriptListExtent = gScriptsEnumerationScriptListExtent;
     int scriptIndex = gScriptsEnumerationScriptIndex;
@@ -2917,3 +2930,5 @@ int _scr_explode_scenery(Object* a1, int tile, int radius, int elevation)
 
     return 0;
 }
+
+} // namespace fallout

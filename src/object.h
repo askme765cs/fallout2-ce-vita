@@ -7,6 +7,8 @@
 #include "map_defs.h"
 #include "obj_types.h"
 
+namespace fallout {
+
 typedef struct ObjectWithFlags {
     int flags;
     Object* object;
@@ -87,6 +89,7 @@ int objectClearOutline(Object* obj, Rect* rect);
 int _obj_intersects_with(Object* object, int x, int y);
 int _obj_create_intersect_list(int x, int y, int elevation, int objectType, ObjectWithFlags** entriesPtr);
 void _obj_delete_intersect_list(ObjectWithFlags** a1);
+void obj_set_seen(int tile);
 void _obj_clear_seen();
 void _obj_process_seen();
 char* objectGetName(Object* obj);
@@ -97,5 +100,7 @@ int _obj_load_dude(File* stream);
 void _obj_fix_violence_settings(int* fid);
 
 Object* objectTypedFindById(int id, int type);
+
+} // namespace fallout
 
 #endif /* OBJECT_H */

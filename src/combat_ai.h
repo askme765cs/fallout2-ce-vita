@@ -6,6 +6,8 @@
 #include "db.h"
 #include "obj_types.h"
 
+namespace fallout {
+
 typedef enum AiMessageType {
     AI_MESSAGE_TYPE_RUN,
     AI_MESSAGE_TYPE_MOVE,
@@ -60,10 +62,12 @@ int critterSetAiPacket(Object* object, int aiPacket);
 int _combatai_msg(Object* a1, Attack* attack, int a3, int a4);
 Object* _combat_ai_random_target(Attack* attack);
 int _combatai_check_retaliation(Object* a1, Object* a2);
-bool objectCanHearObject(Object* a1, Object* a2);
+bool isWithinPerception(Object* a1, Object* a2);
 void aiMessageListReloadIfNeeded();
 void _combatai_notify_onlookers(Object* a1);
 void _combatai_notify_friends(Object* a1);
 void _combatai_delete_critter(Object* obj);
+
+} // namespace fallout
 
 #endif /* COMBAT_AI_H */

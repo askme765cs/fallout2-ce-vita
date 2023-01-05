@@ -7,12 +7,10 @@
 #include "art.h"
 #include "color.h"
 #include "combat.h"
-#include "core.h"
 #include "critter.h"
 #include "debug.h"
 #include "draw.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_mouse.h"
 #include "item.h"
 #include "light.h"
@@ -22,9 +20,13 @@
 #include "proto.h"
 #include "proto_instance.h"
 #include "scripts.h"
+#include "settings.h"
+#include "svga.h"
 #include "text_object.h"
 #include "tile.h"
 #include "worldmap.h"
+
+namespace fallout {
 
 static int objectLoadAllInternal(File* stream);
 static void _obj_fix_combat_cid_for_dude();
@@ -183,7 +185,7 @@ static int _obj_last_roof_y = -1;
 static int _obj_last_elev = -1;
 
 // 0x51977C
-static int _obj_last_is_empty = 1;
+static bool _obj_last_is_empty = true;
 
 // 0x519780
 unsigned char* _wallBlendTable = NULL;
@@ -468,14 +470,9 @@ static int objectLoadAllInternal(File* stream)
         return -1;
     }
 
-    bool fixMapInventory;
-    if (!configGetBool(&gGameConfig, GAME_CONFIG_MAPPER_KEY, GAME_CONFIG_FIX_MAP_INVENTORY_KEY, &fixMapInventory)) {
-        fixMapInventory = false;
-    }
+    bool fixMapInventory = settings.mapper.fix_map_inventory;
 
-    if (!configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_VIOLENCE_LEVEL_KEY, &gViolenceLevel)) {
-        gViolenceLevel = VIOLENCE_LEVEL_MAXIMUM_BLOOD;
-    }
+    gViolenceLevel = settings.preferences.violence_level;
 
     int objectCount;
     if (fileReadInt32(stream, &objectCount) == -1) {
@@ -1492,23 +1489,27 @@ int objectSetLocation(Object* obj, int tile, int elevation, Rect* rect)
             objectListNode = objectListNode->next;
         }
 
-        _obj_seen[tile >> 3] |= 1 << (tile & 7);
+        // NOTE: Uninline.
+        obj_set_seen(tile);
 
-        int v14 = tile % 200 / 2;
-        int v15 = tile / 200 / 2;
-        if (v14 != _obj_last_roof_x || v15 != _obj_last_roof_y || elevation != _obj_last_elev) {
-            int v16 = _square[elevation]->field_0[v14 + 100 * v15];
-            int v31 = buildFid(OBJ_TYPE_TILE, (v16 >> 16) & 0xFFF, 0, 0, 0);
-            int v32 = _square[elevation]->field_0[_obj_last_roof_x + 100 * _obj_last_roof_y];
-            int v34 = buildFid(OBJ_TYPE_TILE, 1, 0, 0, 0) == v31;
+        int roofX = tile % 200 / 2;
+        int roofY = tile / 200 / 2;
+        if (roofX != _obj_last_roof_x || roofY != _obj_last_roof_y || elevation != _obj_last_elev) {
+            int currentSquare = _square[elevation]->field_0[roofX + 100 * roofY];
+            int currentSquareFid = buildFid(OBJ_TYPE_TILE, (currentSquare >> 16) & 0xFFF, 0, 0, 0);
+            // CE: Add additional checks for -1 to prevent array lookup at index -101.
+            int previousSquare = _obj_last_roof_x != -1 && _obj_last_roof_y != -1
+                ? _square[elevation]->field_0[_obj_last_roof_x + 100 * _obj_last_roof_y]
+                : 0;
+            bool isEmpty = buildFid(OBJ_TYPE_TILE, 1, 0, 0, 0) == currentSquareFid;
 
-            if (v34 != _obj_last_is_empty || (((v16 >> 16) & 0xF000) >> 12) != (((v32 >> 16) & 0xF000) >> 12)) {
-                if (_obj_last_is_empty == 0) {
+            if (isEmpty != _obj_last_is_empty || (((currentSquare >> 16) & 0xF000) >> 12) != (((previousSquare >> 16) & 0xF000) >> 12)) {
+                if (!_obj_last_is_empty) {
                     _tile_fill_roof(_obj_last_roof_x, _obj_last_roof_y, elevation, 1);
                 }
 
-                if (v34 == 0) {
-                    _tile_fill_roof(v14, v15, elevation, 0);
+                if (!isEmpty) {
+                    _tile_fill_roof(roofX, roofY, elevation, 0);
                 }
 
                 if (rect != NULL) {
@@ -1516,10 +1517,10 @@ int objectSetLocation(Object* obj, int tile, int elevation, Rect* rect)
                 }
             }
 
-            _obj_last_roof_x = v14;
-            _obj_last_roof_y = v15;
+            _obj_last_roof_x = roofX;
+            _obj_last_roof_y = roofY;
             _obj_last_elev = elevation;
-            _obj_last_is_empty = v34;
+            _obj_last_is_empty = isEmpty;
         }
 
         if (rect != NULL) {
@@ -1532,7 +1533,7 @@ int objectSetLocation(Object* obj, int tile, int elevation, Rect* rect)
 
         if (elevation != oldElevation) {
             mapSetElevation(elevation);
-            tileSetCenter(tile, TILE_SET_CENTER_FLAG_0x01 | TILE_SET_CENTER_FLAG_0x02);
+            tileSetCenter(tile, TILE_SET_CENTER_REFRESH_WINDOW | TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS);
             if (isInCombat()) {
                 _game_user_wants_to_quit = 1;
             }
@@ -2185,7 +2186,7 @@ void _obj_remove_all()
 
     _obj_last_roof_y = -1;
     _obj_last_elev = -1;
-    _obj_last_is_empty = 1;
+    _obj_last_is_empty = true;
     _obj_last_roof_x = -1;
 }
 
@@ -3096,6 +3097,14 @@ void _obj_delete_intersect_list(ObjectWithFlags** entriesPtr)
     }
 }
 
+// NOTE: Inlined.
+//
+// 0x48C76C
+void obj_set_seen(int tile)
+{
+    _obj_seen[tile >> 3] |= 1 << (tile & 7);
+}
+
 // 0x48C788
 void _obj_clear_seen()
 {
@@ -3329,7 +3338,7 @@ static int _obj_offset_table_init()
             }
         }
 
-        if (tileSetCenter(gCenterTile + 1, 2) == -1) {
+        if (tileSetCenter(gCenterTile + 1, TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS) == -1) {
             goto err;
         }
     }
@@ -3747,7 +3756,7 @@ int _obj_load_dude(File* stream)
         return -1;
     }
 
-    tileSetCenter(tile, TILE_SET_CENTER_FLAG_0x01 | TILE_SET_CENTER_FLAG_0x02);
+    tileSetCenter(tile, TILE_SET_CENTER_REFRESH_WINDOW | TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS);
 
     return rc;
 }
@@ -5153,9 +5162,7 @@ void _obj_fix_violence_settings(int* fid)
 
     bool shouldResetViolenceLevel = false;
     if (gViolenceLevel == -1) {
-        if (!configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_VIOLENCE_LEVEL_KEY, &gViolenceLevel)) {
-            gViolenceLevel = VIOLENCE_LEVEL_MAXIMUM_BLOOD;
-        }
+        gViolenceLevel = settings.preferences.violence_level;
         shouldResetViolenceLevel = true;
     }
 
@@ -5235,3 +5242,5 @@ Object* objectTypedFindById(int id, int type)
 
     return NULL;
 }
+
+} // namespace fallout

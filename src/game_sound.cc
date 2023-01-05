@@ -7,9 +7,9 @@
 #include "art.h"
 #include "audio.h"
 #include "combat.h"
-#include "core.h"
 #include "debug.h"
 #include "game_config.h"
+#include "input.h"
 #include "item.h"
 #include "map.h"
 #include "memory.h"
@@ -19,10 +19,14 @@
 #include "proto.h"
 #include "queue.h"
 #include "random.h"
+#include "settings.h"
 #include "sound_effects_cache.h"
 #include "stat.h"
+#include "svga.h"
 #include "window_manager.h"
 #include "worldmap.h"
+
+namespace fallout {
 
 typedef enum SoundEffectActionType {
     SOUND_EFFECT_ACTION_TYPE_ACTIVE,
@@ -187,13 +191,11 @@ int gameSoundInit()
         return -1;
     }
 
-    bool initialize;
-    configGetBool(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_INITIALIZE_KEY, &initialize);
-    if (!initialize) {
+    if (!settings.sound.initialize) {
         return 0;
     }
 
-    configGetBool(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_DEBUG_KEY, &gGameSoundDebugEnabled);
+    gGameSoundDebugEnabled = settings.sound.debug;
 
     if (gGameSoundDebugEnabled) {
         debugPrint("Initializing sound system...");
@@ -237,8 +239,7 @@ int gameSoundInit()
     audioFileInit(gameSoundIsCompressed);
     audioInit(gameSoundIsCompressed);
 
-    int cacheSize;
-    configGetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_CACHE_SIZE_KEY, &cacheSize);
+    int cacheSize = settings.sound.cache_size;
     if (cacheSize >= 0x40000) {
         debugPrint("\n!!! Config file needs adustment.  Please remove the ");
         debugPrint("cache_size line and run fallout again.  This will reset ");
@@ -263,14 +264,11 @@ int gameSoundInit()
     gGameSoundInitialized = true;
 
     // SOUNDS
-    bool sounds = 0;
-    configGetBool(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SOUNDS_KEY, &sounds);
-
     if (gGameSoundDebugEnabled) {
         debugPrint("Sounds are ");
     }
 
-    if (sounds) {
+    if (settings.sound.sounds) {
         // NOTE: Uninline.
         soundEffectsEnable();
     } else {
@@ -284,14 +282,11 @@ int gameSoundInit()
     }
 
     // MUSIC
-    bool music = 0;
-    configGetBool(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MUSIC_KEY, &music);
-
     if (gGameSoundDebugEnabled) {
         debugPrint("Music is ");
     }
 
-    if (music) {
+    if (settings.sound.music) {
         // NOTE: Uninline.
         backgroundSoundEnable();
     } else {
@@ -305,14 +300,11 @@ int gameSoundInit()
     }
 
     // SPEEECH
-    bool speech = 0;
-    configGetBool(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SPEECH_KEY, &speech);
-
     if (gGameSoundDebugEnabled) {
         debugPrint("Speech is ");
     }
 
-    if (speech) {
+    if (settings.sound.speech) {
         // NOTE: Uninline.
         speechEnable();
     } else {
@@ -325,16 +317,16 @@ int gameSoundInit()
         debugPrint("on.\n");
     }
 
-    configGetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MASTER_VOLUME_KEY, &gMasterVolume);
+    gMasterVolume = settings.sound.master_volume;
     gameSoundSetMasterVolume(gMasterVolume);
 
-    configGetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MUSIC_VOLUME_KEY, &gMusicVolume);
+    gMusicVolume = settings.sound.music_volume;
     backgroundSoundSetVolume(gMusicVolume);
 
-    configGetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SNDFX_VOLUME_KEY, &gSoundEffectsVolume);
+    gSoundEffectsVolume = settings.sound.sndfx_volume;
     soundEffectsSetVolume(gSoundEffectsVolume);
 
-    configGetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SPEECH_VOLUME_KEY, &gSpeechVolume);
+    gSpeechVolume = settings.sound.speech_volume;
     speechSetVolume(gSpeechVolume);
 
     _gsound_background_fade = 0;
@@ -1959,35 +1951,37 @@ int speechPlay()
     return 0;
 }
 
+// TODO: Refactor to use Settings.
+//
 // 0x452208
 int _gsound_get_music_path(char** out_value, const char* key)
 {
-    size_t v3;
-    char* v4;
+    size_t len;
+    char* copy;
     char* value;
 
     configGetString(&gGameConfig, GAME_CONFIG_SOUND_KEY, key, out_value);
 
     value = *out_value;
-    v3 = strlen(value) + 1;
+    len = strlen(value);
 
-    if (*(value + v3 - 2) == '\\') {
+    if (value[len - 1] == '\\' || value[len - 1] == '/') {
         return 0;
     }
 
-    v4 = (char*)internal_malloc(v3 - 1 + 2);
-    if (v4 == NULL) {
+    copy = (char*)internal_malloc(len + 2);
+    if (copy == NULL) {
         if (gGameSoundDebugEnabled) {
             debugPrint("Out of memory in gsound_get_music_path.\n");
         }
         return -1;
     }
 
-    strcpy(v4, value);
-    *(v4 + v3) = '\\';
-    *(v4 + v3 + 1) = '\0';
+    strcpy(copy, value);
+    copy[len] = '\\';
+    copy[len + 1] = '\0';
 
-    if (configSetString(&gGameConfig, GAME_CONFIG_SOUND_KEY, key, v4) != 1) {
+    if (configSetString(&gGameConfig, GAME_CONFIG_SOUND_KEY, key, copy) != 1) {
         if (gGameSoundDebugEnabled) {
             debugPrint("config_set_string failed in gsound_music_path.\n");
         }
@@ -1996,7 +1990,7 @@ int _gsound_get_music_path(char** out_value, const char* key)
     }
 
     if (configGetString(&gGameConfig, GAME_CONFIG_SOUND_KEY, key, out_value)) {
-        internal_free(v4);
+        internal_free(copy);
         return 0;
     }
 
@@ -2148,3 +2142,5 @@ int ambientSoundEffectEventProcess(Object* a1, void* data)
 
     return 0;
 }
+
+} // namespace fallout

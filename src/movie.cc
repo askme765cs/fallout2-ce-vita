@@ -5,21 +5,23 @@
 #include <SDL.h>
 
 #include "color.h"
-#include "core.h"
 #include "db.h"
 #include "debug.h"
 #include "draw.h"
-#include "game_config.h"
 #include "geometry.h"
+#include "input.h"
 #include "memory_manager.h"
 #include "movie_effect.h"
 #include "movie_lib.h"
 #include "platform_compat.h"
 #include "pointer_registry.h"
 #include "sound.h"
+#include "svga.h"
 #include "text_font.h"
 #include "window.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 typedef struct MovieSubtitleListNode {
     int num;
@@ -328,10 +330,9 @@ static void movieDirectImpl(SDL_Surface* surface, int srcWidth, int srcHeight, i
     renderVita2dFrame(gSdlSurface);
 #else
     SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
-    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
-    SDL_RenderClear(gSdlRenderer);
-    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
-    SDL_RenderPresent(gSdlRenderer);
+#ifndef __vita__
+    renderPresent();
+#endif
 #endif
 }
 
@@ -912,7 +913,7 @@ static bool _localMovieCallback()
         _movieCallback();
     }
 
-    return _get_input() != -1;
+    return inputGetInput() != -1;
 }
 
 // 0x487AC8
@@ -1015,3 +1016,5 @@ int _moviePlaying()
 {
     return _running;
 }
+
+} // namespace fallout

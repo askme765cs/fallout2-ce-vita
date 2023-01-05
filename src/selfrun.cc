@@ -2,11 +2,17 @@
 
 #include <stdlib.h>
 
-#include "core.h"
 #include "db.h"
 #include "game.h"
-#include "game_config.h"
+#include "input.h"
+#include "kb.h"
+#include "mouse.h"
 #include "platform_compat.h"
+#include "settings.h"
+#include "svga.h"
+#include "vcr.h"
+
+namespace fallout {
 
 // 0x51C8D8
 int gSelfrunState = SELFRUN_STATE_TURNED_OFF;
@@ -84,14 +90,28 @@ void selfrunPlaybackLoop(SelfrunData* selfrunData)
             }
 
             while (gSelfrunState == SELFRUN_STATE_PLAYING) {
-                int keyCode = _get_input();
+                sharedFpsLimiter.mark();
+
+                int keyCode = inputGetInput();
                 if (keyCode != selfrunData->stopKeyCode) {
                     gameHandleKey(keyCode, false);
                 }
+
+#ifndef __vita__
+            renderPresent();
+#endif
+                sharedFpsLimiter.throttle();
             }
 
             while (mouseGetEvent() != 0) {
-                _get_input();
+                sharedFpsLimiter.mark();
+
+                inputGetInput();
+
+#ifndef __vita__
+            renderPresent();
+#endif
+                sharedFpsLimiter.throttle();
             }
 
             if (cursorWasHidden) {
@@ -150,7 +170,9 @@ void selfrunRecordingLoop(SelfrunData* selfrunData)
 
             bool done = false;
             while (!done) {
-                int keyCode = _get_input();
+                sharedFpsLimiter.mark();
+
+                int keyCode = inputGetInput();
                 if (keyCode == selfrunData->stopKeyCode) {
                     vcrStop();
                     _game_user_wants_to_quit = 2;
@@ -158,6 +180,11 @@ void selfrunRecordingLoop(SelfrunData* selfrunData)
                 } else {
                     gameHandleKey(keyCode, false);
                 }
+
+#ifndef __vita__
+        renderPresent();
+#endif
+                sharedFpsLimiter.throttle();
             }
         }
         gSelfrunState = SELFRUN_STATE_TURNED_OFF;
@@ -210,11 +237,8 @@ int selfrunWriteData(const char* path, SelfrunData* selfrunData)
         return -1;
     }
 
-    char* masterPatches;
-    configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &masterPatches);
-
     char selfrunDirectoryPath[COMPAT_MAX_PATH];
-    sprintf(selfrunDirectoryPath, "%s\\%s", masterPatches, "selfrun\\");
+    sprintf(selfrunDirectoryPath, "%s\\%s", settings.system.master_patches_path.c_str(), "selfrun\\");
 
     compat_mkdir(selfrunDirectoryPath);
 
@@ -234,3 +258,5 @@ int selfrunWriteData(const char* path, SelfrunData* selfrunData)
 
     return rc;
 }
+
+} // namespace fallout

@@ -1,19 +1,23 @@
 #include "interpreter_lib.h"
 
 #include "color.h"
-#include "core.h"
 #include "datafile.h"
 #include "debug.h"
 #include "dialog.h"
+#include "input.h"
 #include "interpreter_extra.h"
 #include "memory_manager.h"
+#include "mouse.h"
 #include "mouse_manager.h"
 #include "nevs.h"
 #include "select_file_list.h"
 #include "sound.h"
+#include "svga.h"
 #include "text_font.h"
 #include "window.h"
 #include "window_manager_private.h"
+
+namespace fallout {
 
 #define INT_LIB_SOUNDS_CAPACITY (32)
 #define INT_LIB_KEY_HANDLERS_CAPACITY (256)
@@ -405,12 +409,13 @@ static void _interpretFadePaletteBK(unsigned char* oldPalette, unsigned char* ne
     int index;
     unsigned char palette[256 * 3];
 
-    time = _get_time();
+    time = getTicks();
     previousTime = time;
     steps = (int)duration;
     step = 0;
     delta = 0;
 
+    // TODO: Check if it needs throttling.
     if (duration != 0.0) {
         while (step < steps) {
             if (delta != 0) {
@@ -419,6 +424,9 @@ static void _interpretFadePaletteBK(unsigned char* oldPalette, unsigned char* ne
                 }
 
                 _setSystemPalette(palette);
+#ifndef __vita__
+                renderPresent();
+#endif
 
                 previousTime = time;
                 step += delta;
@@ -428,12 +436,15 @@ static void _interpretFadePaletteBK(unsigned char* oldPalette, unsigned char* ne
                 _process_bk();
             }
 
-            time = _get_time();
+            time = getTicks();
             delta = time - previousTime;
         }
     }
 
     _setSystemPalette(newPalette);
+    #ifndef __vita__
+            renderPresent();
+#endif
 }
 
 // NOTE: Unused.
@@ -1461,8 +1472,9 @@ static void opSetTextColor(Program* program)
     }
 
     for (int arg = 0; arg < 3; arg++) {
-        if (((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT && (value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_INT)
-            || value[arg].floatValue == 0.0) {
+        if ((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT
+            && (value[arg].opcode & VALUE_TYPE_MASK) == VALUE_TYPE_INT
+            && value[arg].integerValue != 0) {
             programFatalError("Invalid type given to settextcolor");
         }
     }
@@ -1488,8 +1500,9 @@ static void opSayOptionColor(Program* program)
     }
 
     for (int arg = 0; arg < 3; arg++) {
-        if (((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT && (value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_INT)
-            || value[arg].floatValue == 0.0) {
+        if ((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT
+            && (value[arg].opcode & VALUE_TYPE_MASK) == VALUE_TYPE_INT
+            && value[arg].integerValue != 0) {
             programFatalError("Invalid type given to sayoptioncolor");
         }
     }
@@ -1515,8 +1528,9 @@ static void opSayReplyColor(Program* program)
     }
 
     for (int arg = 0; arg < 3; arg++) {
-        if (((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT && (value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_INT)
-            || value[arg].floatValue == 0.0) {
+        if ((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT
+            && (value[arg].opcode & VALUE_TYPE_MASK) == VALUE_TYPE_INT
+            && value[arg].integerValue != 0) {
             programFatalError("Invalid type given to sayreplycolor");
         }
     }
@@ -1542,8 +1556,9 @@ static void opSetHighlightColor(Program* program)
     }
 
     for (int arg = 0; arg < 3; arg++) {
-        if (((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT && (value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_INT)
-            || value[arg].floatValue == 0.0) {
+        if ((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT
+            && (value[arg].opcode & VALUE_TYPE_MASK) == VALUE_TYPE_INT
+            && value[arg].integerValue != 0) {
             programFatalError("Invalid type given to sayreplycolor");
         }
     }
@@ -2306,3 +2321,5 @@ void intLibRemoveProgramReferences(Program* program)
         }
     }
 }
+
+} // namespace fallout

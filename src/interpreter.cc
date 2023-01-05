@@ -7,13 +7,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core.h"
 #include "db.h"
 #include "debug.h"
 #include "export.h"
+#include "input.h"
 #include "interpreter_lib.h"
 #include "memory_manager.h"
 #include "platform_compat.h"
+#include "svga.h"
+
+namespace fallout {
 
 typedef struct ProgramListNode {
     Program* program;
@@ -152,7 +155,7 @@ static int (*_outputFunc)(char*) = _outputStr;
 static int _cpuBurstSize = 10;
 
 // 0x59E230
-static OpcodeHandler* gInterpreterOpcodeHandlers[342];
+static OpcodeHandler* gInterpreterOpcodeHandlers[OPCODE_MAX_COUNT];
 
 // 0x59E78C
 static Program* gInterpreterCurrentProgram;
@@ -169,7 +172,7 @@ static int _busy;
 // 0x4670A0
 static unsigned int _defaultTimerFunc()
 {
-    return _get_time();
+    return getTicks();
 }
 
 // 0x4670B4
@@ -1119,6 +1122,16 @@ static void opConditionalOperatorLessThanEquals(Program* program)
             break;
         case VALUE_TYPE_INT:
             result = value[1].integerValue <= value[0].integerValue;
+            break;
+        default:
+            assert(false && "Should be unreachable");
+        }
+        break;
+    // Nevada folks tend to use "object <= 0" to test objects for nulls.
+    case VALUE_TYPE_PTR:
+        switch (value[0].opcode) {
+        case VALUE_TYPE_INT:
+            result = (intptr_t)value[1].pointerValue <= (intptr_t)value[0].integerValue;
             break;
         default:
             assert(false && "Should be unreachable");
@@ -3239,3 +3252,5 @@ bool ProgramValue::isEmpty()
     // Should be unreachable.
     return true;
 }
+
+} // namespace fallout

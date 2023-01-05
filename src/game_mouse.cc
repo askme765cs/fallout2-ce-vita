@@ -9,23 +9,28 @@
 #include "art.h"
 #include "color.h"
 #include "combat.h"
-#include "core.h"
 #include "critter.h"
 #include "draw.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_sound.h"
+#include "input.h"
 #include "interface.h"
 #include "item.h"
+#include "kb.h"
+#include "mouse.h"
 #include "object.h"
 #include "proto.h"
 #include "proto_instance.h"
+#include "settings.h"
 #include "sfall_config.h"
 #include "skill.h"
 #include "skilldex.h"
+#include "svga.h"
 #include "text_font.h"
 #include "tile.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 typedef enum ScrollableDirections {
     SCROLLABLE_W = 0x01,
@@ -687,7 +692,7 @@ void gameMouseRefresh()
                                     primaryAction = GAME_MOUSE_ACTION_MENU_ITEM_TALK;
                                 }
                             } else {
-                                if (_critter_flag_check(pointedObject->pid, CRITTER_FLAG_0x20)) {
+                                if (_critter_flag_check(pointedObject->pid, CRITTER_NO_STEAL)) {
                                     primaryAction = GAME_MOUSE_ACTION_MENU_ITEM_LOOK;
                                 } else {
                                     primaryAction = GAME_MOUSE_ACTION_MENU_ITEM_USE;
@@ -735,9 +740,7 @@ void gameMouseRefresh()
                 if (pointedObject != NULL) {
                     bool pointedObjectIsCritter = FID_TYPE(pointedObject->fid) == OBJ_TYPE_CRITTER;
 
-                    int combatLooks = 0;
-                    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_LOOKS_KEY, &combatLooks);
-                    if (combatLooks != 0) {
+                    if (settings.preferences.combat_looks) {
                         if (_obj_examine(gDude, pointedObject) == -1) {
                             _obj_look_at(gDude, pointedObject);
                         }
@@ -933,16 +936,13 @@ void _gmouse_handle_event(int mouseX, int mouseY, int mouseState)
                 actionPoints = -1;
             }
 
-            bool running;
-            configGetBool(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_RUNNING_KEY, &running);
-
             if (gPressedPhysicalKeys[SDL_SCANCODE_LSHIFT] || gPressedPhysicalKeys[SDL_SCANCODE_RSHIFT]) {
-                if (running) {
+                if (settings.preferences.running) {
                     _dude_move(actionPoints);
                     return;
                 }
             } else {
-                if (!running) {
+                if (!settings.preferences.running) {
                     _dude_move(actionPoints);
                     return;
                 }
@@ -1014,7 +1014,7 @@ void _gmouse_handle_event(int mouseX, int mouseY, int mouseState)
                 _gmouse_3d_hover_test = true;
                 gGameMouseLastY = mouseY;
                 gGameMouseLastX = mouseX;
-                _gmouse_3d_last_move_time = _get_time() - 250;
+                _gmouse_3d_last_move_time = getTicks() - 250;
             }
             return;
         }
@@ -1091,7 +1091,7 @@ void _gmouse_handle_event(int mouseX, int mouseY, int mouseState)
                             actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_TALK;
                         }
                     } else {
-                        if (!_critter_flag_check(v16->pid, CRITTER_FLAG_0x20)) {
+                        if (!_critter_flag_check(v16->pid, CRITTER_NO_STEAL)) {
                             actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE;
                         }
                     }
@@ -1136,7 +1136,9 @@ void _gmouse_handle_event(int mouseX, int mouseY, int mouseState)
                     int v33 = mouseY;
                     int actionIndex = 0;
                     while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_UP) == 0) {
-                        _get_input();
+                        sharedFpsLimiter.mark();
+
+                        inputGetInput();
 
                         if (_game_user_wants_to_quit != 0) {
                             actionMenuItems[actionIndex] = 0;
@@ -1158,6 +1160,11 @@ void _gmouse_handle_event(int mouseX, int mouseY, int mouseState)
                             }
                             v33 = v47;
                         }
+
+#ifndef __vita__
+                        renderPresent();
+#endif
+                        sharedFpsLimiter.throttle();
                     }
 
                     isoEnable();
@@ -1165,7 +1172,7 @@ void _gmouse_handle_event(int mouseX, int mouseY, int mouseState)
                     _gmouse_3d_hover_test = false;
                     gGameMouseLastX = mouseX;
                     gGameMouseLastY = mouseY;
-                    _gmouse_3d_last_move_time = _get_time();
+                    _gmouse_3d_last_move_time = getTicks();
 
                     _mouse_set_position(mouseX, v33);
 
@@ -1271,7 +1278,7 @@ int gameMouseSetCursor(int cursor)
     bool shouldUpdate = true;
     int frame = 0;
     if (cursor >= FIRST_GAME_MOUSE_ANIMATED_CURSOR) {
-        unsigned int tick = _get_time();
+        unsigned int tick = getTicks();
 
         if ((gGameMouseHexCursor->flags & OBJECT_HIDDEN) == 0) {
             gameMouseObjectsHide();
@@ -1390,7 +1397,7 @@ void gameMouseSetMode(int mode)
 
     gGameMouseMode = mode;
     _gmouse_3d_hover_test = false;
-    _gmouse_3d_last_move_time = _get_time();
+    _gmouse_3d_last_move_time = getTicks();
 
     tileWindowRefreshRect(&rect, gElevation);
 
@@ -1558,7 +1565,7 @@ void gameMouseObjectsShow()
     }
 
     _gmouse_3d_hover_test = false;
-    _gmouse_3d_last_move_time = _get_time() - 250;
+    _gmouse_3d_last_move_time = getTicks() - 250;
 }
 
 // 0x44CE34
@@ -1940,10 +1947,7 @@ int gameMouseRenderActionPoints(const char* string, int color)
 // 0x44D954
 void gameMouseLoadItemHighlight()
 {
-    bool itemHighlight;
-    if (configGetBool(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_ITEM_HIGHLIGHT_KEY, &itemHighlight)) {
-        gGameMouseItemHighlightEnabled = itemHighlight;
-    }
+    gGameMouseItemHighlightEnabled = settings.preferences.item_highlight;
 }
 
 // 0x44D984
@@ -2022,7 +2026,7 @@ int gameMouseObjectsReset()
     gGameMouseLastX = -1;
     gGameMouseLastY = -1;
     _gmouse_3d_hover_test = false;
-    _gmouse_3d_last_move_time = _get_time();
+    _gmouse_3d_last_move_time = getTicks();
     gameMouseLoadItemHighlight();
 
     return 0;
@@ -2251,9 +2255,7 @@ int _gmouse_3d_move_to(int x, int y, int elevation, Rect* a4)
             x1 = -8;
             y1 = 13;
 
-            char* executable;
-            configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_EXECUTABLE_KEY, &executable);
-            if (compat_stricmp(executable, "mapper") == 0) {
+            if (compat_stricmp(settings.system.executable.c_str(), "mapper") == 0) {
                 if (tileRoofIsVisible()) {
                     if ((gDude->flags & OBJECT_HIDDEN) == 0) {
                         y1 = -83;
@@ -2454,3 +2456,13 @@ static void customMouseModeFrmsInit()
     configGetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_USE_SCIENCE_FRM_KEY, &(gGameMouseModeFrmIds[GAME_MOUSE_MODE_USE_SCIENCE]));
     configGetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_USE_REPAIR_FRM_KEY, &(gGameMouseModeFrmIds[GAME_MOUSE_MODE_USE_REPAIR]));
 }
+
+void gameMouseRefreshImmediately()
+{
+    gameMouseRefresh();
+    #ifndef __vita__
+            renderPresent();
+#endif
+}
+
+} // namespace fallout

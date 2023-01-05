@@ -2,7 +2,9 @@
 
 #include <string.h>
 
-#include "core.h"
+#include "svga.h"
+
+namespace fallout {
 
 // Return `true` if CPU supports MMX.
 //
@@ -54,3 +56,5 @@ void mmxBlitTrans(unsigned char* dest, int destPitch, unsigned char* src, int sr
         }
     }
 }
+
+} // namespace fallout

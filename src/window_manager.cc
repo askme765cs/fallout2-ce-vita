@@ -7,15 +7,21 @@
 #include <SDL.h>
 
 #include "color.h"
-#include "core.h"
 #include "debug.h"
+#include "dinput.h"
 #include "draw.h"
+#include "input.h"
 #include "memory.h"
+#include "mouse.h"
 #include "palette.h"
 #include "pointer_registry.h"
+#include "svga.h"
 #include "text_font.h"
+#include "vcr.h"
 #include "win32.h"
 #include "window_manager_private.h"
+
+namespace fallout {
 
 #define MAX_WINDOW_COUNT (50)
 
@@ -207,7 +213,7 @@ int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitP
 
     _GNW_debug_init();
 
-    if (coreInit(a3) == -1) {
+    if (inputInit(a3) == -1) {
         return WINDOW_MANAGER_ERR_INITIALIZING_INPUT;
     }
 
@@ -286,7 +292,7 @@ void windowManagerExit(void)
                 gVideoSystemExitProc();
             }
 
-            coreExit();
+            inputExit();
             _GNW_rect_exit();
             textFontsExit();
             _colorsClose();
@@ -2558,3 +2564,5 @@ int _win_button_press_and_release(int btn)
 
     return 0;
 }
+
+} // namespace fallout

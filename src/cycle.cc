@@ -1,9 +1,12 @@
 #include "cycle.h"
 
 #include "color.h"
-#include "core.h"
-#include "game_config.h"
+#include "input.h"
 #include "palette.h"
+#include "settings.h"
+#include "svga.h"
+
+namespace fallout {
 
 #define COLOR_CYCLE_PERIOD_1 (200U)
 #define COLOR_CYCLE_PERIOD_2 (142U)
@@ -119,12 +122,7 @@ void colorCycleInit()
         return;
     }
 
-    bool colorCycling;
-    if (!configGetBool(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_COLOR_CYCLING_KEY, &colorCycling)) {
-        colorCycling = true;
-    }
-
-    if (!colorCycling) {
+    if (!settings.system.color_cycling) {
         return;
     }
 
@@ -153,12 +151,7 @@ void colorCycleInit()
     gColorCycleInitialized = true;
     gColorCycleEnabled = true;
 
-    int cycleSpeedFactor;
-    if (!configGetInt(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_CYCLE_SPEED_FACTOR_KEY, &cycleSpeedFactor)) {
-        cycleSpeedFactor = 1;
-    }
-
-    cycleSetSpeedFactor(cycleSpeedFactor);
+    cycleSetSpeedFactor(settings.system.cycle_speed_factor);
 }
 
 // 0x42E8CC
@@ -206,7 +199,7 @@ bool colorCycleEnabled()
 void cycleSetSpeedFactor(int value)
 {
     gColorCycleSpeedFactor = value;
-    configSetInt(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_CYCLE_SPEED_FACTOR_KEY, value);
+    settings.system.cycle_speed_factor = value;
 }
 
 // 0x42E97C
@@ -219,7 +212,7 @@ void colorCycleTicker()
     bool changed = false;
 
     unsigned char* palette = _getSystemPalette();
-    unsigned int time = _get_time();
+    unsigned int time = getTicks();
 
     if (getTicksBetween(time, gColorCycleTimestamp1) >= COLOR_CYCLE_PERIOD_1 * gColorCycleSpeedFactor) {
         changed = true;
@@ -332,3 +325,5 @@ void colorCycleTicker()
         paletteSetEntriesInRange(palette + 229 * 3, 229, 255);
     }
 }
+
+} // namespace fallout

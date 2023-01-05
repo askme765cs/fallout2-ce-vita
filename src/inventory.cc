@@ -12,7 +12,6 @@
 #include "color.h"
 #include "combat.h"
 #include "combat_ai.h"
-#include "core.h"
 #include "critter.h"
 #include "dbox.h"
 #include "debug.h"
@@ -23,11 +22,14 @@
 #include "game_dialog.h"
 #include "game_mouse.h"
 #include "game_sound.h"
+#include "input.h"
 #include "interface.h"
 #include "item.h"
+#include "kb.h"
 #include "light.h"
 #include "map.h"
 #include "message.h"
+#include "mouse.h"
 #include "object.h"
 #include "party_member.h"
 #include "perk.h"
@@ -39,9 +41,12 @@
 #include "scripts.h"
 #include "skill.h"
 #include "stat.h"
+#include "svga.h"
 #include "text_font.h"
 #include "tile.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 #define INVENTORY_WINDOW_X 80
 #define INVENTORY_WINDOW_Y 0
@@ -170,7 +175,7 @@
 #define INVENTORY_SLOT_HEIGHT_PAD (INVENTORY_SLOT_HEIGHT - INVENTORY_SLOT_PADDING * 2)
 
 #define INVENTORY_NORMAL_WINDOW_PC_ROTATION_DELAY (1000U / ROTATION_COUNT)
-#define OFF_59E7BC_COUNT 12
+#define INVENTORY_FRM_COUNT 12
 
 typedef enum InventoryArrowFrm {
     INVENTORY_ARROW_FRM_LEFT_ARROW_UP,
@@ -405,12 +410,6 @@ static const int _act_weap2[3] = {
     GAME_MOUSE_ACTION_MENU_ITEM_CANCEL,
 };
 
-// 0x59E79C
-static CacheEntry* _mt_key[8];
-
-// 0x59E7BC
-static CacheEntry* _ikey[OFF_59E7BC_COUNT];
-
 // 0x59E7EC
 static int _target_stack_offset[10];
 
@@ -506,6 +505,9 @@ static Inventory* _target_pud;
 // 0x59E97C
 static int _barter_back_win;
 
+static FrmImage _inventoryFrmImages[INVENTORY_FRM_COUNT];
+static FrmImage _moveFrmImages[8];
+
 // 0x46E724
 void _inven_reset_dude()
 {
@@ -586,7 +588,9 @@ void inventoryOpen()
     inventorySetCursor(INVENTORY_WINDOW_CURSOR_HAND);
 
     for (;;) {
-        int keyCode = _get_input();
+        sharedFpsLimiter.mark();
+
+        int keyCode = inputGetInput();
 
         // SFALL: Close with 'I'.
         if (keyCode == KEY_ESCAPE || keyCode == KEY_UPPERCASE_I || keyCode == KEY_LOWERCASE_I) {
@@ -599,7 +603,7 @@ void inventoryOpen()
 
         _display_body(-1, INVENTORY_WINDOW_TYPE_NORMAL);
 
-        if (_game_state() == GAME_STATE_5) {
+        if (gameGetState() == GAME_STATE_5) {
             break;
         }
 
@@ -681,6 +685,11 @@ void inventoryOpen()
                 }
             }
         }
+
+#ifndef __vita__
+        renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     }
 
     _inven_dude = _stack[0];
@@ -739,13 +748,11 @@ static bool _setup_inventory(int inventoryWindowType)
         gInventoryWindowMaxY = windowDescription->height + inventoryWindowY;
 
         unsigned char* dest = windowGetBuffer(gInventoryWindow);
-        int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, windowDescription->field_0, 0, 0, 0);
 
-        CacheEntry* backgroundFrmHandle;
-        unsigned char* backgroundFrmData = artLockFrameData(backgroundFid, 0, 0, &backgroundFrmHandle);
-        if (backgroundFrmData != NULL) {
-            blitBufferToBuffer(backgroundFrmData, windowDescription->width, windowDescription->height, windowDescription->width, dest, windowDescription->width);
-            artUnlock(backgroundFrmHandle);
+        FrmImage backgroundFrmImage;
+        int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, windowDescription->field_0, 0, 0, 0);
+        if (backgroundFrmImage.lock(backgroundFid)) {
+            blitBufferToBuffer(backgroundFrmImage.getData(), windowDescription->width, windowDescription->height, windowDescription->width, dest, windowDescription->width);
         }
 
         gInventoryPrintItemDescriptionHandler = displayMonitorAddMessage;
@@ -774,7 +781,19 @@ static bool _setup_inventory(int inventoryWindowType)
         // Create invsibile buttons representing character's inventory item
         // slots.
         for (int index = 0; index < gInventorySlotsCount; index++) {
-            int btn = buttonCreate(gInventoryWindow, INVENTORY_LOOT_LEFT_SCROLLER_X, INVENTORY_SLOT_HEIGHT * (gInventorySlotsCount - index - 1) + INVENTORY_LOOT_LEFT_SCROLLER_Y, INVENTORY_SLOT_WIDTH, INVENTORY_SLOT_HEIGHT, 999 + gInventorySlotsCount - index, -1, 999 + gInventorySlotsCount - index, -1, NULL, NULL, NULL, 0);
+            int btn = buttonCreate(gInventoryWindow,
+                INVENTORY_LOOT_LEFT_SCROLLER_X,
+                INVENTORY_SLOT_HEIGHT * (gInventorySlotsCount - index - 1) + INVENTORY_LOOT_LEFT_SCROLLER_Y,
+                INVENTORY_SLOT_WIDTH,
+                INVENTORY_SLOT_HEIGHT,
+                999 + gInventorySlotsCount - index,
+                -1,
+                999 + gInventorySlotsCount - index,
+                -1,
+                NULL,
+                NULL,
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetMouseCallbacks(btn, inventoryItemSlotOnMouseEnter, inventoryItemSlotOnMouseExit, NULL, NULL);
             }
@@ -791,7 +810,19 @@ static bool _setup_inventory(int inventoryWindowType)
         // which is a bit awkward for a loop. Probably result of some
         // optimization.
         for (int index = 0; index < 6; index++) {
-            int btn = buttonCreate(gInventoryWindow, INVENTORY_LOOT_RIGHT_SCROLLER_X, y, INVENTORY_SLOT_WIDTH, INVENTORY_SLOT_HEIGHT, eventCode, -1, eventCode, -1, NULL, NULL, NULL, 0);
+            int btn = buttonCreate(gInventoryWindow,
+                INVENTORY_LOOT_RIGHT_SCROLLER_X,
+                y,
+                INVENTORY_SLOT_WIDTH,
+                INVENTORY_SLOT_HEIGHT,
+                eventCode,
+                -1,
+                eventCode,
+                -1,
+                NULL,
+                NULL,
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetMouseCallbacks(btn, inventoryItemSlotOnMouseEnter, inventoryItemSlotOnMouseExit, NULL, NULL);
             }
@@ -807,25 +838,73 @@ static bool _setup_inventory(int inventoryWindowType)
             int btn;
 
             // Invsibile button representing left inventory slot.
-            btn = buttonCreate(gInventoryWindow, INVENTORY_TRADE_LEFT_SCROLLER_X, y1, INVENTORY_SLOT_WIDTH, INVENTORY_SLOT_HEIGHT, 1000 + index, -1, 1000 + index, -1, NULL, NULL, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                INVENTORY_TRADE_LEFT_SCROLLER_X,
+                y1,
+                INVENTORY_SLOT_WIDTH,
+                INVENTORY_SLOT_HEIGHT,
+                1000 + index,
+                -1,
+                1000 + index,
+                -1,
+                NULL,
+                NULL,
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetMouseCallbacks(btn, inventoryItemSlotOnMouseEnter, inventoryItemSlotOnMouseExit, NULL, NULL);
             }
 
             // Invisible button representing right inventory slot.
-            btn = buttonCreate(gInventoryWindow, INVENTORY_TRADE_RIGHT_SCROLLER_X, y1, INVENTORY_SLOT_WIDTH, INVENTORY_SLOT_HEIGHT, 2000 + index, -1, 2000 + index, -1, NULL, NULL, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                INVENTORY_TRADE_RIGHT_SCROLLER_X,
+                y1,
+                INVENTORY_SLOT_WIDTH,
+                INVENTORY_SLOT_HEIGHT,
+                2000 + index,
+                -1,
+                2000 + index,
+                -1,
+                NULL,
+                NULL,
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetMouseCallbacks(btn, inventoryItemSlotOnMouseEnter, inventoryItemSlotOnMouseExit, NULL, NULL);
             }
 
             // Invisible button representing left suggested slot.
-            btn = buttonCreate(gInventoryWindow, INVENTORY_TRADE_INNER_LEFT_SCROLLER_X, y2, INVENTORY_SLOT_WIDTH, INVENTORY_SLOT_HEIGHT, 2300 + index, -1, 2300 + index, -1, NULL, NULL, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                INVENTORY_TRADE_INNER_LEFT_SCROLLER_X,
+                y2,
+                INVENTORY_SLOT_WIDTH,
+                INVENTORY_SLOT_HEIGHT,
+                2300 + index,
+                -1,
+                2300 + index,
+                -1,
+                NULL,
+                NULL,
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetMouseCallbacks(btn, inventoryItemSlotOnMouseEnter, inventoryItemSlotOnMouseExit, NULL, NULL);
             }
 
             // Invisible button representing right suggested slot.
-            btn = buttonCreate(gInventoryWindow, INVENTORY_TRADE_INNER_RIGHT_SCROLLER_X, y2, INVENTORY_SLOT_WIDTH, INVENTORY_SLOT_HEIGHT, 2400 + index, -1, 2400 + index, -1, NULL, NULL, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                INVENTORY_TRADE_INNER_RIGHT_SCROLLER_X,
+                y2,
+                INVENTORY_SLOT_WIDTH,
+                INVENTORY_SLOT_HEIGHT,
+                2400 + index,
+                -1,
+                2400 + index,
+                -1,
+                NULL,
+                NULL,
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetMouseCallbacks(btn, inventoryItemSlotOnMouseEnter, inventoryItemSlotOnMouseExit, NULL, NULL);
             }
@@ -859,52 +938,119 @@ static bool _setup_inventory(int inventoryWindowType)
         int btn;
 
         // Item2 slot
-        btn = buttonCreate(gInventoryWindow, INVENTORY_RIGHT_HAND_SLOT_X, INVENTORY_RIGHT_HAND_SLOT_Y, INVENTORY_LARGE_SLOT_WIDTH, INVENTORY_LARGE_SLOT_HEIGHT, 1006, -1, 1006, -1, NULL, NULL, NULL, 0);
+        btn = buttonCreate(gInventoryWindow,
+            INVENTORY_RIGHT_HAND_SLOT_X,
+            INVENTORY_RIGHT_HAND_SLOT_Y,
+            INVENTORY_LARGE_SLOT_WIDTH,
+            INVENTORY_LARGE_SLOT_HEIGHT,
+            1006,
+            -1,
+            1006,
+            -1,
+            NULL,
+            NULL,
+            NULL,
+            0);
         if (btn != -1) {
             buttonSetMouseCallbacks(btn, inventoryItemSlotOnMouseEnter, inventoryItemSlotOnMouseExit, NULL, NULL);
         }
 
         // Item1 slot
-        btn = buttonCreate(gInventoryWindow, INVENTORY_LEFT_HAND_SLOT_X, INVENTORY_LEFT_HAND_SLOT_Y, INVENTORY_LARGE_SLOT_WIDTH, INVENTORY_LARGE_SLOT_HEIGHT, 1007, -1, 1007, -1, NULL, NULL, NULL, 0);
+        btn = buttonCreate(gInventoryWindow,
+            INVENTORY_LEFT_HAND_SLOT_X,
+            INVENTORY_LEFT_HAND_SLOT_Y,
+            INVENTORY_LARGE_SLOT_WIDTH,
+            INVENTORY_LARGE_SLOT_HEIGHT,
+            1007,
+            -1,
+            1007,
+            -1,
+            NULL,
+            NULL,
+            NULL,
+            0);
         if (btn != -1) {
             buttonSetMouseCallbacks(btn, inventoryItemSlotOnMouseEnter, inventoryItemSlotOnMouseExit, NULL, NULL);
         }
 
         // Armor slot
-        btn = buttonCreate(gInventoryWindow, INVENTORY_ARMOR_SLOT_X, INVENTORY_ARMOR_SLOT_Y, INVENTORY_LARGE_SLOT_WIDTH, INVENTORY_LARGE_SLOT_HEIGHT, 1008, -1, 1008, -1, NULL, NULL, NULL, 0);
+        btn = buttonCreate(gInventoryWindow,
+            INVENTORY_ARMOR_SLOT_X,
+            INVENTORY_ARMOR_SLOT_Y,
+            INVENTORY_LARGE_SLOT_WIDTH,
+            INVENTORY_LARGE_SLOT_HEIGHT,
+            1008,
+            -1,
+            1008,
+            -1,
+            NULL,
+            NULL,
+            NULL,
+            0);
         if (btn != -1) {
             buttonSetMouseCallbacks(btn, inventoryItemSlotOnMouseEnter, inventoryItemSlotOnMouseExit, NULL, NULL);
         }
     }
 
-    memset(_ikey, 0, sizeof(_ikey));
-
     int fid;
     int btn;
-    unsigned char* buttonUpData;
-    unsigned char* buttonDownData;
-    unsigned char* buttonDisabledData;
 
     fid = buildFid(OBJ_TYPE_INTERFACE, 8, 0, 0, 0);
-    buttonUpData = artLockFrameData(fid, 0, 0, &(_ikey[0]));
+    _inventoryFrmImages[0].lock(fid);
 
     fid = buildFid(OBJ_TYPE_INTERFACE, 9, 0, 0, 0);
-    buttonDownData = artLockFrameData(fid, 0, 0, &(_ikey[1]));
+    _inventoryFrmImages[1].lock(fid);
 
-    if (buttonUpData != NULL && buttonDownData != NULL) {
+    if (_inventoryFrmImages[0].isLocked() && _inventoryFrmImages[1].isLocked()) {
         btn = -1;
         switch (inventoryWindowType) {
         case INVENTORY_WINDOW_TYPE_NORMAL:
             // Done button
-            btn = buttonCreate(gInventoryWindow, 437, 329, 15, 16, -1, -1, -1, KEY_ESCAPE, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
+            btn = buttonCreate(gInventoryWindow,
+                437,
+                329,
+                15,
+                16,
+                -1,
+                -1,
+                -1,
+                KEY_ESCAPE,
+                _inventoryFrmImages[0].getData(),
+                _inventoryFrmImages[1].getData(),
+                NULL,
+                BUTTON_FLAG_TRANSPARENT);
             break;
         case INVENTORY_WINDOW_TYPE_USE_ITEM_ON:
             // Cancel button
-            btn = buttonCreate(gInventoryWindow, 233, 328, 15, 16, -1, -1, -1, KEY_ESCAPE, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
+            btn = buttonCreate(gInventoryWindow,
+                233,
+                328,
+                15,
+                16,
+                -1,
+                -1,
+                -1,
+                KEY_ESCAPE,
+                _inventoryFrmImages[0].getData(),
+                _inventoryFrmImages[1].getData(),
+                NULL,
+                BUTTON_FLAG_TRANSPARENT);
             break;
         case INVENTORY_WINDOW_TYPE_LOOT:
             // Done button
-            btn = buttonCreate(gInventoryWindow, 476, 331, 15, 16, -1, -1, -1, KEY_ESCAPE, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
+            btn = buttonCreate(gInventoryWindow,
+                476,
+                331,
+                15,
+                16,
+                -1,
+                -1,
+                -1,
+                KEY_ESCAPE,
+                _inventoryFrmImages[0].getData(),
+                _inventoryFrmImages[1].getData(),
+                NULL,
+                BUTTON_FLAG_TRANSPARENT);
             break;
         }
 
@@ -914,27 +1060,47 @@ static bool _setup_inventory(int inventoryWindowType)
     }
 
     if (inventoryWindowType == INVENTORY_WINDOW_TYPE_TRADE) {
-        // TODO: Figure out why it building fid in chain.
-
         // Large arrow up (normal).
         fid = buildFid(OBJ_TYPE_INTERFACE, 100, 0, 0, 0);
-        fid = buildFid(OBJ_TYPE_INTERFACE, fid, 0, 0, 0);
-        buttonUpData = artLockFrameData(fid, 0, 0, &(_ikey[2]));
+        _inventoryFrmImages[2].lock(fid);
 
         // Large arrow up (pressed).
         fid = buildFid(OBJ_TYPE_INTERFACE, 101, 0, 0, 0);
-        fid = buildFid(OBJ_TYPE_INTERFACE, fid, 0, 0, 0);
-        buttonDownData = artLockFrameData(fid, 0, 0, &(_ikey[3]));
+        _inventoryFrmImages[3].lock(fid);
 
-        if (buttonUpData != NULL && buttonDownData != NULL) {
+        if (_inventoryFrmImages[2].isLocked() && _inventoryFrmImages[3].isLocked()) {
             // Left inventory up button.
-            btn = buttonCreate(gInventoryWindow, 109, 56, 23, 24, -1, -1, KEY_ARROW_UP, -1, buttonUpData, buttonDownData, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                109,
+                56,
+                23,
+                24,
+                -1,
+                -1,
+                KEY_ARROW_UP,
+                -1,
+                _inventoryFrmImages[2].getData(),
+                _inventoryFrmImages[3].getData(),
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
             }
 
             // Right inventory up button.
-            btn = buttonCreate(gInventoryWindow, 342, 56, 23, 24, -1, -1, KEY_CTRL_ARROW_UP, -1, buttonUpData, buttonDownData, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                342,
+                56,
+                23,
+                24,
+                -1,
+                -1,
+                KEY_CTRL_ARROW_UP,
+                -1,
+                _inventoryFrmImages[2].getData(),
+                _inventoryFrmImages[3].getData(),
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
             }
@@ -942,22 +1108,34 @@ static bool _setup_inventory(int inventoryWindowType)
     } else {
         // Large up arrow (normal).
         fid = buildFid(OBJ_TYPE_INTERFACE, 49, 0, 0, 0);
-        buttonUpData = artLockFrameData(fid, 0, 0, &(_ikey[2]));
+        _inventoryFrmImages[2].lock(fid);
 
         // Large up arrow (pressed).
         fid = buildFid(OBJ_TYPE_INTERFACE, 50, 0, 0, 0);
-        buttonDownData = artLockFrameData(fid, 0, 0, &(_ikey[3]));
+        _inventoryFrmImages[3].lock(fid);
 
         // Large up arrow (disabled).
         fid = buildFid(OBJ_TYPE_INTERFACE, 53, 0, 0, 0);
-        buttonDisabledData = artLockFrameData(fid, 0, 0, &(_ikey[4]));
+        _inventoryFrmImages[4].lock(fid);
 
-        if (buttonUpData != NULL && buttonDownData != NULL && buttonDisabledData != NULL) {
+        if (_inventoryFrmImages[2].isLocked() && _inventoryFrmImages[3].isLocked() && _inventoryFrmImages[4].isLocked()) {
             if (inventoryWindowType != INVENTORY_WINDOW_TYPE_TRADE) {
                 // Left inventory up button.
-                gInventoryScrollUpButton = buttonCreate(gInventoryWindow, 128, 39, 22, 23, -1, -1, KEY_ARROW_UP, -1, buttonUpData, buttonDownData, NULL, 0);
+                gInventoryScrollUpButton = buttonCreate(gInventoryWindow,
+                    128,
+                    39,
+                    22,
+                    23,
+                    -1,
+                    -1,
+                    KEY_ARROW_UP,
+                    -1,
+                    _inventoryFrmImages[2].getData(),
+                    _inventoryFrmImages[3].getData(),
+                    NULL,
+                    0);
                 if (gInventoryScrollUpButton != -1) {
-                    _win_register_button_disable(gInventoryScrollUpButton, buttonDisabledData, buttonDisabledData, buttonDisabledData);
+                    _win_register_button_disable(gInventoryScrollUpButton, _inventoryFrmImages[4].getData(), _inventoryFrmImages[4].getData(), _inventoryFrmImages[4].getData());
                     buttonSetCallbacks(gInventoryScrollUpButton, _gsound_red_butt_press, _gsound_red_butt_release);
                     buttonDisable(gInventoryScrollUpButton);
                 }
@@ -965,9 +1143,21 @@ static bool _setup_inventory(int inventoryWindowType)
 
             if (inventoryWindowType == INVENTORY_WINDOW_TYPE_LOOT) {
                 // Right inventory up button.
-                gSecondaryInventoryScrollUpButton = buttonCreate(gInventoryWindow, 379, 39, 22, 23, -1, -1, KEY_CTRL_ARROW_UP, -1, buttonUpData, buttonDownData, NULL, 0);
+                gSecondaryInventoryScrollUpButton = buttonCreate(gInventoryWindow,
+                    379,
+                    39,
+                    22,
+                    23,
+                    -1,
+                    -1,
+                    KEY_CTRL_ARROW_UP,
+                    -1,
+                    _inventoryFrmImages[2].getData(),
+                    _inventoryFrmImages[3].getData(),
+                    NULL,
+                    0);
                 if (gSecondaryInventoryScrollUpButton != -1) {
-                    _win_register_button_disable(gSecondaryInventoryScrollUpButton, buttonDisabledData, buttonDisabledData, buttonDisabledData);
+                    _win_register_button_disable(gSecondaryInventoryScrollUpButton, _inventoryFrmImages[4].getData(), _inventoryFrmImages[4].getData(), _inventoryFrmImages[4].getData());
                     buttonSetCallbacks(gSecondaryInventoryScrollUpButton, _gsound_red_butt_press, _gsound_red_butt_release);
                     buttonDisable(gSecondaryInventoryScrollUpButton);
                 }
@@ -978,70 +1168,176 @@ static bool _setup_inventory(int inventoryWindowType)
     if (inventoryWindowType == INVENTORY_WINDOW_TYPE_TRADE) {
         // Large dialog down button (normal)
         fid = buildFid(OBJ_TYPE_INTERFACE, 93, 0, 0, 0);
-        fid = buildFid(OBJ_TYPE_INTERFACE, fid, 0, 0, 0);
-        buttonUpData = artLockFrameData(fid, 0, 0, &(_ikey[5]));
+        _inventoryFrmImages[5].lock(fid);
 
         // Dialog down button (pressed)
         fid = buildFid(OBJ_TYPE_INTERFACE, 94, 0, 0, 0);
-        fid = buildFid(OBJ_TYPE_INTERFACE, fid, 0, 0, 0);
-        buttonDownData = artLockFrameData(fid, 0, 0, &(_ikey[6]));
+        _inventoryFrmImages[6].lock(fid);
 
-        if (buttonUpData != NULL && buttonDownData != NULL) {
+        if (_inventoryFrmImages[5].isLocked() && _inventoryFrmImages[6].isLocked()) {
             // Left inventory down button.
-            btn = buttonCreate(gInventoryWindow, 109, 82, 24, 25, -1, -1, KEY_ARROW_DOWN, -1, buttonUpData, buttonDownData, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                109,
+                82,
+                24,
+                25,
+                -1,
+                -1,
+                KEY_ARROW_DOWN,
+                -1,
+                _inventoryFrmImages[5].getData(),
+                _inventoryFrmImages[6].getData(),
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
             }
 
             // Right inventory down button
-            btn = buttonCreate(gInventoryWindow, 342, 82, 24, 25, -1, -1, KEY_CTRL_ARROW_DOWN, -1, buttonUpData, buttonDownData, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                342,
+                82,
+                24,
+                25,
+                -1,
+                -1,
+                KEY_CTRL_ARROW_DOWN,
+                -1,
+                _inventoryFrmImages[5].getData(),
+                _inventoryFrmImages[6].getData(),
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
             }
 
             // Invisible button representing left character.
-            buttonCreate(_barter_back_win, 15, 25, INVENTORY_BODY_VIEW_WIDTH, INVENTORY_BODY_VIEW_HEIGHT, -1, -1, 2500, -1, NULL, NULL, NULL, 0);
+            buttonCreate(_barter_back_win,
+                15,
+                25,
+                INVENTORY_BODY_VIEW_WIDTH,
+                INVENTORY_BODY_VIEW_HEIGHT,
+                -1,
+                -1,
+                2500,
+                -1,
+                NULL,
+                NULL,
+                NULL,
+                0);
 
             // Invisible button representing right character.
-            buttonCreate(_barter_back_win, 560, 25, INVENTORY_BODY_VIEW_WIDTH, INVENTORY_BODY_VIEW_HEIGHT, -1, -1, 2501, -1, NULL, NULL, NULL, 0);
+            buttonCreate(_barter_back_win,
+                560,
+                25,
+                INVENTORY_BODY_VIEW_WIDTH,
+                INVENTORY_BODY_VIEW_HEIGHT,
+                -1,
+                -1,
+                2501,
+                -1,
+                NULL,
+                NULL,
+                NULL,
+                0);
         }
     } else {
         // Large arrow down (normal).
         fid = buildFid(OBJ_TYPE_INTERFACE, 51, 0, 0, 0);
-        buttonUpData = artLockFrameData(fid, 0, 0, &(_ikey[5]));
+        _inventoryFrmImages[5].lock(fid);
 
         // Large arrow down (pressed).
         fid = buildFid(OBJ_TYPE_INTERFACE, 52, 0, 0, 0);
-        buttonDownData = artLockFrameData(fid, 0, 0, &(_ikey[6]));
+        _inventoryFrmImages[6].lock(fid);
 
         // Large arrow down (disabled).
         fid = buildFid(OBJ_TYPE_INTERFACE, 54, 0, 0, 0);
-        buttonDisabledData = artLockFrameData(fid, 0, 0, &(_ikey[7]));
+        _inventoryFrmImages[7].lock(fid);
 
-        if (buttonUpData != NULL && buttonDownData != NULL && buttonDisabledData != NULL) {
+        if (_inventoryFrmImages[5].isLocked() && _inventoryFrmImages[6].isLocked() && _inventoryFrmImages[7].isLocked()) {
             // Left inventory down button.
-            gInventoryScrollDownButton = buttonCreate(gInventoryWindow, 128, 62, 22, 23, -1, -1, KEY_ARROW_DOWN, -1, buttonUpData, buttonDownData, NULL, 0);
+            gInventoryScrollDownButton = buttonCreate(gInventoryWindow,
+                128,
+                62,
+                22,
+                23,
+                -1,
+                -1,
+                KEY_ARROW_DOWN,
+                -1,
+                _inventoryFrmImages[5].getData(),
+                _inventoryFrmImages[6].getData(),
+                NULL,
+                0);
             buttonSetCallbacks(gInventoryScrollDownButton, _gsound_red_butt_press, _gsound_red_butt_release);
-            _win_register_button_disable(gInventoryScrollDownButton, buttonDisabledData, buttonDisabledData, buttonDisabledData);
+            _win_register_button_disable(gInventoryScrollDownButton, _inventoryFrmImages[7].getData(), _inventoryFrmImages[7].getData(), _inventoryFrmImages[7].getData());
             buttonDisable(gInventoryScrollDownButton);
 
             if (inventoryWindowType == INVENTORY_WINDOW_TYPE_LOOT) {
                 // Invisible button representing left character.
-                buttonCreate(gInventoryWindow, INVENTORY_LOOT_LEFT_BODY_VIEW_X, INVENTORY_LOOT_LEFT_BODY_VIEW_Y, INVENTORY_BODY_VIEW_WIDTH, INVENTORY_BODY_VIEW_HEIGHT, -1, -1, 2500, -1, NULL, NULL, NULL, 0);
+                buttonCreate(gInventoryWindow,
+                    INVENTORY_LOOT_LEFT_BODY_VIEW_X,
+                    INVENTORY_LOOT_LEFT_BODY_VIEW_Y,
+                    INVENTORY_BODY_VIEW_WIDTH,
+                    INVENTORY_BODY_VIEW_HEIGHT,
+                    -1,
+                    -1,
+                    2500,
+                    -1,
+                    NULL,
+                    NULL,
+                    NULL,
+                    0);
 
                 // Right inventory down button.
-                gSecondaryInventoryScrollDownButton = buttonCreate(gInventoryWindow, 379, 62, 22, 23, -1, -1, KEY_CTRL_ARROW_DOWN, -1, buttonUpData, buttonDownData, 0, 0);
+                gSecondaryInventoryScrollDownButton = buttonCreate(gInventoryWindow,
+                    379,
+                    62,
+                    22,
+                    23,
+                    -1,
+                    -1,
+                    KEY_CTRL_ARROW_DOWN,
+                    -1,
+                    _inventoryFrmImages[5].getData(),
+                    _inventoryFrmImages[6].getData(),
+                    NULL,
+                    0);
                 if (gSecondaryInventoryScrollDownButton != -1) {
                     buttonSetCallbacks(gSecondaryInventoryScrollDownButton, _gsound_red_butt_press, _gsound_red_butt_release);
-                    _win_register_button_disable(gSecondaryInventoryScrollDownButton, buttonDisabledData, buttonDisabledData, buttonDisabledData);
+                    _win_register_button_disable(gSecondaryInventoryScrollDownButton, _inventoryFrmImages[7].getData(), _inventoryFrmImages[7].getData(), _inventoryFrmImages[7].getData());
                     buttonDisable(gSecondaryInventoryScrollDownButton);
                 }
 
                 // Invisible button representing right character.
-                buttonCreate(gInventoryWindow, INVENTORY_LOOT_RIGHT_BODY_VIEW_X, INVENTORY_LOOT_RIGHT_BODY_VIEW_Y, INVENTORY_BODY_VIEW_WIDTH, INVENTORY_BODY_VIEW_HEIGHT, -1, -1, 2501, -1, NULL, NULL, NULL, 0);
+                buttonCreate(gInventoryWindow,
+                    INVENTORY_LOOT_RIGHT_BODY_VIEW_X,
+                    INVENTORY_LOOT_RIGHT_BODY_VIEW_Y,
+                    INVENTORY_BODY_VIEW_WIDTH,
+                    INVENTORY_BODY_VIEW_HEIGHT,
+                    -1,
+                    -1,
+                    2501,
+                    -1,
+                    NULL,
+                    NULL,
+                    NULL,
+                    0);
             } else {
                 // Invisible button representing character (in inventory and use on dialogs).
-                buttonCreate(gInventoryWindow, INVENTORY_PC_BODY_VIEW_X, INVENTORY_PC_BODY_VIEW_Y, INVENTORY_BODY_VIEW_WIDTH, INVENTORY_BODY_VIEW_HEIGHT, -1, -1, 2500, -1, NULL, NULL, NULL, 0);
+                buttonCreate(gInventoryWindow,
+                    INVENTORY_PC_BODY_VIEW_X,
+                    INVENTORY_PC_BODY_VIEW_Y,
+                    INVENTORY_BODY_VIEW_WIDTH,
+                    INVENTORY_BODY_VIEW_HEIGHT,
+                    -1,
+                    -1,
+                    2500,
+                    -1,
+                    NULL,
+                    NULL,
+                    NULL,
+                    0);
             }
         }
     }
@@ -1051,15 +1347,27 @@ static bool _setup_inventory(int inventoryWindowType)
             if (!_gIsSteal) {
                 // Take all button (normal)
                 fid = buildFid(OBJ_TYPE_INTERFACE, 436, 0, 0, 0);
-                buttonUpData = artLockFrameData(fid, 0, 0, &(_ikey[8]));
+                _inventoryFrmImages[8].lock(fid);
 
                 // Take all button (pressed)
                 fid = buildFid(OBJ_TYPE_INTERFACE, 437, 0, 0, 0);
-                buttonDownData = artLockFrameData(fid, 0, 0, &(_ikey[9]));
+                _inventoryFrmImages[9].lock(fid);
 
-                if (buttonUpData != NULL && buttonDownData != NULL) {
+                if (_inventoryFrmImages[8].isLocked() && _inventoryFrmImages[9].isLocked()) {
                     // Take all button.
-                    btn = buttonCreate(gInventoryWindow, 432, 204, 39, 41, -1, -1, KEY_UPPERCASE_A, -1, buttonUpData, buttonDownData, NULL, 0);
+                    btn = buttonCreate(gInventoryWindow,
+                        432,
+                        204,
+                        39,
+                        41,
+                        -1,
+                        -1,
+                        KEY_UPPERCASE_A,
+                        -1,
+                        _inventoryFrmImages[8].getData(),
+                        _inventoryFrmImages[9].getData(),
+                        NULL,
+                        0);
                     if (btn != -1) {
                         buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
                     }
@@ -1069,21 +1377,45 @@ static bool _setup_inventory(int inventoryWindowType)
     } else {
         // Inventory button up (normal)
         fid = buildFid(OBJ_TYPE_INTERFACE, 49, 0, 0, 0);
-        buttonUpData = artLockFrameData(fid, 0, 0, &(_ikey[8]));
+        _inventoryFrmImages[8].lock(fid);
 
         // Inventory button up (pressed)
         fid = buildFid(OBJ_TYPE_INTERFACE, 50, 0, 0, 0);
-        buttonDownData = artLockFrameData(fid, 0, 0, &(_ikey[9]));
+        _inventoryFrmImages[9].lock(fid);
 
-        if (buttonUpData != NULL && buttonDownData != NULL) {
+        if (_inventoryFrmImages[8].isLocked() && _inventoryFrmImages[9].isLocked()) {
             // Left offered inventory up button.
-            btn = buttonCreate(gInventoryWindow, 128, 113, 22, 23, -1, -1, KEY_PAGE_UP, -1, buttonUpData, buttonDownData, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                128,
+                113,
+                22,
+                23,
+                -1,
+                -1,
+                KEY_PAGE_UP,
+                -1,
+                _inventoryFrmImages[8].getData(),
+                _inventoryFrmImages[9].getData(),
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
             }
 
             // Right offered inventory up button.
-            btn = buttonCreate(gInventoryWindow, 333, 113, 22, 23, -1, -1, KEY_CTRL_PAGE_UP, -1, buttonUpData, buttonDownData, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                333,
+                113,
+                22,
+                23,
+                -1,
+                -1,
+                KEY_CTRL_PAGE_UP,
+                -1,
+                _inventoryFrmImages[8].getData(),
+                _inventoryFrmImages[9].getData(),
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
             }
@@ -1091,21 +1423,45 @@ static bool _setup_inventory(int inventoryWindowType)
 
         // Inventory button down (normal)
         fid = buildFid(OBJ_TYPE_INTERFACE, 51, 0, 0, 0);
-        buttonUpData = artLockFrameData(fid, 0, 0, &(_ikey[8]));
+        _inventoryFrmImages[10].lock(fid);
 
         // Inventory button down (pressed).
         fid = buildFid(OBJ_TYPE_INTERFACE, 52, 0, 0, 0);
-        buttonDownData = artLockFrameData(fid, 0, 0, &(_ikey[9]));
+        _inventoryFrmImages[11].lock(fid);
 
-        if (buttonUpData != NULL && buttonDownData != NULL) {
+        if (_inventoryFrmImages[10].isLocked() && _inventoryFrmImages[11].isLocked()) {
             // Left offered inventory down button.
-            btn = buttonCreate(gInventoryWindow, 128, 136, 22, 23, -1, -1, KEY_PAGE_DOWN, -1, buttonUpData, buttonDownData, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                128,
+                136,
+                22,
+                23,
+                -1,
+                -1,
+                KEY_PAGE_DOWN,
+                -1,
+                _inventoryFrmImages[10].getData(),
+                _inventoryFrmImages[11].getData(),
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
             }
 
             // Right offered inventory down button.
-            btn = buttonCreate(gInventoryWindow, 333, 136, 22, 23, -1, -1, KEY_CTRL_PAGE_DOWN, -1, buttonUpData, buttonDownData, NULL, 0);
+            btn = buttonCreate(gInventoryWindow,
+                333,
+                136,
+                22,
+                23,
+                -1,
+                -1,
+                KEY_CTRL_PAGE_DOWN,
+                -1,
+                _inventoryFrmImages[10].getData(),
+                _inventoryFrmImages[11].getData(),
+                NULL,
+                0);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
             }
@@ -1180,8 +1536,8 @@ static void _exit_inventory(bool shouldEnableIso)
     gInventoryArmor = NULL;
     gInventoryLeftHandItem = NULL;
 
-    for (int index = 0; index < OFF_59E7BC_COUNT; index++) {
-        artUnlock(_ikey[index]);
+    for (int index = 0; index < INVENTORY_FRM_COUNT; index++) {
+        _inventoryFrmImages[index].unlock();
     }
 
     if (shouldEnableIso) {
@@ -1241,60 +1597,72 @@ static void _display_inventory(int a1, int a2, int inventoryWindowType)
     if (inventoryWindowType == INVENTORY_WINDOW_TYPE_NORMAL) {
         pitch = INVENTORY_WINDOW_WIDTH;
 
+        FrmImage backgroundFrmImage;
         int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 48, 0, 0, 0);
-
-        CacheEntry* backgroundFrmHandle;
-        unsigned char* backgroundFrmData = artLockFrameData(backgroundFid, 0, 0, &backgroundFrmHandle);
-        if (backgroundFrmData != NULL) {
+        if (backgroundFrmImage.lock(backgroundFid)) {
             // Clear scroll view background.
-            blitBufferToBuffer(backgroundFrmData + pitch * INVENTORY_SCROLLER_Y + INVENTORY_SCROLLER_X, INVENTORY_SLOT_WIDTH, gInventorySlotsCount * INVENTORY_SLOT_HEIGHT, pitch, windowBuffer + pitch * INVENTORY_SCROLLER_Y + INVENTORY_SCROLLER_X, pitch);
+            blitBufferToBuffer(backgroundFrmImage.getData() + pitch * INVENTORY_SCROLLER_Y + INVENTORY_SCROLLER_X,
+                INVENTORY_SLOT_WIDTH,
+                gInventorySlotsCount * INVENTORY_SLOT_HEIGHT,
+                pitch,
+                windowBuffer + pitch * INVENTORY_SCROLLER_Y + INVENTORY_SCROLLER_X,
+                pitch);
 
             // Clear armor button background.
-            blitBufferToBuffer(backgroundFrmData + pitch * INVENTORY_ARMOR_SLOT_Y + INVENTORY_ARMOR_SLOT_X, INVENTORY_LARGE_SLOT_WIDTH, INVENTORY_LARGE_SLOT_HEIGHT, pitch, windowBuffer + pitch * INVENTORY_ARMOR_SLOT_Y + INVENTORY_ARMOR_SLOT_X, pitch);
+            blitBufferToBuffer(backgroundFrmImage.getData() + pitch * INVENTORY_ARMOR_SLOT_Y + INVENTORY_ARMOR_SLOT_X,
+                INVENTORY_LARGE_SLOT_WIDTH,
+                INVENTORY_LARGE_SLOT_HEIGHT,
+                pitch,
+                windowBuffer + pitch * INVENTORY_ARMOR_SLOT_Y + INVENTORY_ARMOR_SLOT_X,
+                pitch);
 
             if (gInventoryLeftHandItem != NULL && gInventoryLeftHandItem == gInventoryRightHandItem) {
                 // Clear item1.
+                FrmImage itemBackgroundFrmImage;
                 int itemBackgroundFid = buildFid(OBJ_TYPE_INTERFACE, 32, 0, 0, 0);
-
-                CacheEntry* itemBackgroundFrmHandle;
-                Art* itemBackgroundFrm = artLock(itemBackgroundFid, &itemBackgroundFrmHandle);
-                if (itemBackgroundFrm != NULL) {
-                    unsigned char* data = artGetFrameData(itemBackgroundFrm, 0, 0);
-                    int width = artGetWidth(itemBackgroundFrm, 0, 0);
-                    int height = artGetHeight(itemBackgroundFrm, 0, 0);
+                if (itemBackgroundFrmImage.lock(itemBackgroundFid)) {
+                    unsigned char* data = itemBackgroundFrmImage.getData();
+                    int width = itemBackgroundFrmImage.getWidth();
+                    int height = itemBackgroundFrmImage.getHeight();
                     blitBufferToBuffer(data, width, height, width, windowBuffer + pitch * 284 + 152, pitch);
-                    artUnlock(itemBackgroundFrmHandle);
                 }
             } else {
                 // Clear both items in one go.
-                blitBufferToBuffer(backgroundFrmData + pitch * INVENTORY_LEFT_HAND_SLOT_Y + INVENTORY_LEFT_HAND_SLOT_X, INVENTORY_LARGE_SLOT_WIDTH * 2, INVENTORY_LARGE_SLOT_HEIGHT, pitch, windowBuffer + pitch * INVENTORY_LEFT_HAND_SLOT_Y + INVENTORY_LEFT_HAND_SLOT_X, pitch);
+                blitBufferToBuffer(backgroundFrmImage.getData() + pitch * INVENTORY_LEFT_HAND_SLOT_Y + INVENTORY_LEFT_HAND_SLOT_X,
+                    INVENTORY_LARGE_SLOT_WIDTH * 2,
+                    INVENTORY_LARGE_SLOT_HEIGHT,
+                    pitch,
+                    windowBuffer + pitch * INVENTORY_LEFT_HAND_SLOT_Y + INVENTORY_LEFT_HAND_SLOT_X,
+                    pitch);
             }
-
-            artUnlock(backgroundFrmHandle);
         }
     } else if (inventoryWindowType == INVENTORY_WINDOW_TYPE_USE_ITEM_ON) {
         pitch = INVENTORY_USE_ON_WINDOW_WIDTH;
 
+        FrmImage backgroundFrmImage;
         int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 113, 0, 0, 0);
-
-        CacheEntry* backgroundFrmHandle;
-        unsigned char* backgroundFrmData = artLockFrameData(backgroundFid, 0, 0, &backgroundFrmHandle);
-        if (backgroundFrmData != NULL) {
+        if (backgroundFrmImage.lock(backgroundFid)) {
             // Clear scroll view background.
-            blitBufferToBuffer(backgroundFrmData + pitch * INVENTORY_SCROLLER_Y + INVENTORY_SCROLLER_X, INVENTORY_SLOT_WIDTH, gInventorySlotsCount * INVENTORY_SLOT_HEIGHT, pitch, windowBuffer + pitch * INVENTORY_SCROLLER_Y + INVENTORY_SCROLLER_X, pitch);
-            artUnlock(backgroundFrmHandle);
+            blitBufferToBuffer(backgroundFrmImage.getData() + pitch * INVENTORY_SCROLLER_Y + INVENTORY_SCROLLER_X,
+                INVENTORY_SLOT_WIDTH,
+                gInventorySlotsCount * INVENTORY_SLOT_HEIGHT,
+                pitch,
+                windowBuffer + pitch * INVENTORY_SCROLLER_Y + INVENTORY_SCROLLER_X,
+                pitch);
         }
     } else if (inventoryWindowType == INVENTORY_WINDOW_TYPE_LOOT) {
         pitch = INVENTORY_LOOT_WINDOW_WIDTH;
 
+        FrmImage backgroundFrmImage;
         int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 114, 0, 0, 0);
-
-        CacheEntry* backgroundFrmHandle;
-        unsigned char* backgroundFrmData = artLockFrameData(backgroundFid, 0, 0, &backgroundFrmHandle);
-        if (backgroundFrmData != NULL) {
+        if (backgroundFrmImage.lock(backgroundFid)) {
             // Clear scroll view background.
-            blitBufferToBuffer(backgroundFrmData + pitch * INVENTORY_LOOT_LEFT_SCROLLER_Y + INVENTORY_LOOT_LEFT_SCROLLER_X, INVENTORY_SLOT_WIDTH, gInventorySlotsCount * INVENTORY_SLOT_HEIGHT, pitch, windowBuffer + pitch * INVENTORY_LOOT_LEFT_SCROLLER_Y + INVENTORY_LOOT_LEFT_SCROLLER_X, pitch);
-            artUnlock(backgroundFrmHandle);
+            blitBufferToBuffer(backgroundFrmImage.getData() + pitch * INVENTORY_LOOT_LEFT_SCROLLER_Y + INVENTORY_LOOT_LEFT_SCROLLER_X,
+                INVENTORY_SLOT_WIDTH,
+                gInventorySlotsCount * INVENTORY_SLOT_HEIGHT,
+                pitch,
+                windowBuffer + pitch * INVENTORY_LOOT_LEFT_SCROLLER_Y + INVENTORY_LOOT_LEFT_SCROLLER_X,
+                pitch);
         }
     } else if (inventoryWindowType == INVENTORY_WINDOW_TYPE_TRADE) {
         pitch = INVENTORY_TRADE_WINDOW_WIDTH;
@@ -1384,15 +1752,12 @@ static void _display_inventory(int a1, int a2, int inventoryWindowType)
         int oldFont = fontGetCurrent();
         fontSetCurrent(101);
 
+        FrmImage backgroundFrm;
         int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 114, 0, 0, 0);
-
-        CacheEntry* backgroundFrmHandle;
-        unsigned char* backgroundFrmData = artLockFrameData(backgroundFid, 0, 0, &backgroundFrmHandle);
-        if (backgroundFrmData != NULL) {
+        if (backgroundFrm.lock(backgroundFid)) {
             int x = INVENTORY_LOOT_LEFT_SCROLLER_X;
             int y = INVENTORY_LOOT_LEFT_SCROLLER_Y + gInventorySlotsCount * INVENTORY_SLOT_HEIGHT + 2;
-            blitBufferToBuffer(backgroundFrmData + pitch * y + x, INVENTORY_SLOT_WIDTH, fontGetLineHeight(), pitch, windowBuffer + pitch * y + x, pitch);
-            artUnlock(backgroundFrmHandle);
+            blitBufferToBuffer(backgroundFrm.getData() + pitch * y + x, INVENTORY_SLOT_WIDTH, fontGetLineHeight(), pitch, windowBuffer + pitch * y + x, pitch);
         }
 
         Object* object = _stack[0];
@@ -1436,13 +1801,15 @@ static void _display_target_inventory(int a1, int a2, Inventory* inventory, int 
     if (inventoryWindowType == INVENTORY_WINDOW_TYPE_LOOT) {
         pitch = INVENTORY_LOOT_WINDOW_WIDTH;
 
+        FrmImage backgroundFrmImage;
         int fid = buildFid(OBJ_TYPE_INTERFACE, 114, 0, 0, 0);
-
-        CacheEntry* handle;
-        unsigned char* data = artLockFrameData(fid, 0, 0, &handle);
-        if (data != NULL) {
-            blitBufferToBuffer(data + pitch * INVENTORY_LOOT_RIGHT_SCROLLER_Y + INVENTORY_LOOT_RIGHT_SCROLLER_X, INVENTORY_SLOT_WIDTH, INVENTORY_SLOT_HEIGHT * gInventorySlotsCount, pitch, windowBuffer + pitch * INVENTORY_LOOT_RIGHT_SCROLLER_Y + INVENTORY_LOOT_RIGHT_SCROLLER_X, pitch);
-            artUnlock(handle);
+        if (backgroundFrmImage.lock(fid)) {
+            blitBufferToBuffer(backgroundFrmImage.getData() + pitch * INVENTORY_LOOT_RIGHT_SCROLLER_Y + INVENTORY_LOOT_RIGHT_SCROLLER_X,
+                INVENTORY_SLOT_WIDTH,
+                INVENTORY_SLOT_HEIGHT * gInventorySlotsCount,
+                pitch,
+                windowBuffer + pitch * INVENTORY_LOOT_RIGHT_SCROLLER_Y + INVENTORY_LOOT_RIGHT_SCROLLER_X,
+                pitch);
         }
     } else if (inventoryWindowType == INVENTORY_WINDOW_TYPE_TRADE) {
         pitch = INVENTORY_TRADE_WINDOW_WIDTH;
@@ -1503,15 +1870,17 @@ static void _display_target_inventory(int a1, int a2, Inventory* inventory, int 
         int oldFont = fontGetCurrent();
         fontSetCurrent(101);
 
+        FrmImage backgroundFrmImage;
         int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 114, 0, 0, 0);
-
-        CacheEntry* backgroundFrmHandle;
-        unsigned char* backgroundFrmData = artLockFrameData(backgroundFid, 0, 0, &backgroundFrmHandle);
-        if (backgroundFrmData != NULL) {
+        if (backgroundFrmImage.lock(backgroundFid)) {
             int x = INVENTORY_LOOT_RIGHT_SCROLLER_X;
             int y = INVENTORY_LOOT_RIGHT_SCROLLER_Y + INVENTORY_SLOT_HEIGHT * gInventorySlotsCount + 2;
-            blitBufferToBuffer(backgroundFrmData + pitch * y + x, INVENTORY_SLOT_WIDTH, fontGetLineHeight(), pitch, windowBuffer + pitch * y + x, pitch);
-            artUnlock(backgroundFrmHandle);
+            blitBufferToBuffer(backgroundFrmImage.getData() + pitch * y + x,
+                INVENTORY_SLOT_WIDTH,
+                fontGetLineHeight(),
+                pitch,
+                windowBuffer + pitch * y + x,
+                pitch);
         }
 
         Object* object = _target_stack[_target_curr_stack];
@@ -1656,7 +2025,6 @@ static void _display_body(int fid, int inventoryWindowType)
 
         int win;
         Rect rect;
-        CacheEntry* backrgroundFrmHandle;
         if (inventoryWindowType == INVENTORY_WINDOW_TYPE_TRADE) {
             unsigned char* windowBuffer = windowGetBuffer(_barter_back_win);
             int windowPitch = windowGetWidth(_barter_back_win);
@@ -1672,12 +2040,10 @@ static void _display_body(int fid, int inventoryWindowType)
             rect.right = rect.left + INVENTORY_BODY_VIEW_WIDTH - 1;
             rect.bottom = rect.top + INVENTORY_BODY_VIEW_HEIGHT - 1;
 
-            int frmId = gGameDialogSpeakerIsPartyMember ? 420 : 111;
-            int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, frmId, 0, 0, 0);
-
-            unsigned char* src = artLockFrameData(backgroundFid, 0, 0, &backrgroundFrmHandle);
-            if (src != NULL) {
-                blitBufferToBuffer(src + rect.top * 640 + rect.left,
+            FrmImage backgroundFrmImage;
+            int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, gGameDialogSpeakerIsPartyMember ? 420 : 111, 0, 0, 0);
+            if (backgroundFrmImage.lock(backgroundFid)) {
+                blitBufferToBuffer(backgroundFrmImage.getData() + rect.top * 640 + rect.left,
                     INVENTORY_BODY_VIEW_WIDTH,
                     INVENTORY_BODY_VIEW_HEIGHT,
                     640,
@@ -1715,10 +2081,10 @@ static void _display_body(int fid, int inventoryWindowType)
             rect.right = rect.left + INVENTORY_BODY_VIEW_WIDTH - 1;
             rect.bottom = rect.top + INVENTORY_BODY_VIEW_HEIGHT - 1;
 
+            FrmImage backgroundFrmImage;
             int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 114, 0, 0, 0);
-            unsigned char* src = artLockFrameData(backgroundFid, 0, 0, &backrgroundFrmHandle);
-            if (src != NULL) {
-                blitBufferToBuffer(src + INVENTORY_LOOT_WINDOW_WIDTH * rect.top + rect.left,
+            if (backgroundFrmImage.lock(backgroundFid)) {
+                blitBufferToBuffer(backgroundFrmImage.getData() + INVENTORY_LOOT_WINDOW_WIDTH * rect.top + rect.left,
                     INVENTORY_BODY_VIEW_WIDTH,
                     INVENTORY_BODY_VIEW_HEIGHT,
                     INVENTORY_LOOT_WINDOW_WIDTH,
@@ -1734,11 +2100,10 @@ static void _display_body(int fid, int inventoryWindowType)
         }
         windowRefreshRect(win, &rect);
 
-        artUnlock(backrgroundFrmHandle);
         artUnlock(handle);
     }
 
-    gInventoryWindowDudeRotationTimestamp = _get_time();
+    gInventoryWindowDudeRotationTimestamp = getTicks();
 }
 
 // 0x470A2C
@@ -1943,23 +2308,29 @@ static void _inven_pickup(int keyCode, int a2)
                 width = INVENTORY_SLOT_WIDTH;
             }
 
-            CacheEntry* backgroundFrmHandle;
+            FrmImage backgroundFrmImage;
             int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 48, 0, 0, 0);
-            unsigned char* backgroundFrmData = artLockFrameData(backgroundFid, 0, 0, &backgroundFrmHandle);
-            if (backgroundFrmData != NULL) {
-                blitBufferToBuffer(backgroundFrmData + INVENTORY_WINDOW_WIDTH * rect.top + rect.left, width, height, INVENTORY_WINDOW_WIDTH, windowBuffer + INVENTORY_WINDOW_WIDTH * rect.top + rect.left, INVENTORY_WINDOW_WIDTH);
-                artUnlock(backgroundFrmHandle);
+            if (backgroundFrmImage.lock(backgroundFid)) {
+                blitBufferToBuffer(backgroundFrmImage.getData() + INVENTORY_WINDOW_WIDTH * rect.top + rect.left,
+                    width,
+                    height,
+                    INVENTORY_WINDOW_WIDTH,
+                    windowBuffer + INVENTORY_WINDOW_WIDTH * rect.top + rect.left,
+                    INVENTORY_WINDOW_WIDTH);
             }
 
             rect.right = rect.left + width - 1;
             rect.bottom = rect.top + height - 1;
         } else {
-            CacheEntry* backgroundFrmHandle;
+            FrmImage backgroundFrmImage;
             int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 48, 0, 0, 0);
-            unsigned char* backgroundFrmData = artLockFrameData(backgroundFid, 0, 0, &backgroundFrmHandle);
-            if (backgroundFrmData != NULL) {
-                blitBufferToBuffer(backgroundFrmData + INVENTORY_WINDOW_WIDTH * 286 + 154, 180, 61, INVENTORY_WINDOW_WIDTH, windowBuffer + INVENTORY_WINDOW_WIDTH * 286 + 154, INVENTORY_WINDOW_WIDTH);
-                artUnlock(backgroundFrmHandle);
+            if (backgroundFrmImage.lock(backgroundFid)) {
+                blitBufferToBuffer(backgroundFrmImage.getData() + INVENTORY_WINDOW_WIDTH * 286 + 154,
+                    180,
+                    61,
+                    INVENTORY_WINDOW_WIDTH,
+                    windowBuffer + INVENTORY_WINDOW_WIDTH * 286 + 154,
+                    INVENTORY_WINDOW_WIDTH);
             }
 
             rect.left = 154;
@@ -1972,14 +2343,13 @@ static void _inven_pickup(int keyCode, int a2)
         _display_inventory(a2, v3, INVENTORY_WINDOW_TYPE_NORMAL);
     }
 
-    CacheEntry* itemInventoryFrmHandle;
+    FrmImage itemInventoryFrmImage;
     int itemInventoryFid = itemGetInventoryFid(a1a);
-    Art* itemInventoryFrm = artLock(itemInventoryFid, &itemInventoryFrmHandle);
-    if (itemInventoryFrm != NULL) {
-        int width = artGetWidth(itemInventoryFrm, 0, 0);
-        int height = artGetHeight(itemInventoryFrm, 0, 0);
-        unsigned char* itemInventoryFrmData = artGetFrameData(itemInventoryFrm, 0, 0);
-        mouseSetFrame(itemInventoryFrmData, width, height, width, width / 2, height / 2, 0);
+    if (itemInventoryFrmImage.lock(itemInventoryFid)) {
+        int width = itemInventoryFrmImage.getWidth();
+        int height = itemInventoryFrmImage.getHeight();
+        unsigned char* data = itemInventoryFrmImage.getData();
+        mouseSetFrame(data, width, height, width, width / 2, height / 2, 0);
         soundPlayFile("ipickup1");
     }
 
@@ -1988,12 +2358,19 @@ static void _inven_pickup(int keyCode, int a2)
     }
 
     do {
-        _get_input();
+        sharedFpsLimiter.mark();
+
+        inputGetInput();
         _display_body(-1, INVENTORY_WINDOW_TYPE_NORMAL);
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     } while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0);
 
-    if (itemInventoryFrm != NULL) {
-        artUnlock(itemInventoryFrmHandle);
+    if (itemInventoryFrmImage.isLocked()) {
+        itemInventoryFrmImage.unlock();
         soundPlayFile("iputdown");
     }
 
@@ -2253,13 +2630,15 @@ void inventoryOpenUseItemOn(Object* a1)
     _display_inventory(_stack_offset[_curr_stack], -1, INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
     inventorySetCursor(INVENTORY_WINDOW_CURSOR_HAND);
     for (;;) {
+        sharedFpsLimiter.mark();
+
         if (_game_user_wants_to_quit != 0) {
             break;
         }
 
         _display_body(-1, INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
 
-        int keyCode = _get_input();
+        int keyCode = inputGetInput();
         switch (keyCode) {
         case KEY_HOME:
             _stack_offset[_curr_stack] = 0;
@@ -2363,6 +2742,11 @@ void inventoryOpenUseItemOn(Object* a1)
         if (keyCode == KEY_ESCAPE) {
             break;
         }
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     }
 
     _exit_inventory(isoWasEnabled);
@@ -2494,14 +2878,16 @@ static void inventoryRenderSummary()
 
     unsigned char* windowBuffer = windowGetBuffer(gInventoryWindow);
 
-    int fid = buildFid(OBJ_TYPE_INTERFACE, 48, 0, 0, 0);
-
-    CacheEntry* backgroundHandle;
-    unsigned char* backgroundData = artLockFrameData(fid, 0, 0, &backgroundHandle);
-    if (backgroundData != NULL) {
-        blitBufferToBuffer(backgroundData + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X, 152, 188, INVENTORY_WINDOW_WIDTH, windowBuffer + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X, INVENTORY_WINDOW_WIDTH);
+    FrmImage backgroundFrmImage;
+    int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 48, 0, 0, 0);
+    if (backgroundFrmImage.lock(backgroundFid)) {
+        blitBufferToBuffer(backgroundFrmImage.getData() + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X,
+            152,
+            188,
+            INVENTORY_WINDOW_WIDTH,
+            windowBuffer + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X,
+            INVENTORY_WINDOW_WIDTH);
     }
-    artUnlock(backgroundHandle);
 
     // Render character name.
     const char* critterName = critterGetName(_stack[0]);
@@ -2510,14 +2896,14 @@ static void inventoryRenderSummary()
     bufferDrawLine(windowBuffer,
         INVENTORY_WINDOW_WIDTH,
         INVENTORY_SUMMARY_X,
-        3 * fontGetLineHeight() / 2 + INVENTORY_SUMMARY_Y,
+        3 * 10 / 2 + INVENTORY_SUMMARY_Y,
         INVENTORY_SUMMARY_MAX_X,
-        3 * fontGetLineHeight() / 2 + INVENTORY_SUMMARY_Y,
+        3 * 10 / 2 + INVENTORY_SUMMARY_Y,
         _colorTable[992]);
 
     MessageListItem messageListItem;
 
-    int offset = INVENTORY_WINDOW_WIDTH * 2 * fontGetLineHeight() + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X;
+    int offset = INVENTORY_WINDOW_WIDTH * 2 * 10 + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X;
     for (int stat = 0; stat < 7; stat++) {
         messageListItem.num = stat;
         if (messageListGetItem(&gInventoryMessageList, &messageListItem)) {
@@ -2528,10 +2914,10 @@ static void inventoryRenderSummary()
         sprintf(formattedText, "%d", value);
         fontDrawText(windowBuffer + offset + 24, formattedText, 80, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
 
-        offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += INVENTORY_WINDOW_WIDTH * 10;
     }
 
-    offset -= INVENTORY_WINDOW_WIDTH * 7 * fontGetLineHeight();
+    offset -= INVENTORY_WINDOW_WIDTH * 7 * 10;
 
     for (int index = 0; index < 7; index += 1) {
         messageListItem.num = 7 + index;
@@ -2551,11 +2937,11 @@ static void inventoryRenderSummary()
 
         fontDrawText(windowBuffer + offset + 104, formattedText, 80, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
 
-        offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += INVENTORY_WINDOW_WIDTH * 10;
     }
 
-    bufferDrawLine(windowBuffer, INVENTORY_WINDOW_WIDTH, INVENTORY_SUMMARY_X, 18 * fontGetLineHeight() / 2 + 48, INVENTORY_SUMMARY_MAX_X, 18 * fontGetLineHeight() / 2 + 48, _colorTable[992]);
-    bufferDrawLine(windowBuffer, INVENTORY_WINDOW_WIDTH, INVENTORY_SUMMARY_X, 26 * fontGetLineHeight() / 2 + 48, INVENTORY_SUMMARY_MAX_X, 26 * fontGetLineHeight() / 2 + 48, _colorTable[992]);
+    bufferDrawLine(windowBuffer, INVENTORY_WINDOW_WIDTH, INVENTORY_SUMMARY_X, 18 * 10 / 2 + 48, INVENTORY_SUMMARY_MAX_X, 18 * 10 / 2 + 48, _colorTable[992]);
+    bufferDrawLine(windowBuffer, INVENTORY_WINDOW_WIDTH, INVENTORY_SUMMARY_X, 26 * 10 / 2 + 48, INVENTORY_SUMMARY_MAX_X, 26 * 10 / 2 + 48, _colorTable[992]);
 
     Object* itemsInHands[2] = {
         gInventoryLeftHandItem,
@@ -2577,7 +2963,7 @@ static void inventoryRenderSummary()
         HIT_MODE_KICK,
     };
 
-    offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+    offset += INVENTORY_WINDOW_WIDTH * 10;
 
     for (int index = 0; index < 2; index += 1) {
         Object* item = itemsInHands[index];
@@ -2590,7 +2976,7 @@ static void inventoryRenderSummary()
                 fontDrawText(windowBuffer + offset, messageListItem.text, 120, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
             }
 
-            offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+            offset += INVENTORY_WINDOW_WIDTH * 10;
 
             // Unarmed dmg:
             messageListItem.num = 24;
@@ -2602,8 +2988,8 @@ static void inventoryRenderSummary()
                     int actions[2];
                     interfaceGetItemActions(&(actions[0]), &(actions[1]));
 
-                    bool isSecondary = actions[index] == INTERFACE_ITEM_ACTION_SECONDARY ||
-                        actions[index] == INTERFACE_ITEM_ACTION_SECONDARY_AIMING;
+                    bool isSecondary = actions[index] == INTERFACE_ITEM_ACTION_SECONDARY
+                        || actions[index] == INTERFACE_ITEM_ACTION_SECONDARY_AIMING;
 
                     if (index == HAND_LEFT) {
                         hitMode = unarmedGetPunchHitMode(isSecondary);
@@ -2626,14 +3012,14 @@ static void inventoryRenderSummary()
 
             fontDrawText(windowBuffer + offset, formattedText, 120, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
 
-            offset += 3 * INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+            offset += 3 * INVENTORY_WINDOW_WIDTH * 10;
             continue;
         }
 
         const char* itemName = itemGetName(item);
         fontDrawText(windowBuffer + offset, itemName, 140, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
 
-        offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += INVENTORY_WINDOW_WIDTH * 10;
 
         int itemType = itemGetType(item);
         if (itemType != ITEM_TYPE_WEAPON) {
@@ -2645,7 +3031,7 @@ static void inventoryRenderSummary()
                 }
             }
 
-            offset += 3 * INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+            offset += 3 * INVENTORY_WINDOW_WIDTH * 10;
             continue;
         }
 
@@ -2655,8 +3041,8 @@ static void inventoryRenderSummary()
             int actions[2];
             interfaceGetItemActions(&(actions[0]), &(actions[1]));
 
-            bool isSecondary = actions[index] == INTERFACE_ITEM_ACTION_SECONDARY ||
-                actions[index] == INTERFACE_ITEM_ACTION_SECONDARY_AIMING;
+            bool isSecondary = actions[index] == INTERFACE_ITEM_ACTION_SECONDARY
+                || actions[index] == INTERFACE_ITEM_ACTION_SECONDARY_AIMING;
 
             if (isSecondary) {
                 hitMode = secondaryHitModes[index];
@@ -2724,7 +3110,7 @@ static void inventoryRenderSummary()
             fontDrawText(windowBuffer + offset, formattedText, 140, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
         }
 
-        offset += INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += INVENTORY_WINDOW_WIDTH * 10;
 
         if (ammoGetCapacity(item) > 0) {
             int ammoTypePid = weaponGetAmmoTypePid(item);
@@ -2754,7 +3140,7 @@ static void inventoryRenderSummary()
             fontDrawText(windowBuffer + offset, formattedText, 140, INVENTORY_WINDOW_WIDTH, _colorTable[992]);
         }
 
-        offset += 2 * INVENTORY_WINDOW_WIDTH * fontGetLineHeight();
+        offset += 2 * INVENTORY_WINDOW_WIDTH * 10;
     }
 
     // Total wt:
@@ -3248,14 +3634,16 @@ static void inventoryExamineItem(Object* critter, Object* item)
     unsigned char* windowBuffer = windowGetBuffer(gInventoryWindow);
 
     // Clear item description area.
+    FrmImage backgroundFrmImage;
     int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 48, 0, 0, 0);
-
-    CacheEntry* handle;
-    unsigned char* backgroundData = artLockFrameData(backgroundFid, 0, 0, &handle);
-    if (backgroundData != NULL) {
-        blitBufferToBuffer(backgroundData + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X, 152, 188, INVENTORY_WINDOW_WIDTH, windowBuffer + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X, INVENTORY_WINDOW_WIDTH);
+    if (backgroundFrmImage.lock(backgroundFid)) {
+        blitBufferToBuffer(backgroundFrmImage.getData() + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X,
+            152,
+            200,
+            INVENTORY_WINDOW_WIDTH,
+            windowBuffer + INVENTORY_WINDOW_WIDTH * INVENTORY_SUMMARY_Y + INVENTORY_SUMMARY_X,
+            INVENTORY_WINDOW_WIDTH);
     }
-    artUnlock(handle);
 
     // Reset item description lines counter.
     _inven_display_msg_line = 0;
@@ -3320,7 +3708,9 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
 
     int mouseState;
     do {
-        _get_input();
+        sharedFpsLimiter.mark();
+
+        inputGetInput();
 
         if (inventoryWindowType == INVENTORY_WINDOW_TYPE_NORMAL) {
             _display_body(-1, INVENTORY_WINDOW_TYPE_NORMAL);
@@ -3336,6 +3726,11 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
             windowRefresh(gInventoryWindow);
             return;
         }
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     } while ((mouseState & MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT) != MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT);
 
     inventorySetCursor(INVENTORY_WINDOW_CURSOR_BLANK);
@@ -3440,7 +3835,9 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
     int menuItemIndex = 0;
     int previousMouseY = y;
     while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_UP) == 0) {
-        _get_input();
+        sharedFpsLimiter.mark();
+
+        inputGetInput();
 
         if (inventoryWindowType == INVENTORY_WINDOW_TYPE_NORMAL) {
             _display_body(-1, INVENTORY_WINDOW_TYPE_NORMAL);
@@ -3461,6 +3858,11 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
             windowRefreshRect(gInventoryWindow, &rect);
             previousMouseY = y;
         }
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     }
 
     buttonDestroy(btn);
@@ -3475,16 +3877,16 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
             windowBuffer + windowDescription->width * rect.top + rect.left,
             windowDescription->width);
     } else {
+        FrmImage backgroundFrmImage;
         int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, windowDescription->field_0, 0, 0, 0);
-        CacheEntry* backgroundFrmHandle;
-        unsigned char* backgroundFrmData = artLockFrameData(backgroundFid, 0, 0, &backgroundFrmHandle);
-        blitBufferToBuffer(backgroundFrmData + windowDescription->width * rect.top + rect.left,
-            cursorData->width,
-            menuButtonHeight,
-            windowDescription->width,
-            windowBuffer + windowDescription->width * rect.top + rect.left,
-            windowDescription->width);
-        artUnlock(backgroundFrmHandle);
+        if (backgroundFrmImage.lock(backgroundFid)) {
+            blitBufferToBuffer(backgroundFrmImage.getData() + windowDescription->width * rect.top + rect.left,
+                cursorData->width,
+                menuButtonHeight,
+                windowDescription->width,
+                windowBuffer + windowDescription->width * rect.top + rect.left,
+                windowDescription->width);
+        }
     }
 
     _mouse_set_position(x, y);
@@ -3643,7 +4045,7 @@ static void inventoryWindowOpenContextMenu(int keyCode, int inventoryWindowType)
 int inventoryOpenLooting(Object* a1, Object* a2)
 {
     int arrowFrmIds[INVENTORY_ARROW_FRM_COUNT];
-    CacheEntry* arrowFrmHandles[INVENTORY_ARROW_FRM_COUNT];
+    FrmImage arrowFrmImages[INVENTORY_ARROW_FRM_COUNT];
     MessageListItem messageListItem;
 
     memcpy(arrowFrmIds, gInventoryArrowFrmIds, sizeof(gInventoryArrowFrmIds));
@@ -3653,7 +4055,7 @@ int inventoryOpenLooting(Object* a1, Object* a2)
     }
 
     if (FID_TYPE(a2->fid) == OBJ_TYPE_CRITTER) {
-        if (_critter_flag_check(a2->pid, CRITTER_FLAG_0x20)) {
+        if (_critter_flag_check(a2->pid, CRITTER_NO_STEAL)) {
             // You can't find anything to take from that.
             messageListItem.num = 50;
             if (messageListGetItem(&gInventoryMessageList, &messageListItem)) {
@@ -3760,23 +4162,29 @@ int inventoryOpenLooting(Object* a1, Object* a2)
 
             if (critterCount > 1) {
                 int fid;
-                unsigned char* buttonUpData;
-                unsigned char* buttonDownData;
                 int btn;
-
-                for (int index = 0; index < INVENTORY_ARROW_FRM_COUNT; index++) {
-                    arrowFrmHandles[index] = INVALID_CACHE_ENTRY;
-                }
 
                 // Setup left arrow button.
                 fid = buildFid(OBJ_TYPE_INTERFACE, arrowFrmIds[INVENTORY_ARROW_FRM_LEFT_ARROW_UP], 0, 0, 0);
-                buttonUpData = artLockFrameData(fid, 0, 0, &(arrowFrmHandles[INVENTORY_ARROW_FRM_LEFT_ARROW_UP]));
+                arrowFrmImages[INVENTORY_ARROW_FRM_LEFT_ARROW_UP].lock(fid);
 
                 fid = buildFid(OBJ_TYPE_INTERFACE, arrowFrmIds[INVENTORY_ARROW_FRM_LEFT_ARROW_DOWN], 0, 0, 0);
-                buttonDownData = artLockFrameData(fid, 0, 0, &(arrowFrmHandles[INVENTORY_ARROW_FRM_LEFT_ARROW_DOWN]));
+                arrowFrmImages[INVENTORY_ARROW_FRM_LEFT_ARROW_DOWN].lock(fid);
 
-                if (buttonUpData != NULL && buttonDownData != NULL) {
-                    btn = buttonCreate(gInventoryWindow, 436, 162, 20, 18, -1, -1, KEY_PAGE_UP, -1, buttonUpData, buttonDownData, NULL, 0);
+                if (arrowFrmImages[INVENTORY_ARROW_FRM_LEFT_ARROW_UP].isLocked() && arrowFrmImages[INVENTORY_ARROW_FRM_LEFT_ARROW_DOWN].isLocked()) {
+                    btn = buttonCreate(gInventoryWindow,
+                        436,
+                        162,
+                        20,
+                        18,
+                        -1,
+                        -1,
+                        KEY_PAGE_UP,
+                        -1,
+                        arrowFrmImages[INVENTORY_ARROW_FRM_LEFT_ARROW_UP].getData(),
+                        arrowFrmImages[INVENTORY_ARROW_FRM_LEFT_ARROW_DOWN].getData(),
+                        NULL,
+                        0);
                     if (btn != -1) {
                         buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
                     }
@@ -3784,13 +4192,25 @@ int inventoryOpenLooting(Object* a1, Object* a2)
 
                 // Setup right arrow button.
                 fid = buildFid(OBJ_TYPE_INTERFACE, arrowFrmIds[INVENTORY_ARROW_FRM_RIGHT_ARROW_UP], 0, 0, 0);
-                buttonUpData = artLockFrameData(fid, 0, 0, &(arrowFrmHandles[INVENTORY_ARROW_FRM_RIGHT_ARROW_UP]));
+                arrowFrmImages[INVENTORY_ARROW_FRM_RIGHT_ARROW_UP].lock(fid);
 
                 fid = buildFid(OBJ_TYPE_INTERFACE, arrowFrmIds[INVENTORY_ARROW_FRM_RIGHT_ARROW_DOWN], 0, 0, 0);
-                buttonDownData = artLockFrameData(fid, 0, 0, &(arrowFrmHandles[INVENTORY_ARROW_FRM_RIGHT_ARROW_DOWN]));
+                arrowFrmImages[INVENTORY_ARROW_FRM_RIGHT_ARROW_DOWN].lock(fid);
 
-                if (buttonUpData != NULL && buttonDownData != NULL) {
-                    btn = buttonCreate(gInventoryWindow, 456, 162, 20, 18, -1, -1, KEY_PAGE_DOWN, -1, buttonUpData, buttonDownData, NULL, 0);
+                if (arrowFrmImages[INVENTORY_ARROW_FRM_RIGHT_ARROW_UP].isLocked() && arrowFrmImages[INVENTORY_ARROW_FRM_RIGHT_ARROW_DOWN].isLocked()) {
+                    btn = buttonCreate(gInventoryWindow,
+                        456,
+                        162,
+                        20,
+                        18,
+                        -1,
+                        -1,
+                        KEY_PAGE_DOWN,
+                        -1,
+                        arrowFrmImages[INVENTORY_ARROW_FRM_RIGHT_ARROW_UP].getData(),
+                        arrowFrmImages[INVENTORY_ARROW_FRM_RIGHT_ARROW_DOWN].getData(),
+                        NULL,
+                        0);
                     if (btn != -1) {
                         buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
                     }
@@ -3814,6 +4234,8 @@ int inventoryOpenLooting(Object* a1, Object* a2)
     int stealingXp = 0;
     int stealingXpBonus = 10;
     for (;;) {
+        sharedFpsLimiter.mark();
+
         if (_game_user_wants_to_quit != 0) {
             break;
         }
@@ -3822,7 +4244,7 @@ int inventoryOpenLooting(Object* a1, Object* a2)
             break;
         }
 
-        int keyCode = _get_input();
+        int keyCode = inputGetInput();
 
         if (keyCode == KEY_CTRL_Q || keyCode == KEY_CTRL_X || keyCode == KEY_F10) {
             showQuitConfirmationDialog();
@@ -4002,14 +4424,15 @@ int inventoryOpenLooting(Object* a1, Object* a2)
         if (keyCode == KEY_ESCAPE) {
             break;
         }
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     }
 
     if (critterCount != 0) {
         objectListFree(critters);
-
-        for (int index = 0; index < INVENTORY_ARROW_FRM_COUNT; index++) {
-            artUnlock(arrowFrmHandles[index]);
-        }
     }
 
     if (_gIsSteal) {
@@ -4132,12 +4555,15 @@ static int _move_inventory(Object* a1, int a2, Object* a3, bool a4)
     if (v38) {
         unsigned char* windowBuffer = windowGetBuffer(gInventoryWindow);
 
-        CacheEntry* handle;
-        int fid = buildFid(OBJ_TYPE_INTERFACE, 114, 0, 0, 0);
-        unsigned char* data = artLockFrameData(fid, 0, 0, &handle);
-        if (data != NULL) {
-            blitBufferToBuffer(data + INVENTORY_LOOT_WINDOW_WIDTH * rect.top + rect.left, INVENTORY_SLOT_WIDTH, INVENTORY_SLOT_HEIGHT, INVENTORY_LOOT_WINDOW_WIDTH, windowBuffer + INVENTORY_LOOT_WINDOW_WIDTH * rect.top + rect.left, INVENTORY_LOOT_WINDOW_WIDTH);
-            artUnlock(handle);
+        FrmImage backgroundFrmImage;
+        int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, 114, 0, 0, 0);
+        if (backgroundFrmImage.lock(backgroundFid)) {
+            blitBufferToBuffer(backgroundFrmImage.getData() + INVENTORY_LOOT_WINDOW_WIDTH * rect.top + rect.left,
+                INVENTORY_SLOT_WIDTH,
+                INVENTORY_SLOT_HEIGHT,
+                INVENTORY_LOOT_WINDOW_WIDTH,
+                windowBuffer + INVENTORY_LOOT_WINDOW_WIDTH * rect.top + rect.left,
+                INVENTORY_LOOT_WINDOW_WIDTH);
         }
 
         rect.right = rect.left + INVENTORY_SLOT_WIDTH - 1;
@@ -4145,23 +4571,29 @@ static int _move_inventory(Object* a1, int a2, Object* a3, bool a4)
         windowRefreshRect(gInventoryWindow, &rect);
     }
 
-    CacheEntry* inventoryFrmHandle;
-    int inventoryFid = itemGetInventoryFid(a1);
-    Art* inventoryFrm = artLock(inventoryFid, &inventoryFrmHandle);
-    if (inventoryFrm != NULL) {
-        int width = artGetWidth(inventoryFrm, 0, 0);
-        int height = artGetHeight(inventoryFrm, 0, 0);
-        unsigned char* data = artGetFrameData(inventoryFrm, 0, 0);
+    FrmImage itemInventoryFrmImage;
+    int itemInventoryFid = itemGetInventoryFid(a1);
+    if (itemInventoryFrmImage.lock(itemInventoryFid)) {
+        int width = itemInventoryFrmImage.getWidth();
+        int height = itemInventoryFrmImage.getHeight();
+        unsigned char* data = itemInventoryFrmImage.getData();
         mouseSetFrame(data, width, height, width, width / 2, height / 2, 0);
         soundPlayFile("ipickup1");
     }
 
     do {
-        _get_input();
+        sharedFpsLimiter.mark();
+
+        inputGetInput();
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     } while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0);
 
-    if (inventoryFrm != NULL) {
-        artUnlock(inventoryFrmHandle);
+    if (itemInventoryFrmImage.isLocked()) {
+        itemInventoryFrmImage.unlock();
         soundPlayFile("iputdown");
     }
 
@@ -4361,23 +4793,29 @@ static void _barter_move_inventory(Object* a1, int quantity, int a3, int a4, Obj
         windowRefreshRect(gInventoryWindow, &rect);
     }
 
-    CacheEntry* inventoryFrmHandle;
-    int inventoryFid = itemGetInventoryFid(a1);
-    Art* inventoryFrm = artLock(inventoryFid, &inventoryFrmHandle);
-    if (inventoryFrm != NULL) {
-        int width = artGetWidth(inventoryFrm, 0, 0);
-        int height = artGetHeight(inventoryFrm, 0, 0);
-        unsigned char* data = artGetFrameData(inventoryFrm, 0, 0);
+    FrmImage itemInventoryFrmImage;
+    int itemInventoryFid = itemGetInventoryFid(a1);
+    if (itemInventoryFrmImage.lock(itemInventoryFid)) {
+        int width = itemInventoryFrmImage.getWidth();
+        int height = itemInventoryFrmImage.getHeight();
+        unsigned char* data = itemInventoryFrmImage.getData();
         mouseSetFrame(data, width, height, width, width / 2, height / 2, 0);
         soundPlayFile("ipickup1");
     }
 
     do {
-        _get_input();
+        sharedFpsLimiter.mark();
+
+        inputGetInput();
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     } while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0);
 
-    if (inventoryFrm != NULL) {
-        artUnlock(inventoryFrmHandle);
+    if (itemInventoryFrmImage.isLocked()) {
+        itemInventoryFrmImage.unlock();
         soundPlayFile("iputdown");
     }
 
@@ -4444,23 +4882,29 @@ static void _barter_move_from_table_inventory(Object* a1, int quantity, int a3, 
         windowRefreshRect(gInventoryWindow, &rect);
     }
 
-    CacheEntry* inventoryFrmHandle;
-    int inventoryFid = itemGetInventoryFid(a1);
-    Art* inventoryFrm = artLock(inventoryFid, &inventoryFrmHandle);
-    if (inventoryFrm != NULL) {
-        int width = artGetWidth(inventoryFrm, 0, 0);
-        int height = artGetHeight(inventoryFrm, 0, 0);
-        unsigned char* data = artGetFrameData(inventoryFrm, 0, 0);
+    FrmImage itemInventoryFrmImage;
+    int itemInventoryFid = itemGetInventoryFid(a1);
+    if (itemInventoryFrmImage.lock(itemInventoryFid)) {
+        int width = itemInventoryFrmImage.getWidth();
+        int height = itemInventoryFrmImage.getHeight();
+        unsigned char* data = itemInventoryFrmImage.getData();
         mouseSetFrame(data, width, height, width, width / 2, height / 2, 0);
         soundPlayFile("ipickup1");
     }
 
     do {
-        _get_input();
+        sharedFpsLimiter.mark();
+
+        inputGetInput();
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     } while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0);
 
-    if (inventoryFrm != NULL) {
-        artUnlock(inventoryFrmHandle);
+    if (itemInventoryFrmImage.isLocked()) {
+        itemInventoryFrmImage.unlock();
         soundPlayFile("iputdown");
     }
 
@@ -4666,11 +5110,13 @@ void inventoryOpenTrade(int win, Object* a2, Object* a3, Object* a4, int a5)
 
     int keyCode = -1;
     for (;;) {
+        sharedFpsLimiter.mark();
+
         if (keyCode == KEY_ESCAPE || _game_user_wants_to_quit != 0) {
             break;
         }
 
-        keyCode = _get_input();
+        keyCode = inputGetInput();
         if (keyCode == KEY_CTRL_Q || keyCode == KEY_CTRL_X || keyCode == KEY_F10) {
             showQuitConfirmationDialog();
         }
@@ -4888,6 +5334,11 @@ void inventoryOpenTrade(int win, Object* a2, Object* a3, Object* a4, int a5)
                 }
             }
         }
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     }
 
     itemMoveAll(a1a, a2);
@@ -5088,10 +5539,9 @@ static int _drop_ammo_into_weapon(Object* weapon, Object* ammo, Object** a3, int
 static void _draw_amount(int value, int inventoryWindowType)
 {
     // BIGNUM.frm
-    CacheEntry* handle;
-    int fid = buildFid(OBJ_TYPE_INTERFACE, 170, 0, 0, 0);
-    unsigned char* data = artLockFrameData(fid, 0, 0, &handle);
-    if (data == NULL) {
+    FrmImage numbersFrmImage;
+    int numbersFid = buildFid(OBJ_TYPE_INTERFACE, 170, 0, 0, 0);
+    if (!numbersFrmImage.lock(numbersFid)) {
         return;
     }
 
@@ -5116,7 +5566,7 @@ static void _draw_amount(int value, int inventoryWindowType)
         windowBuffer += rect.top * windowWidth + rect.left;
 
         for (int index = 0; index < 5; index++) {
-            unsigned char* src = data + 14 * ranks[index];
+            unsigned char* src = numbersFrmImage.getData() + 14 * ranks[index];
             blitBufferToBuffer(src, 14, 24, 336, windowBuffer, windowWidth);
             windowBuffer += 14;
         }
@@ -5127,12 +5577,11 @@ static void _draw_amount(int value, int inventoryWindowType)
         rect.bottom = 88;
 
         windowBuffer += windowWidth * rect.top + rect.left;
-        blitBufferToBuffer(data + 14 * (value / 60), 14, 24, 336, windowBuffer, windowWidth);
-        blitBufferToBuffer(data + 14 * (value % 60 / 10), 14, 24, 336, windowBuffer + 14 * 2, windowWidth);
-        blitBufferToBuffer(data + 14 * (value % 10), 14, 24, 336, windowBuffer + 14 * 3, windowWidth);
+        blitBufferToBuffer(numbersFrmImage.getData() + 14 * (value / 60), 14, 24, 336, windowBuffer, windowWidth);
+        blitBufferToBuffer(numbersFrmImage.getData() + 14 * (value % 60 / 10), 14, 24, 336, windowBuffer + 14 * 2, windowWidth);
+        blitBufferToBuffer(numbersFrmImage.getData() + 14 * (value % 10), 14, 24, 336, windowBuffer + 14 * 3, windowWidth);
     }
 
-    artUnlock(handle);
     windowRefreshRect(_mt_wid, &rect);
 }
 
@@ -5158,7 +5607,9 @@ static int inventoryQuantitySelect(int inventoryWindowType, Object* item, int ma
 
     bool v5 = false;
     for (;;) {
-        int keyCode = _get_input();
+        sharedFpsLimiter.mark();
+
+        int keyCode = inputGetInput();
         if (keyCode == KEY_ESCAPE) {
             inventoryQuantityWindowFree(inventoryWindowType);
             return -1;
@@ -5182,21 +5633,28 @@ static int inventoryQuantitySelect(int inventoryWindowType, Object* item, int ma
             if (value < max) {
                 if (inventoryWindowType == INVENTORY_WINDOW_TYPE_MOVE_ITEMS) {
                     if ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0) {
-                        _get_time();
+                        getTicks();
 
                         unsigned int delay = 100;
                         while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0) {
+                            sharedFpsLimiter.mark();
+
                             if (value < max) {
                                 value++;
                             }
 
                             _draw_amount(value, inventoryWindowType);
-                            _get_input();
+                            inputGetInput();
 
                             if (delay > 1) {
                                 delay--;
-                                coreDelayProcessingEvents(delay);
+                                inputPauseForTocks(delay);
                             }
+
+    #ifndef __vita__
+            renderPresent();
+#endif
+                            sharedFpsLimiter.throttle();
                         }
                     } else {
                         if (value < max) {
@@ -5215,21 +5673,28 @@ static int inventoryQuantitySelect(int inventoryWindowType, Object* item, int ma
             if (value > min) {
                 if (inventoryWindowType == INVENTORY_WINDOW_TYPE_MOVE_ITEMS) {
                     if ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0) {
-                        _get_time();
+                        getTicks();
 
                         unsigned int delay = 100;
                         while ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_REPEAT) != 0) {
+                            sharedFpsLimiter.mark();
+
                             if (value > min) {
                                 value--;
                             }
 
                             _draw_amount(value, inventoryWindowType);
-                            _get_input();
+                            inputGetInput();
 
                             if (delay > 1) {
                                 delay--;
-                                coreDelayProcessingEvents(delay);
+                                inputPauseForTocks(delay);
                             }
+
+    #ifndef __vita__
+            renderPresent();
+#endif
+                            sharedFpsLimiter.throttle();
                         }
                     } else {
                         if (value > min) {
@@ -5269,6 +5734,11 @@ static int inventoryQuantitySelect(int inventoryWindowType, Object* item, int ma
                 continue;
             }
         }
+
+#ifndef __vita__
+            renderPresent();
+#endif
+        sharedFpsLimiter.throttle();
     }
 
     inventoryQuantityWindowFree(inventoryWindowType);
@@ -5284,10 +5754,6 @@ static int inventoryQuantityWindowInit(int inventoryWindowType, Object* item)
     const int oldFont = fontGetCurrent();
     fontSetCurrent(103);
 
-    for (int index = 0; index < 8; index++) {
-        _mt_key[index] = NULL;
-    }
-
     const InventoryWindowDescription* windowDescription = &(gInventoryWindowDescriptions[inventoryWindowType]);
 
     // Maintain original position in original resolution, otherwise center it.
@@ -5300,12 +5766,15 @@ static int inventoryQuantityWindowInit(int inventoryWindowType, Object* item)
     _mt_wid = windowCreate(quantityWindowX, quantityWindowY, windowDescription->width, windowDescription->height, 257, WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
     unsigned char* windowBuffer = windowGetBuffer(_mt_wid);
 
-    CacheEntry* backgroundHandle;
+    FrmImage backgroundFrmImage;
     int backgroundFid = buildFid(OBJ_TYPE_INTERFACE, windowDescription->field_0, 0, 0, 0);
-    unsigned char* backgroundData = artLockFrameData(backgroundFid, 0, 0, &backgroundHandle);
-    if (backgroundData != NULL) {
-        blitBufferToBuffer(backgroundData, windowDescription->width, windowDescription->height, windowDescription->width, windowBuffer, windowDescription->width);
-        artUnlock(backgroundHandle);
+    if (backgroundFrmImage.lock(backgroundFid)) {
+        blitBufferToBuffer(backgroundFrmImage.getData(),
+            windowDescription->width,
+            windowDescription->height,
+            windowDescription->width,
+            windowBuffer,
+            windowDescription->width);
     }
 
     MessageListItem messageListItem;
@@ -5325,12 +5794,15 @@ static int inventoryQuantityWindowInit(int inventoryWindowType, Object* item)
         }
 
         // Timer overlay
-        CacheEntry* overlayFrmHandle;
+        FrmImage overlayFrmImage;
         int overlayFid = buildFid(OBJ_TYPE_INTERFACE, 306, 0, 0, 0);
-        unsigned char* overlayFrmData = artLockFrameData(overlayFid, 0, 0, &overlayFrmHandle);
-        if (overlayFrmData != NULL) {
-            blitBufferToBuffer(overlayFrmData, 105, 81, 105, windowBuffer + 34 * windowDescription->width + 113, windowDescription->width);
-            artUnlock(overlayFrmHandle);
+        if (overlayFrmImage.lock(overlayFid)) {
+            blitBufferToBuffer(overlayFrmImage.getData(),
+                105,
+                81,
+                105,
+                windowBuffer + 34 * windowDescription->width + 113,
+                windowDescription->width);
         }
     }
 
@@ -5348,19 +5820,29 @@ static int inventoryQuantityWindowInit(int inventoryWindowType, Object* item)
     }
 
     int fid;
-    unsigned char* buttonUpData;
-    unsigned char* buttonDownData;
     int btn;
 
     // Plus button
     fid = buildFid(OBJ_TYPE_INTERFACE, 193, 0, 0, 0);
-    buttonUpData = artLockFrameData(fid, 0, 0, &(_mt_key[0]));
+    _moveFrmImages[0].lock(fid);
 
     fid = buildFid(OBJ_TYPE_INTERFACE, 194, 0, 0, 0);
-    buttonDownData = artLockFrameData(fid, 0, 0, &(_mt_key[1]));
+    _moveFrmImages[1].lock(fid);
 
-    if (buttonUpData != NULL && buttonDownData != NULL) {
-        btn = buttonCreate(_mt_wid, x, y, 16, 12, -1, -1, 6000, -1, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
+    if (_moveFrmImages[0].isLocked() && _moveFrmImages[1].isLocked()) {
+        btn = buttonCreate(_mt_wid,
+            x,
+            y,
+            16,
+            12,
+            -1,
+            -1,
+            6000,
+            -1,
+            _moveFrmImages[0].getData(),
+            _moveFrmImages[1].getData(),
+            NULL,
+            BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
         }
@@ -5368,33 +5850,69 @@ static int inventoryQuantityWindowInit(int inventoryWindowType, Object* item)
 
     // Minus button
     fid = buildFid(OBJ_TYPE_INTERFACE, 191, 0, 0, 0);
-    buttonUpData = artLockFrameData(fid, 0, 0, &(_mt_key[2]));
+    _moveFrmImages[2].lock(fid);
 
     fid = buildFid(OBJ_TYPE_INTERFACE, 192, 0, 0, 0);
-    buttonDownData = artLockFrameData(fid, 0, 0, &(_mt_key[3]));
+    _moveFrmImages[3].lock(fid);
 
-    if (buttonUpData != NULL && buttonDownData != NULL) {
-        btn = buttonCreate(_mt_wid, x, y + 12, 17, 12, -1, -1, 7000, -1, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
+    if (_moveFrmImages[2].isLocked() && _moveFrmImages[3].isLocked()) {
+        btn = buttonCreate(_mt_wid,
+            x,
+            y + 12,
+            17,
+            12,
+            -1,
+            -1,
+            7000,
+            -1,
+            _moveFrmImages[2].getData(),
+            _moveFrmImages[3].getData(),
+            NULL,
+            BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
         }
     }
 
     fid = buildFid(OBJ_TYPE_INTERFACE, 8, 0, 0, 0);
-    buttonUpData = artLockFrameData(fid, 0, 0, &(_mt_key[4]));
+    _moveFrmImages[4].lock(fid);
 
     fid = buildFid(OBJ_TYPE_INTERFACE, 9, 0, 0, 0);
-    buttonDownData = artLockFrameData(fid, 0, 0, &(_mt_key[5]));
+    _moveFrmImages[5].lock(fid);
 
-    if (buttonUpData != NULL && buttonDownData != NULL) {
+    if (_moveFrmImages[4].isLocked() && _moveFrmImages[5].isLocked()) {
         // Done
-        btn = buttonCreate(_mt_wid, 98, 128, 15, 16, -1, -1, -1, KEY_RETURN, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
+        btn = buttonCreate(_mt_wid,
+            98,
+            128,
+            15,
+            16,
+            -1,
+            -1,
+            -1,
+            KEY_RETURN,
+            _moveFrmImages[4].getData(),
+            _moveFrmImages[5].getData(),
+            NULL,
+            BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
         }
 
         // Cancel
-        btn = buttonCreate(_mt_wid, 148, 128, 15, 16, -1, -1, -1, KEY_ESCAPE, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
+        btn = buttonCreate(_mt_wid,
+            148,
+            128,
+            15,
+            16,
+            -1,
+            -1,
+            -1,
+            KEY_ESCAPE,
+            _moveFrmImages[4].getData(),
+            _moveFrmImages[5].getData(),
+            NULL,
+            BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
         }
@@ -5402,22 +5920,34 @@ static int inventoryQuantityWindowInit(int inventoryWindowType, Object* item)
 
     if (inventoryWindowType == INVENTORY_WINDOW_TYPE_MOVE_ITEMS) {
         fid = buildFid(OBJ_TYPE_INTERFACE, 307, 0, 0, 0);
-        buttonUpData = artLockFrameData(fid, 0, 0, &(_mt_key[6]));
+        _moveFrmImages[6].lock(fid);
 
         fid = buildFid(OBJ_TYPE_INTERFACE, 308, 0, 0, 0);
-        buttonDownData = artLockFrameData(fid, 0, 0, &(_mt_key[7]));
+        _moveFrmImages[7].lock(fid);
 
-        if (buttonUpData != NULL && buttonDownData != NULL) {
+        if (_moveFrmImages[6].isLocked() && _moveFrmImages[7].isLocked()) {
             // ALL
             messageListItem.num = 22;
             if (messageListGetItem(&gInventoryMessageList, &messageListItem)) {
                 int length = fontGetStringWidth(messageListItem.text);
 
                 // TODO: Where is y? Is it hardcoded in to 376?
-                fontDrawText(buttonUpData + (94 - length) / 2 + 376, messageListItem.text, 200, 94, _colorTable[21091]);
-                fontDrawText(buttonDownData + (94 - length) / 2 + 376, messageListItem.text, 200, 94, _colorTable[18977]);
+                fontDrawText(_moveFrmImages[6].getData() + (94 - length) / 2 + 376, messageListItem.text, 200, 94, _colorTable[21091]);
+                fontDrawText(_moveFrmImages[7].getData() + (94 - length) / 2 + 376, messageListItem.text, 200, 94, _colorTable[18977]);
 
-                btn = buttonCreate(_mt_wid, 120, 80, 94, 33, -1, -1, -1, 5000, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
+                btn = buttonCreate(_mt_wid,
+                    120,
+                    80,
+                    94,
+                    33,
+                    -1,
+                    -1,
+                    -1,
+                    5000,
+                    _moveFrmImages[6].getData(),
+                    _moveFrmImages[7].getData(),
+                    NULL,
+                    BUTTON_FLAG_TRANSPARENT);
                 if (btn != -1) {
                     buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
                 }
@@ -5438,7 +5968,7 @@ static int inventoryQuantityWindowFree(int inventoryWindowType)
     int count = inventoryWindowType == INVENTORY_WINDOW_TYPE_MOVE_ITEMS ? 8 : 6;
 
     for (int index = 0; index < count; index++) {
-        artUnlock(_mt_key[index]);
+        _moveFrmImages[index].unlock();
     }
 
     windowDestroy(_mt_wid);
@@ -5466,3 +5996,5 @@ int _inven_set_timer(Object* a1)
 
     return seconds;
 }
+
+} // namespace fallout

@@ -2,12 +2,16 @@
 
 #include <string.h>
 
-#include "core.h"
 #include "datafile.h"
 #include "db.h"
 #include "debug.h"
+#include "input.h"
 #include "memory_manager.h"
+#include "mouse.h"
 #include "platform_compat.h"
+#include "svga.h"
+
+namespace fallout {
 
 // 0x5195A8
 MouseManagerNameMangler* gMouseManagerNameMangler = mouseManagerNameManglerDefaultImpl;
@@ -54,7 +58,7 @@ int mouseManagerRateProviderDefaultImpl()
 // 0x48525C
 int mouseManagerTimeProviderDefaultImpl()
 {
-    return _get_time();
+    return getTicks();
 }
 
 // 0x485288
@@ -437,7 +441,7 @@ bool mouseManagerSetMouseShape(char* fileName, int a2, int a3)
     if (cacheEntry == NULL) {
         MouseManagerStaticData* staticData;
         staticData = (MouseManagerStaticData*)internal_malloc_safe(sizeof(*staticData), __FILE__, __LINE__); // "..\\int\\MOUSEMGR.C", 430
-        staticData->data = datafileReadRaw(mangledFileName, &height, &width);
+        staticData->data = datafileReadRaw(mangledFileName, &width, &height);
         staticData->field_4 = a2;
         staticData->field_8 = a3;
         staticData->width = width;
@@ -639,3 +643,5 @@ void mouseManagerShowMouse()
 {
     mouseShowCursor();
 }
+
+} // namespace fallout

@@ -1,4 +1,7 @@
 #include "dinput.h"
+#include "mouse.h"
+
+namespace fallout {
 
 enum InputType {
     INPUT_TYPE_MOUSE,
@@ -30,7 +33,6 @@ extern int screenGetHeight();
 
 #ifdef __vita__
 #include <psp2/kernel/clib.h>
-#include "core.h"
 
 const uint8_t TOUCH_DELAY = 2;
 
@@ -328,3 +330,5 @@ void handleTouchEvent(SDL_Event* event)
         gLastInputType = INPUT_TYPE_TOUCH;
     }
 }
+
+} // namespace fallout

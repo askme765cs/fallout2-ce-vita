@@ -6,8 +6,10 @@
 
 #include "text_font.h"
 
+namespace fallout {
+
 // 0x4BC6F0
-int wordWrap(const char* string, int width, short* breakpoints, short* breakpointsLengthPtr)
+extern int leagcyWordWrap(const char* string, int width, short* breakpoints, short* breakpointsLengthPtr)
 {
     breakpoints[0] = 0;
     *breakpointsLengthPtr = 1;
@@ -72,3 +74,5 @@ int wordWrap(const char* string, int width, short* breakpoints, short* breakpoin
 
     return 0;
 }
+
+} // namespace fallout
