@@ -306,7 +306,8 @@ endif()
 
 if(VITA)
     #set(VITA_FLAGS "-Ofast -mcpu=cortex-a9 -mfpu=neon -fgraphite-identity -floop-parallelize-all -floop-nest-optimize -ftree-parallelize-loops=3 -flto -fno-peephole2 -DNDEBUG")
-    set(VITA_FLAGS "-O2 -g -mcpu=cortex-a9 -mfpu=neon -fno-peephole2 -DNDEBUG")
+    #set(VITA_FLAGS "-O2 -g -mcpu=cortex-a9 -mfpu=neon -fno-peephole2 -DNDEBUG")
+    set(VITA_FLAGS "-O2 -mcpu=cortex-a9 -mfpu=neon -fno-peephole2 -DNDEBUG -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${VITA_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VITA_FLAGS}")
 
@@ -322,7 +323,7 @@ if(VITA)
 
     include("${CMAKE_SOURCE_DIR}/vita/vita.cmake")
     add_definitions(-D__unix)
-    add_definitions(-D_DEBUG)
+    #add_definitions(-D_DEBUG)
     target_compile_definitions(${EXECUTABLE_NAME} PRIVATE _POSIX_C_SOURCE=200809)
 endif()
 
