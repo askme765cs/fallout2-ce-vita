@@ -20,6 +20,10 @@
 #include "iconv.h"
 #include "settings.h"
 
+#include "debug.h"
+#include <string>
+#include <vector>
+
 // The maximum number of interface fonts.
 #define FT_FONT_MAX (16)
 
@@ -214,19 +218,87 @@ int FtFontsInit()
 }
 
 // 0x441CEC
+// prevent filebuffer from been freed multiple times
 void FtFontsExit()
 {
     for (int font = 0; font < FT_FONT_MAX; font++) {
-        if (gFtFontDescriptors[font].filebuffer != NULL) {
-            internal_free_safe(gFtFontDescriptors[font].filebuffer, __FILE__, __LINE__); // FONTMGR.C, 124
+        if (gFtFontDescriptors[font].filebuffer == NULL)
+            continue;
+        for(int font2 = font;font2 <FT_FONT_MAX; font2++)
+        {
+            if(gFtFontDescriptors[font2].filebuffer == gFtFontDescriptors[font].filebuffer)
+                gFtFontDescriptors[font2].filebuffer=NULL;
         }
+        internal_free_safe(gFtFontDescriptors[font].filebuffer, __FILE__, __LINE__); // FONTMGR.C, 124
     }
     //TODO: clean up
 }
 
+struct FtFontCache
+{
+    std::string fontFileName;
+    int fontFileSize;
+    unsigned char* fontFilebuffer;
+};
+
+std::vector<struct FtFontCache> FtFontCacheList;
+
+unsigned char* FtFontLoadFile(std::string fontFileName,int *fileSize)
+{
+    for(int i =0; i < FtFontCacheList.size();i++)
+    {
+        if(fontFileName.compare(FtFontCacheList[i].fontFileName)==0)
+        {
+            debugPrint("FtFontLoadFile font %s reused\n",fontFileName.c_str());
+            *fileSize=FtFontCacheList[i].fontFileSize;
+            return FtFontCacheList[i].fontFilebuffer;
+        }
+    }
+
+    File* stream = fileOpen(fontFileName.c_str(), "rb");
+    if (stream == NULL) {
+        return NULL;
+    }
+
+    *fileSize = fileGetSize(stream); //19647736
+
+    unsigned char* filebuffer = (unsigned char*)internal_malloc_safe(*fileSize, __FILE__, __LINE__); // FONTMGR.C, 259
+
+    int readleft = *fileSize;
+    unsigned char* ptr = filebuffer;
+
+    debugPrint("font read start:%s\n",fontFileName.c_str());
+
+    while (readleft > 10000) {
+        int readsize = fileRead(ptr, 1, 10000, stream);
+        if (readsize != 10000) {
+            fileClose(stream);
+            return NULL;
+        }
+        readleft -= 10000;
+        ptr += 10000;
+    }
+
+    if (fileRead(ptr, 1, readleft, stream) != readleft) {
+        fileClose(stream);
+        return NULL;
+    }
+
+    fileClose(stream);
+
+    FtFontCache newFtFontCache={fontFileName,*fileSize,filebuffer};
+    FtFontCacheList.push_back(newFtFontCache);
+
+    debugPrint("font read end\n");
+    
+    return filebuffer;
+}
+
+// the probleam is that if a font is used in many font configs ,it should load it many times.Extremly time consuming for devies like psvita.
 // 0x441D20
 static int FtFontLoad(int font_index)
 {
+    debugPrint("font_index:%d\n",font_index);
     char string[56];
     FtFontDescriptor* desc = &(gFtFontDescriptors[font_index]);
 
@@ -276,30 +348,17 @@ static int FtFontLoad(int font_index)
 
     sprintf(string, "fonts/%s/%s", settings.system.language.c_str(), fontFileName);
 
-    File* stream = fileOpen(string, "rb");
-    if (stream == NULL) {
+    int fileSize=0;
+    unsigned char* filebuffer=NULL;
+
+    filebuffer=FtFontLoadFile(std::string(string),&fileSize);
+    if(filebuffer==NULL || fileSize==0)
+    {
+        debugPrint("font failed\n");
         return -1;
     }
 
-    int fileSize = fileGetSize(stream); //19647736
-
-    desc->filebuffer = (unsigned char*)internal_malloc_safe(fileSize, __FILE__, __LINE__); // FONTMGR.C, 259
-
-    int readleft = fileSize;
-    unsigned char* ptr = desc->filebuffer;
-
-    while (readleft > 10000) {
-        int readsize = fileRead(ptr, 1, 10000, stream);
-        if (readsize != 10000) {
-            return -1;
-        }
-        readleft -= 10000;
-        ptr += 10000;
-    }
-
-    if (fileRead(ptr, 1, readleft, stream) != readleft) {
-        return -1;
-    }
+    desc->filebuffer = filebuffer;
 
     FT_Init_FreeType(&(desc->library));
     FT_New_Memory_Face(desc->library, desc->filebuffer, fileSize, 0, &desc->face);
@@ -307,7 +366,6 @@ static int FtFontLoad(int font_index)
     FT_Select_Charmap(desc->face, FT_ENCODING_UNICODE);
     FT_Set_Pixel_Sizes(desc->face, desc->maxWidth, desc->maxHeight);
 
-    fileClose(stream);
     configFree(&config);
     return 0;
 }
