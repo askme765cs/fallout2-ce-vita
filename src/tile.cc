@@ -4,6 +4,8 @@
 #include <math.h>
 #include <string.h>
 
+#include <algorithm>
+
 #include "art.h"
 #include "color.h"
 #include "config.h"
@@ -19,40 +21,39 @@
 
 namespace fallout {
 
-typedef struct STRUCT_51D99C {
+typedef struct RightsideUpTableEntry {
     int field_0;
     int field_4;
-} STRUCT_51D99C;
+} RightsideUpTableEntry;
 
-typedef struct STRUCT_51DA04 {
+typedef struct UpsideDownTableEntry {
     int field_0;
     int field_4;
-} STRUCT_51DA04;
+} UpsideDownTableEntry;
 
 typedef struct STRUCT_51DA6C {
     int field_0;
-    int field_4;
-    int field_8;
-    int field_C; // something with light level?
+    int offsets[2];
+    int intensity;
 } STRUCT_51DA6C;
 
-typedef struct STRUCT_51DB0C {
+typedef struct RightsideUpTriangle {
     int field_0;
     int field_4;
     int field_8;
-} STRUCT_51DB0C;
+} RightsideUpTriangle;
 
-typedef struct STRUCT_51DB48 {
+typedef struct UpsideDownTriangle {
     int field_0;
     int field_4;
     int field_8;
-} STRUCT_51DB48;
+} UpsideDownTriangle;
 
 static void tileSetBorder(int windowWidth, int windowHeight, int hexGridWidth, int hexGridHeight);
 static void tileRefreshMapper(Rect* rect, int elevation);
 static void tileRefreshGame(Rect* rect, int elevation);
-static void _roof_fill_on(int x, int y, int elevation);
-static void sub_4B23DC(int x, int y, int elevation);
+static void roof_fill_on(int x, int y, int elevation);
+static void roof_fill_off(int x, int y, int elevation);
 static void tileRenderRoof(int fid, int x, int y, Rect* rect, int light);
 static void _draw_grid(int tile, int elevation, Rect* rect);
 static void tileRenderFloor(int fid, int x, int y, Rect* rect);
@@ -103,7 +104,7 @@ const int dword_51D984[6] = {
 };
 
 // 0x51D99C
-static STRUCT_51D99C _rightside_up_table[13] = {
+static RightsideUpTableEntry _rightside_up_table[13] = {
     { -1, 2 },
     { 78, 2 },
     { 76, 6 },
@@ -120,7 +121,7 @@ static STRUCT_51D99C _rightside_up_table[13] = {
 };
 
 // 0x51DA04
-static STRUCT_51DA04 _upside_down_table[13] = {
+static UpsideDownTableEntry _upside_down_table[13] = {
     { 0, 32 },
     { 48, 32 },
     { 49, 30 },
@@ -151,7 +152,7 @@ static STRUCT_51DA6C _verticies[10] = {
 };
 
 // 0x51DB0C
-static STRUCT_51DB0C _rightside_up_triangles[5] = {
+static RightsideUpTriangle _rightside_up_triangles[5] = {
     { 2, 3, 0 },
     { 3, 4, 1 },
     { 5, 6, 3 },
@@ -160,7 +161,7 @@ static STRUCT_51DB0C _rightside_up_triangles[5] = {
 };
 
 // 0x51DB48
-static STRUCT_51DB48 _upside_down_triangles[5] = {
+static UpsideDownTriangle _upside_down_triangles[5] = {
     { 0, 3, 1 },
     { 2, 5, 3 },
     { 3, 6, 4 },
@@ -632,6 +633,14 @@ static void tileRefreshGame(Rect* rect, int elevation)
         return;
     }
 
+    // CE: Clear dirty rect to prevent most of the visual artifacts near map
+    // edges.
+    bufferFill(gTileWindowBuffer + rectToUpdate.top * gTileWindowPitch + rectToUpdate.left,
+        rectGetWidth(&rectToUpdate),
+        rectGetHeight(&rectToUpdate),
+        gTileWindowPitch,
+        0);
+
     tileRenderFloorsInRect(&rectToUpdate, elevation);
     _obj_render_pre_roof(&rectToUpdate, elevation);
     tileRenderRoofsInRect(&rectToUpdate, elevation);
@@ -683,8 +692,13 @@ int tileToScreenXY(int tile, int* screenX, int* screenY, int elevation)
     return 0;
 }
 
+// CE: Added optional `ignoreBounds` param to return tile number without
+// validating hex grid bounds. The resulting invalid tile number serves as an
+// origin for calculations using prepared offsets table during objects
+// rendering.
+//
 // 0x4B1754
-int tileFromScreenXY(int screenX, int screenY, int elevation)
+int tileFromScreenXY(int screenX, int screenY, int elevation, bool ignoreBounds)
 {
     int v2;
     int v3;
@@ -751,6 +765,10 @@ int tileFromScreenXY(int screenX, int screenY, int elevation)
 
     v12 = gHexGridWidth - 1 - v11;
     if (v12 >= 0 && v12 < gHexGridWidth && v10 >= 0 && v10 < gHexGridHeight) {
+        return gHexGridWidth * v10 + v12;
+    }
+
+    if (ignoreBounds) {
         return gHexGridWidth * v10 + v12;
     }
 
@@ -1217,7 +1235,7 @@ void tileRenderRoofsInRect(Rect* rect, int elevation)
         minY = gSquareGridHeight - 1;
     }
 
-    int light = lightGetLightLevel();
+    int light = lightGetAmbientIntensity();
 
     int baseSquareTile = gSquareGridWidth * minY;
 
@@ -1241,72 +1259,62 @@ void tileRenderRoofsInRect(Rect* rect, int elevation)
 }
 
 // 0x4B22D0
-static void _roof_fill_on(int a1, int a2, int elevation)
+static void roof_fill_on(int x, int y, int elevation)
 {
-    while ((a1 >= 0 && a1 < gSquareGridWidth) && (a2 >= 0 && a2 < gSquareGridHeight)) {
-        int squareTile = gSquareGridWidth * a2 + a1;
-        int value = gTileSquares[elevation]->field_0[squareTile];
-        int upper = (value >> 16) & 0xFFFF;
+    if (x >= 0 && x < gSquareGridWidth && y >= 0 && y < gSquareGridHeight) {
+        int squareTileIndex = gSquareGridWidth * y + x;
+        int squareTile = gTileSquares[elevation]->field_0[squareTileIndex];
+        int roof = (squareTile >> 16) & 0xFFFF;
 
-        int id = upper & 0xFFF;
-        if (buildFid(OBJ_TYPE_TILE, id, 0, 0, 0) == buildFid(OBJ_TYPE_TILE, 1, 0, 0, 0)) {
-            break;
+        int id = roof & 0xFFF;
+        if (buildFid(OBJ_TYPE_TILE, id, 0, 0, 0) != buildFid(OBJ_TYPE_TILE, 1, 0, 0, 0)) {
+            int flag = (roof & 0xF000) >> 12;
+            if ((flag & 0x01) != 0) {
+                flag &= ~0x01;
+
+                gTileSquares[elevation]->field_0[squareTileIndex] = (squareTile & 0xFFFF) | (((flag << 12) | id) << 16);
+
+                roof_fill_on(x - 1, y, elevation);
+                roof_fill_on(x + 1, y, elevation);
+                roof_fill_on(x, y - 1, elevation);
+                roof_fill_on(x, y + 1, elevation);
+            }
         }
-
-        int flag = (upper & 0xF000) >> 12;
-        if ((flag & 0x01) == 0) {
-            break;
-        }
-
-        flag &= ~0x01;
-
-        gTileSquares[elevation]->field_0[squareTile] = (value & 0xFFFF) | (((flag << 12) | id) << 16);
-
-        _roof_fill_on(a1 - 1, a2, elevation);
-        _roof_fill_on(a1 + 1, a2, elevation);
-        _roof_fill_on(a1, a2 - 1, elevation);
-
-        a2++;
     }
 }
 
 // 0x4B23D4
-void _tile_fill_roof(int a1, int a2, int elevation, int a4)
+void tile_fill_roof(int x, int y, int elevation, bool on)
 {
-    if (a4) {
-        _roof_fill_on(a1, a2, elevation);
+    if (on) {
+        roof_fill_on(x, y, elevation);
     } else {
-        sub_4B23DC(a1, a2, elevation);
+        roof_fill_off(x, y, elevation);
     }
 }
 
 // 0x4B23DC
-static void sub_4B23DC(int a1, int a2, int elevation)
+static void roof_fill_off(int x, int y, int elevation)
 {
-    while ((a1 >= 0 && a1 < gSquareGridWidth) && (a2 >= 0 && a2 < gSquareGridHeight)) {
-        int squareTile = gSquareGridWidth * a2 + a1;
-        int value = gTileSquares[elevation]->field_0[squareTile];
-        int upper = (value >> 16) & 0xFFFF;
+    if (x >= 0 && x < gSquareGridWidth && y >= 0 && y < gSquareGridHeight) {
+        int squareTileIndex = gSquareGridWidth * y + x;
+        int squareTile = gTileSquares[elevation]->field_0[squareTileIndex];
+        int roof = (squareTile >> 16) & 0xFFFF;
 
-        int id = upper & 0xFFF;
-        if (buildFid(OBJ_TYPE_TILE, id, 0, 0, 0) == buildFid(OBJ_TYPE_TILE, 1, 0, 0, 0)) {
-            break;
+        int id = roof & 0xFFF;
+        if (buildFid(OBJ_TYPE_TILE, id, 0, 0, 0) != buildFid(OBJ_TYPE_TILE, 1, 0, 0, 0)) {
+            int flag = (roof & 0xF000) >> 12;
+            if ((flag & 0x03) == 0) {
+                flag |= 0x01;
+
+                gTileSquares[elevation]->field_0[squareTileIndex] = (squareTile & 0xFFFF) | (((flag << 12) | id) << 16);
+
+                roof_fill_off(x - 1, y, elevation);
+                roof_fill_off(x + 1, y, elevation);
+                roof_fill_off(x, y - 1, elevation);
+                roof_fill_off(x, y + 1, elevation);
+            }
         }
-
-        int flag = (upper & 0xF000) >> 12;
-        if ((flag & 0x03) != 0) {
-            break;
-        }
-
-        flag |= 0x01;
-
-        gTileSquares[elevation]->field_0[squareTile] = (value & 0xFFFF) | (((flag << 12) | id) << 16);
-
-        sub_4B23DC(a1 - 1, a2, elevation);
-        sub_4B23DC(a1 + 1, a2, elevation);
-        sub_4B23DC(a1, a2 - 1, elevation);
-
-        a2++;
     }
 }
 
@@ -1450,22 +1458,23 @@ void tileRenderFloorsInRect(Rect* rect, int elevation)
         minY = gSquareGridHeight - 1;
     }
 
-    lightGetLightLevel();
+    lightGetAmbientIntensity();
 
-    temp = gSquareGridWidth * minY;
-    for (int v15 = minY; v15 <= maxY; v15++) {
-        for (int i = minX; i <= maxX; i++) {
-            int v3 = temp + i;
-            int frmId = gTileSquares[elevation]->field_0[v3];
+    int baseSquareTile = gSquareGridWidth * minY;
+
+    for (int y = minY; y <= maxY; y++) {
+        for (int x = minX; x <= maxX; x++) {
+            int squareTile = baseSquareTile + x;
+            int frmId = gTileSquares[elevation]->field_0[squareTile];
             if ((((frmId & 0xF000) >> 12) & 0x01) == 0) {
-                int v12;
-                int v13;
-                squareTileToScreenXY(v3, &v12, &v13, elevation);
+                int tileScreenX;
+                int tileScreenY;
+                squareTileToScreenXY(squareTile, &tileScreenX, &tileScreenY, elevation);
                 int fid = buildFid(OBJ_TYPE_TILE, frmId & 0xFFF, 0, 0, 0);
-                tileRenderFloor(fid, v12, v13, rect);
+                tileRenderFloor(fid, tileScreenX, tileScreenY, rect);
             }
         }
-        temp += gSquareGridWidth;
+        baseSquareTile += gSquareGridWidth;
     }
 }
 
@@ -1599,7 +1608,7 @@ static void tileRenderFloor(int fid, int x, int y, Rect* rect)
     int height = rect->bottom - rect->top + 1;
     int frameWidth;
     int frameHeight;
-    int v15;
+    int tile;
     int v76;
     int v77;
     int v78;
@@ -1657,22 +1666,18 @@ static void tileRenderFloor(int fid, int x, int y, Rect* rect)
 
     if (v77 <= 0 || v76 <= 0) goto out;
 
-    v15 = tileFromScreenXY(savedX, savedY + 13, gElevation);
-    if (v15 != -1) {
-        int v17 = lightGetLightLevel();
-        for (int i = v15 & 1; i < 10; i++) {
-            // NOTE: calling _light_get_tile two times, probably a result of using __min kind macro
-            int v21 = _light_get_tile(elev, v15 + _verticies[i].field_4);
-            if (v21 <= v17) {
-                v21 = v17;
-            }
-
-            _verticies[i].field_C = v21;
+    tile = tileFromScreenXY(savedX, savedY + 13, gElevation);
+    if (tile != -1) {
+        int parity = tile & 1;
+        int ambientIntensity = lightGetAmbientIntensity();
+        for (int i = 0; i < 10; i++) {
+            // NOTE: Calls `lightGetTileIntensity` twice.
+            _verticies[i].intensity = std::max(lightGetTileIntensity(elev, tile + _verticies[i].offsets[parity]), ambientIntensity);
         }
 
         int v23 = 0;
         for (int i = 0; i < 9; i++) {
-            if (_verticies[i + 1].field_C != _verticies[i].field_C) {
+            if (_verticies[i + 1].intensity != _verticies[i].intensity) {
                 break;
             }
 
@@ -1681,18 +1686,18 @@ static void tileRenderFloor(int fid, int x, int y, Rect* rect)
 
         if (v23 == 9) {
             unsigned char* buf = artGetFrameData(art, 0, 0);
-            _dark_trans_buf_to_buf(buf + frameWidth * v78 + v79, v77, v76, frameWidth, gTileWindowBuffer, x, y, gTileWindowPitch, _verticies[0].field_C);
+            _dark_trans_buf_to_buf(buf + frameWidth * v78 + v79, v77, v76, frameWidth, gTileWindowBuffer, x, y, gTileWindowPitch, _verticies[0].intensity);
             goto out;
         }
 
         for (int i = 0; i < 5; i++) {
-            STRUCT_51DB0C* ptr_51DB0C = &(_rightside_up_triangles[i]);
-            int v32 = _verticies[ptr_51DB0C->field_8].field_C;
-            int v33 = _verticies[ptr_51DB0C->field_8].field_0;
-            int v34 = _verticies[ptr_51DB0C->field_4].field_C - _verticies[ptr_51DB0C->field_0].field_C;
+            RightsideUpTriangle* triangle = &(_rightside_up_triangles[i]);
+            int v32 = _verticies[triangle->field_8].intensity;
+            int v33 = _verticies[triangle->field_8].field_0;
+            int v34 = _verticies[triangle->field_4].intensity - _verticies[triangle->field_0].intensity;
             // TODO: Probably wrong.
             int v35 = v34 / 32;
-            int v36 = (_verticies[ptr_51DB0C->field_0].field_C - v32) / 13;
+            int v36 = (_verticies[triangle->field_0].intensity - v32) / 13;
             int* v37 = &(_intensity_map[v33]);
             if (v35 != 0) {
                 if (v36 != 0) {
@@ -1740,13 +1745,13 @@ static void tileRenderFloor(int fid, int x, int y, Rect* rect)
         }
 
         for (int i = 0; i < 5; i++) {
-            STRUCT_51DB48* ptr_51DB48 = &(_upside_down_triangles[i]);
-            int v50 = _verticies[ptr_51DB48->field_0].field_C;
-            int v51 = _verticies[ptr_51DB48->field_0].field_0;
-            int v52 = _verticies[ptr_51DB48->field_8].field_C - v50;
+            UpsideDownTriangle* triangle = &(_upside_down_triangles[i]);
+            int v50 = _verticies[triangle->field_0].intensity;
+            int v51 = _verticies[triangle->field_0].field_0;
+            int v52 = _verticies[triangle->field_8].intensity - v50;
             // TODO: Probably wrong.
             int v53 = v52 / 32;
-            int v54 = (_verticies[ptr_51DB48->field_4].field_C - v50) / 13;
+            int v54 = (_verticies[triangle->field_4].intensity - v50) / 13;
             int* v55 = &(_intensity_map[v51]);
             if (v53 != 0) {
                 if (v54 != 0) {
@@ -1803,8 +1808,7 @@ static void tileRenderFloor(int fid, int x, int y, Rect* rect)
         while (--v76 != -1) {
             for (int kk = 0; kk < v77; kk++) {
                 if (*v67 != 0) {
-                    int t = (*v67 << 8) + (*v68 >> 9);
-                    *v66 = _intensityColorTable[t];
+                    *v66 = intensityColorTable[*v67][*v68 >> 9];
                 }
                 v67++;
                 v68++;

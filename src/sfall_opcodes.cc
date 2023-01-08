@@ -17,6 +17,10 @@
 
 namespace fallout {
 
+static constexpr int kVersionMajor = 4;
+static constexpr int kVersionMinor = 3;
+static constexpr int kVersionPatch = 4;
+
 // read_byte
 static void opReadByte(Program* program)
 {
@@ -119,6 +123,24 @@ static void opListEnd(Program* program)
     sfallListsDestroy(listId);
 }
 
+// sfall_ver_major
+static void opGetVersionMajor(Program* program)
+{
+    programStackPushInteger(program, kVersionMajor);
+}
+
+// sfall_ver_minor
+static void opGetVersionMinor(Program* program)
+{
+    programStackPushInteger(program, kVersionMinor);
+}
+
+// sfall_ver_build
+static void opGetVersionPatch(Program* program)
+{
+    programStackPushInteger(program, kVersionPatch);
+}
+
 // get_weapon_ammo_pid
 static void opGetWeaponAmmoPid(Program* program)
 {
@@ -139,6 +161,30 @@ static void opGetWeaponAmmoPid(Program* program)
     }
 
     programStackPushInteger(program, pid);
+}
+
+// There are two problems with this function.
+//
+// 1. Sfall's implementation changes ammo PID of misc items, which is impossible
+// since it's stored in proto, not in the object.
+// 2. Changing weapon's ammo PID is done without checking for ammo
+// quantity/capacity which can probably lead to bad things.
+//
+// set_weapon_ammo_pid
+static void opSetWeaponAmmoPid(Program* program)
+{
+    int ammoTypePid = programStackPopInteger(program);
+    Object* obj = static_cast<Object*>(programStackPopPointer(program));
+
+    if (obj != nullptr) {
+        if (PID_TYPE(obj->pid) == OBJ_TYPE_ITEM) {
+            switch (itemGetType(obj)) {
+            case ITEM_TYPE_WEAPON:
+                obj->data.item.weapon.ammoTypePid = ammoTypePid;
+                break;
+            }
+        }
+    }
 }
 
 // get_weapon_ammo_count
@@ -271,7 +317,11 @@ void sfallOpcodesInit()
     interpreterRegisterOpcode(0x820D, opListBegin);
     interpreterRegisterOpcode(0x820E, opListNext);
     interpreterRegisterOpcode(0x820F, opListEnd);
+    interpreterRegisterOpcode(0x8210, opGetVersionMajor);
+    interpreterRegisterOpcode(0x8211, opGetVersionMinor);
+    interpreterRegisterOpcode(0x8212, opGetVersionPatch);
     interpreterRegisterOpcode(0x8217, opGetWeaponAmmoPid);
+    interpreterRegisterOpcode(0x8218, opSetWeaponAmmoPid);
     interpreterRegisterOpcode(0x8219, opGetWeaponAmmoCount);
     interpreterRegisterOpcode(0x821A, opSetWeaponAmmoCount);
     interpreterRegisterOpcode(0x821C, opGetMouseX);

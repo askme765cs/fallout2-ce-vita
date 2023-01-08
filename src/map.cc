@@ -828,7 +828,12 @@ static int mapLoad(File* stream)
 
     int rc = 0;
 
-    windowFill(gIsoWindow, 0, 0, _scr_size.right - _scr_size.left + 1, _scr_size.bottom - _scr_size.top - 99, _colorTable[0]);
+    windowFill(gIsoWindow,
+        0,
+        0,
+        windowGetWidth(gIsoWindow),
+        windowGetHeight(gIsoWindow),
+        _colorTable[0]);
     windowRefresh(gIsoWindow);
     animationStop();
     scriptsDisable();
@@ -919,7 +924,7 @@ static int mapLoad(File* stream)
         goto err;
     }
 
-    lightSetLightLevel(LIGHT_LEVEL_MAX, false);
+    lightSetAmbientIntensity(LIGHT_INTENSITY_MAX, false);
     objectSetLocation(gDude, gCenterTile, gElevation, NULL);
     objectSetRotation(gDude, gEnteringRotation, NULL);
     gMapHeader.field_34 = wmMapMatchNameToIdx(gMapHeader.name);
@@ -953,7 +958,7 @@ static int mapLoad(File* stream)
         Object* object;
         int fid = buildFid(OBJ_TYPE_MISC, 12, 0, 0, 0);
         objectCreateWithFidPid(&object, fid, -1);
-        object->flags |= (OBJECT_LIGHT_THRU | OBJECT_TEMPORARY | OBJECT_HIDDEN);
+        object->flags |= (OBJECT_LIGHT_THRU | OBJECT_NO_SAVE | OBJECT_HIDDEN);
         objectSetLocation(object, 1, 0, NULL);
         object->sid = gMapSid;
         scriptSetFixedParam(gMapSid, (gMapHeader.flags & 1) == 0);
@@ -990,7 +995,7 @@ err:
     }
 
     _partyMemberRecoverLoad();
-    _intface_show();
+    interfaceBarShow();
     _proto_dude_update_gender();
     _map_place_dude_and_mouse();
     fileSetReadProgressHandler(NULL, 0);
@@ -1361,7 +1366,7 @@ static int _map_save_file(File* stream)
             Object* object = objectFindFirstAtElevation(elevation);
             if (object != NULL) {
                 // TODO: Implementation is slightly different, check in debugger.
-                while (object != NULL && (object->flags & OBJECT_TEMPORARY)) {
+                while (object != NULL && (object->flags & OBJECT_NO_SAVE)) {
                     object = objectFindNextAtElevation();
                 }
 
@@ -1498,36 +1503,44 @@ static void isoWindowRefreshRect(Rect* rect)
 // 0x483EE4
 static void isoWindowRefreshRectGame(Rect* rect)
 {
-    Rect clampedDirtyRect;
-    if (rectIntersection(rect, &gIsoWindowRect, &clampedDirtyRect) == -1) {
+    Rect rectToUpdate;
+    if (rectIntersection(rect, &gIsoWindowRect, &rectToUpdate) == -1) {
         return;
     }
 
-    tileRenderFloorsInRect(&clampedDirtyRect, gElevation);
-    _grid_render(&clampedDirtyRect, gElevation);
-    _obj_render_pre_roof(&clampedDirtyRect, gElevation);
-    tileRenderRoofsInRect(&clampedDirtyRect, gElevation);
-    _obj_render_post_roof(&clampedDirtyRect, gElevation);
+    // CE: Clear dirty rect to prevent most of the visual artifacts near map
+    // edges.
+    bufferFill(gIsoWindowBuffer + rectToUpdate.top * rectGetWidth(&gIsoWindowRect) + rectToUpdate.left,
+        rectGetWidth(&rectToUpdate),
+        rectGetHeight(&rectToUpdate),
+        rectGetWidth(&gIsoWindowRect),
+        0);
+
+    tileRenderFloorsInRect(&rectToUpdate, gElevation);
+    _obj_render_pre_roof(&rectToUpdate, gElevation);
+    tileRenderRoofsInRect(&rectToUpdate, gElevation);
+    _obj_render_post_roof(&rectToUpdate, gElevation);
 }
 
 // 0x483F44
 static void isoWindowRefreshRectMapper(Rect* rect)
 {
-    Rect clampedDirtyRect;
-    if (rectIntersection(rect, &gIsoWindowRect, &clampedDirtyRect) == -1) {
+    Rect rectToUpdate;
+    if (rectIntersection(rect, &gIsoWindowRect, &rectToUpdate) == -1) {
         return;
     }
 
-    bufferFill(gIsoWindowBuffer + clampedDirtyRect.top * (_scr_size.right - _scr_size.left + 1) + clampedDirtyRect.left,
-        clampedDirtyRect.right - clampedDirtyRect.left + 1,
-        clampedDirtyRect.bottom - clampedDirtyRect.top + 1,
-        _scr_size.right - _scr_size.left + 1,
+    bufferFill(gIsoWindowBuffer + rectToUpdate.top * rectGetWidth(&gIsoWindowRect) + rectToUpdate.left,
+        rectGetWidth(&rectToUpdate),
+        rectGetHeight(&rectToUpdate),
+        rectGetWidth(&gIsoWindowRect),
         0);
-    tileRenderFloorsInRect(&clampedDirtyRect, gElevation);
-    _grid_render(&clampedDirtyRect, gElevation);
-    _obj_render_pre_roof(&clampedDirtyRect, gElevation);
-    tileRenderRoofsInRect(&clampedDirtyRect, gElevation);
-    _obj_render_post_roof(&clampedDirtyRect, gElevation);
+
+    tileRenderFloorsInRect(&rectToUpdate, gElevation);
+    _grid_render(&rectToUpdate, gElevation);
+    _obj_render_pre_roof(&rectToUpdate, gElevation);
+    tileRenderRoofsInRect(&rectToUpdate, gElevation);
+    _obj_render_post_roof(&rectToUpdate, gElevation);
 }
 
 // NOTE: Inlined.
@@ -1637,7 +1650,7 @@ static void _map_place_dude_and_mouse()
         }
 
         objectSetLight(gDude, 4, 0x10000, 0);
-        gDude->flags |= OBJECT_TEMPORARY;
+        gDude->flags |= OBJECT_NO_SAVE;
 
         _dude_stand(gDude, gDude->rotation, gDude->fid);
         _partyMemberSyncPosition();

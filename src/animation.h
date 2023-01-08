@@ -10,7 +10,7 @@ typedef enum AnimationRequestOptions {
     ANIMATION_REQUEST_UNRESERVED = 0x01,
     ANIMATION_REQUEST_RESERVED = 0x02,
     ANIMATION_REQUEST_NO_STAND = 0x04,
-    ANIMATION_REQUEST_0x100 = 0x100,
+    ANIMATION_REQUEST_PING = 0x100,
     ANIMATION_REQUEST_INSIGNIFICANT = 0x200,
 } AnimationRequestOptions;
 
@@ -100,12 +100,12 @@ typedef int(AnimationCallback)(void* a1, void* a2);
 // Signature of animation callback accepting 3 parameters.
 typedef int(AnimationCallback3)(void* a1, void* a2, void* a3);
 
-typedef struct STRUCT_530014_28 {
+typedef struct StraightPathNode {
     int tile;
     int elevation;
     int x;
     int y;
-} STRUCT_530014_28;
+} StraightPathNode;
 
 typedef Object* PathBuilderCallback(Object* object, int tile, int elevation);
 
@@ -142,15 +142,15 @@ int animationRegisterSetLightDistance(Object* owner, int lightDistance, int dela
 int animationRegisterToggleOutline(Object* object, bool outline, int delay);
 int animationRegisterPlaySoundEffect(Object* owner, const char* soundEffectName, int delay);
 int animationRegisterAnimateForever(Object* owner, int anim, int delay);
-int reg_anim_26(int a1, int a2);
+int animationRegisterPing(int flags, int delay);
 int _make_path(Object* object, int from, int to, unsigned char* a4, int a5);
 int pathfinderFindPath(Object* object, int from, int to, unsigned char* rotations, int a5, PathBuilderCallback* callback);
-int _make_straight_path(Object* a1, int from, int to, STRUCT_530014_28* pathNodes, Object** a5, int a6);
-int _make_straight_path_func(Object* a1, int from, int to, STRUCT_530014_28* a4, Object** a5, int a6, Object* (*a7)(Object*, int, int));
+int _make_straight_path(Object* a1, int from, int to, StraightPathNode* straightPathNodeList, Object** obstaclePtr, int a6);
+int _make_straight_path_func(Object* a1, int from, int to, StraightPathNode* straightPathNodeList, Object** obstaclePtr, int a6, PathBuilderCallback* callback);
 void _object_animate();
-int _check_move(int* a1);
-int _dude_move(int a1);
-int _dude_run(int a1);
+int _check_move(int* actionPointsPtr);
+int _dude_move(int actionPoints);
+int _dude_run(int actionPoints);
 void _dude_fidget();
 void _dude_stand(Object* obj, int rotation, int fid);
 void _dude_standup(Object* a1);

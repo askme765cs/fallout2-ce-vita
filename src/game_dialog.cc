@@ -3248,7 +3248,7 @@ int _gdialog_barter_create_win()
                     _barterer_table_obj->flags |= OBJECT_HIDDEN;
 
                     if (objectCreateWithFidPid(&_barterer_temp_obj, gGameDialogSpeaker->fid, -1) != -1) {
-                        _barterer_temp_obj->flags |= OBJECT_HIDDEN | OBJECT_TEMPORARY;
+                        _barterer_temp_obj->flags |= OBJECT_HIDDEN | OBJECT_NO_SAVE;
                         _barterer_temp_obj->sid = -1;
                         return 0;
                     }
@@ -3758,11 +3758,16 @@ void partyMemberControlWindowHandleEvents()
                     return;
                 }
             } else if (keyCode == -2) {
-                if (_mouse_click_in(441, 451, 540, 470)) {
-                    aiSetDisposition(gGameDialogSpeaker, 0);
-                    _dialogue_state = 13;
-                    _dialogue_switch_mode = 11;
-                    done = true;
+                // CE: Minor improvement - handle on mouse up (just like other
+                // buttons). Also fixed active button area (in original code
+                // it's slightly smaller than the button itself).
+                if ((mouseGetEvent() & MOUSE_EVENT_LEFT_BUTTON_UP) != 0) {
+                    if (mouseHitTestInWindow(gGameDialogWindow, 438, 156, 438 + 109, 156 + 28)) {
+                        aiSetDisposition(gGameDialogSpeaker, 0);
+                        _dialogue_state = 13;
+                        _dialogue_switch_mode = 11;
+                        done = true;
+                    }
                 }
             }
         }
@@ -4667,9 +4672,9 @@ void gameDialogRenderTalkingHead(Art* headFrm, int frame)
 void gameDialogHighlightsInit()
 {
     for (int color = 0; color < 256; color++) {
-        int r = (_Color2RGB_(color) & 0x7C00) >> 10;
-        int g = (_Color2RGB_(color) & 0x3E0) >> 5;
-        int b = _Color2RGB_(color) & 0x1F;
+        int r = (Color2RGB(color) & 0x7C00) >> 10;
+        int g = (Color2RGB(color) & 0x3E0) >> 5;
+        int b = Color2RGB(color) & 0x1F;
         _light_GrayTable[color] = ((r + 2 * g + 2 * b) / 10) >> 2;
         _dark_GrayTable[color] = ((r + g + b) / 10) >> 2;
     }
