@@ -7,7 +7,12 @@ set(EXECUTABLE_NAME fallout2-ce)
 set(VITA_VERSION "01.00")
 
 set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS}")
-vita_create_self(${EXECUTABLE_NAME}.self ${EXECUTABLE_NAME})
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    vita_create_self(${EXECUTABLE_NAME}.self ${EXECUTABLE_NAME} STRIPPED)
+else()
+    vita_create_self(${EXECUTABLE_NAME}.self ${EXECUTABLE_NAME})
+endif()
 
 vita_create_vpk(${EXECUTABLE_NAME}.vpk ${VITA_TITLEID} ${EXECUTABLE_NAME}.self
     VERSION ${VITA_VERSION}
