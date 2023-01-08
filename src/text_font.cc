@@ -8,6 +8,8 @@
 #include "memory.h"
 #include "platform_compat.h"
 
+namespace fallout {
+
 // The maximum number of text fonts.
 #define TEXT_FONT_MAX (10)
 
@@ -150,7 +152,7 @@ int textFontLoad(int font)
     int rc = -1;
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "font%d.fon", font);
+    snprintf(path, sizeof(path), "font%d.fon", font);
 
     // NOTE: Original code is slightly different. It uses deep nesting and
     // unwinds everything from the point of failure.
@@ -425,3 +427,5 @@ static int textFontGetMonospacedCharacterWidthImpl()
 
     return width + gCurrentTextFontDescriptor->letterSpacing;
 }
+
+} // namespace fallout

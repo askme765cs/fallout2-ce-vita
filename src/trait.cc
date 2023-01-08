@@ -9,6 +9,8 @@
 #include "skill.h"
 #include "stat.h"
 
+namespace fallout {
+
 // Provides metadata about traits.
 typedef struct TraitDescription {
     // The name of trait.
@@ -60,7 +62,7 @@ int traitsInit()
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "trait.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "trait.msg");
 
     if (!messageListLoad(&gTraitsMessageList, path)) {
         return -1;
@@ -83,6 +85,8 @@ int traitsInit()
     // NOTE: Uninline.
     traitsReset();
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_TRAIT, &gTraitsMessageList);
+
     return true;
 }
 
@@ -97,6 +101,7 @@ void traitsReset()
 // 0x4B3AF8
 void traitsExit()
 {
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_TRAIT, nullptr);
     messageListFree(&gTraitsMessageList);
 }
 
@@ -305,3 +310,5 @@ int traitGetSkillModifier(int skill)
 
     return modifier;
 }
+
+} // namespace fallout

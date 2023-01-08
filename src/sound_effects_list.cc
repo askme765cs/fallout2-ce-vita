@@ -12,6 +12,8 @@
 #include "pointer_registry.h"
 #include "sound_decoder.h"
 
+namespace fallout {
+
 typedef struct SoundEffectsListEntry {
     char* name;
     int dataSize;
@@ -84,9 +86,9 @@ int soundEffectsListInit(const char* soundEffectsPath, int a2, int debugLevel)
     gSoundEffectsListPathLength = strlen(gSoundEffectsListPath);
 
     if (gSoundEffectsListPathLength == 0 || soundEffectsPath[gSoundEffectsListPathLength - 1] == '\\') {
-        sprintf(path, "%sSNDLIST.LST", soundEffectsPath);
+        snprintf(path, sizeof(path), "%sSNDLIST.LST", soundEffectsPath);
     } else {
-        sprintf(path, "%s\\SNDLIST.LST", soundEffectsPath);
+        snprintf(path, sizeof(path), "%s\\SNDLIST.LST", soundEffectsPath);
     }
 
     File* stream = fileOpen(path, "rt");
@@ -470,3 +472,5 @@ static int _sfxl_ad_reader(int fileHandle, void* buf, unsigned int size)
 {
     return fileRead(buf, 1, size, (File*)intToPtr(fileHandle));
 }
+
+} // namespace fallout

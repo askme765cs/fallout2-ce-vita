@@ -10,25 +10,30 @@
 #include "color.h"
 #include "combat.h"
 #include "combat_ai.h"
-#include "core.h"
 #include "cycle.h"
 #include "debug.h"
 #include "draw.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "geometry.h"
 #include "grayscale.h"
+#include "input.h"
+#include "kb.h"
 #include "loadsave.h"
 #include "memory.h"
 #include "message.h"
+#include "mouse.h"
 #include "platform_compat.h"
 #include "scripts.h"
+#include "settings.h"
+#include "svga.h"
 #include "text_font.h"
 #include "text_object.h"
 #include "tile.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 #define PREFERENCES_WINDOW_WIDTH 640
 #define PREFERENCES_WINDOW_HEIGHT 480
@@ -102,7 +107,6 @@ typedef enum PreferencesWindowFrm {
     PREFERENCES_WINDOW_FRM_COUNT,
 } PreferencesWindowFrm;
 
-#pragma pack(2)
 typedef struct PreferenceDescription {
     // The number of options.
     short valuesCount;
@@ -124,7 +128,6 @@ typedef struct PreferenceDescription {
     double maxValue;
     int* valuePtr;
 } PreferenceDescription;
-#pragma pack()
 
 static int optionsWindowInit();
 static int optionsWindowFree();
@@ -291,26 +294,14 @@ static PreferenceDescription gPreferenceDescriptions[PREF_COUNT] = {
     { 2, 0, 374, 451, 0, 0, { 207, 218, 0, 0 }, 0, GAME_CONFIG_MOUSE_SENSITIVITY_KEY, 1.0, 2.5, NULL },
 };
 
-// 0x6637D0
-static Size gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_COUNT];
-
 // 0x6637E8
 static MessageList gOptionsMessageList;
-
-// 0x6637F0
-static Size gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_COUNT];
 
 // 0x663840
 static MessageListItem gOptionsMessageListItem;
 
-// 0x663850
-static unsigned char* gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_COUNT];
-
 // 0x663878
 static unsigned char* _opbtns[OPTIONS_WINDOW_BUTTONS_COUNT];
-
-// 0x6638A0
-static CacheEntry* gPreferencesWindowFrmHandles[PREFERENCES_WINDOW_FRM_COUNT];
 
 // 0x6638C8
 static double gPreferencesTextBaseDelay2;
@@ -344,12 +335,6 @@ static int gPreferencesWindow;
 
 // 0x663908
 static unsigned char* gOptionsWindowBuffer;
-
-// 0x66390C
-static CacheEntry* gOptionsWindowFrmHandles[OPTIONS_WINDOW_FRM_COUNT];
-
-// 0x663918
-static unsigned char* gOptionsWindowFrmData[OPTIONS_WINDOW_FRM_COUNT];
 
 // 0x663924
 static int gPreferencesGameDifficulty2;
@@ -465,6 +450,9 @@ int gPreferencesGameDifficulty1;
 // 0x6639C0
 int gPreferencesCombatLooks1;
 
+static FrmImage _optionsFrmImages[OPTIONS_WINDOW_FRM_COUNT];
+static FrmImage _preferencesFrmImages[PREFERENCES_WINDOW_FRM_COUNT];
+
 // 0x48FC48
 int showOptions()
 {
@@ -474,6 +462,8 @@ int showOptions()
 // 0x48FC50
 int showOptionsWithInitialKeyCode(int initialKeyCode)
 {
+    ScopedGameMode gm(GameMode::kOptions);
+
     if (optionsWindowInit() == -1) {
         debugPrint("\nOPTION MENU: Error loading option dialog data!\n");
         return -1;
@@ -481,7 +471,9 @@ int showOptionsWithInitialKeyCode(int initialKeyCode)
 
     int rc = -1;
     while (rc == -1) {
-        int keyCode = _get_input();
+        sharedFpsLimiter.mark();
+
+        int keyCode = inputGetInput();
         bool showPreferences = false;
 
         if (initialKeyCode != -1) {
@@ -504,7 +496,7 @@ int showOptionsWithInitialKeyCode(int initialKeyCode)
             case KEY_UPPERCASE_S:
             case KEY_LOWERCASE_S:
             case 500:
-                if (lsgSaveGame(1) != 1) {
+                if (lsgSaveGame(LOAD_SAVE_MODE_NORMAL) == 1) {
                     rc = 1;
                 }
                 break;
@@ -551,6 +543,9 @@ int showOptionsWithInitialKeyCode(int initialKeyCode)
                 break;
             }
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     optionsWindowFree();
@@ -568,18 +563,16 @@ static int optionsWindowInit()
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "options.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "options.msg");
     if (!messageListLoad(&gOptionsMessageList, path)) {
         return -1;
     }
 
     for (int index = 0; index < OPTIONS_WINDOW_FRM_COUNT; index++) {
         int fid = buildFid(OBJ_TYPE_INTERFACE, gOptionsWindowFrmIds[index], 0, 0, 0);
-        gOptionsWindowFrmData[index] = artLockFrameDataReturningSize(fid, &(gOptionsWindowFrmHandles[index]), &(gOptionsWindowFrmSizes[index].width), &(gOptionsWindowFrmSizes[index].height));
-
-        if (gOptionsWindowFrmData[index] == NULL) {
+        if (!_optionsFrmImages[index].lock(fid)) {
             while (--index >= 0) {
-                artUnlock(gOptionsWindowFrmHandles[index]);
+                _optionsFrmImages[index].unlock();
             }
 
             messageListFree(&gOptionsMessageList);
@@ -590,14 +583,14 @@ static int optionsWindowInit()
 
     int cycle = 0;
     for (int index = 0; index < OPTIONS_WINDOW_BUTTONS_COUNT; index++) {
-        _opbtns[index] = (unsigned char*)internal_malloc(gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width * gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].height + 1024);
+        _opbtns[index] = (unsigned char*)internal_malloc(_optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth() * _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getHeight() + 1024);
         if (_opbtns[index] == NULL) {
             while (--index >= 0) {
                 internal_free(_opbtns[index]);
             }
 
             for (int index = 0; index < OPTIONS_WINDOW_FRM_COUNT; index++) {
-                artUnlock(gOptionsWindowFrmHandles[index]);
+                _optionsFrmImages[index].unlock();
             }
 
             messageListFree(&gOptionsMessageList);
@@ -607,17 +600,17 @@ static int optionsWindowInit()
 
         cycle = cycle ^ 1;
 
-        memcpy(_opbtns[index], gOptionsWindowFrmData[cycle + 1], gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width * gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].height);
+        memcpy(_opbtns[index], _optionsFrmImages[cycle + 1].getData(), _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth() * _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getHeight());
     }
 
-    int optionsWindowX = (screenGetWidth() - gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BACKGROUND].width) / 2;
-    int optionsWindowY = (screenGetHeight() - gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BACKGROUND].height) / 2 - 60;
+    int optionsWindowX = (screenGetWidth() - _optionsFrmImages[OPTIONS_WINDOW_FRM_BACKGROUND].getWidth()) / 2;
+    int optionsWindowY = (screenGetHeight() - _optionsFrmImages[OPTIONS_WINDOW_FRM_BACKGROUND].getHeight()) / 2 - 60;
     gOptionsWindow = windowCreate(optionsWindowX,
         optionsWindowY,
-        gOptionsWindowFrmSizes[0].width,
-        gOptionsWindowFrmSizes[0].height,
+        _optionsFrmImages[0].getWidth(),
+        _optionsFrmImages[0].getHeight(),
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x02);
+        WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
 
     if (gOptionsWindow == -1) {
         for (int index = 0; index < OPTIONS_WINDOW_BUTTONS_COUNT; index++) {
@@ -625,7 +618,7 @@ static int optionsWindowInit()
         }
 
         for (int index = 0; index < OPTIONS_WINDOW_FRM_COUNT; index++) {
-            artUnlock(gOptionsWindowFrmHandles[index]);
+            _optionsFrmImages[index].unlock();
         }
 
         messageListFree(&gOptionsMessageList);
@@ -643,11 +636,11 @@ static int optionsWindowInit()
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
 
     gOptionsWindowBuffer = windowGetBuffer(gOptionsWindow);
-    memcpy(gOptionsWindowBuffer, gOptionsWindowFrmData[OPTIONS_WINDOW_FRM_BACKGROUND], gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BACKGROUND].width * gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BACKGROUND].height);
+    memcpy(gOptionsWindowBuffer, _optionsFrmImages[OPTIONS_WINDOW_FRM_BACKGROUND].getData(), _optionsFrmImages[OPTIONS_WINDOW_FRM_BACKGROUND].getWidth() * _optionsFrmImages[OPTIONS_WINDOW_FRM_BACKGROUND].getHeight());
 
     fontSetCurrent(103);
 
-    int textY = (gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].height - fontGetLineHeight()) / 2 + 1;
+    int textY = (_optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getHeight() - fontGetLineHeight()) / 2 + 1;
     int buttonY = 17;
 
     for (int index = 0; index < OPTIONS_WINDOW_BUTTONS_COUNT; index += 2) {
@@ -656,20 +649,32 @@ static int optionsWindowInit()
         const char* msg = getmsg(&gOptionsMessageList, &gOptionsMessageListItem, index / 2);
         strcpy(text, msg);
 
-        int textX = (gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width - fontGetStringWidth(text)) / 2;
+        int textX = (_optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth() - fontGetStringWidth(text)) / 2;
         if (textX < 0) {
             textX = 0;
         }
 
-        fontDrawText(_opbtns[index] + gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width * textY + textX, text, gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width, gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width, _colorTable[18979]);
-        fontDrawText(_opbtns[index + 1] + gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width * textY + textX, text, gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width, gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width, _colorTable[14723]);
+        fontDrawText(_opbtns[index] + _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth() * textY + textX, text, _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth(), _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth(), _colorTable[18979]);
+        fontDrawText(_opbtns[index + 1] + _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth() * textY + textX, text, _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth(), _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth(), _colorTable[14723]);
 
-        int btn = buttonCreate(gOptionsWindow, 13, buttonY, gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].width, gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].height, -1, -1, -1, index / 2 + 500, _opbtns[index], _opbtns[index + 1], NULL, 32);
+        int btn = buttonCreate(gOptionsWindow,
+            13,
+            buttonY,
+            _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getWidth(),
+            _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getHeight(),
+            -1,
+            -1,
+            -1,
+            index / 2 + 500,
+            _opbtns[index],
+            _opbtns[index + 1],
+            NULL,
+            BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_lrg_butt_press, _gsound_lrg_butt_release);
         }
 
-        buttonY += gOptionsWindowFrmSizes[OPTIONS_WINDOW_FRM_BUTTON_ON].height + 3;
+        buttonY += _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getHeight() + 3;
     }
 
     fontSetCurrent(101);
@@ -691,7 +696,7 @@ static int optionsWindowFree()
     }
 
     for (int index = 0; index < OPTIONS_WINDOW_FRM_COUNT; index++) {
-        artUnlock(gOptionsWindowFrmHandles[index]);
+        _optionsFrmImages[index].unlock();
     }
 
     if (gOptionsWindowGameMouseObjectsWasVisible) {
@@ -708,13 +713,6 @@ static int optionsWindowFree()
 // 0x4902B0
 int showPause(bool a1)
 {
-    int graphicIds[PAUSE_WINDOW_FRM_COUNT];
-    unsigned char* frmData[PAUSE_WINDOW_FRM_COUNT];
-    CacheEntry* frmHandles[PAUSE_WINDOW_FRM_COUNT];
-    Size frmSizes[PAUSE_WINDOW_FRM_COUNT];
-
-    memcpy(graphicIds, gPauseWindowFrmIds, sizeof(gPauseWindowFrmIds));
-
     bool gameMouseWasVisible;
     if (!a1) {
         gOptionsWindowIsoWasEnabled = isoDisable();
@@ -729,14 +727,10 @@ int showPause(bool a1)
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
     _ShadeScreen(a1);
 
+    FrmImage frmImages[PAUSE_WINDOW_FRM_COUNT];
     for (int index = 0; index < PAUSE_WINDOW_FRM_COUNT; index++) {
-        int fid = buildFid(OBJ_TYPE_INTERFACE, graphicIds[index], 0, 0, 0);
-        frmData[index] = artLockFrameDataReturningSize(fid, &(frmHandles[index]), &(frmSizes[index].width), &(frmSizes[index].height));
-        if (frmData[index] == NULL) {
-            while (--index >= 0) {
-                artUnlock(frmHandles[index]);
-            }
-
+        int fid = buildFid(OBJ_TYPE_INTERFACE, gPauseWindowFrmIds[index], 0, 0, 0);
+        if (!frmImages[index].lock(fid)) {
             debugPrint("\n** Error loading pause window graphics! **\n");
             return -1;
         }
@@ -748,14 +742,14 @@ int showPause(bool a1)
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "options.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "options.msg");
     if (!messageListLoad(&gOptionsMessageList, path)) {
         // FIXME: Leaking graphics.
         return -1;
     }
 
-    int pauseWindowX = (screenGetWidth() - frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width) / 2;
-    int pauseWindowY = (screenGetHeight() - frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].height) / 2;
+    int pauseWindowX = (screenGetWidth() - frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth()) / 2;
+    int pauseWindowY = (screenGetHeight() - frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getHeight()) / 2;
 
     if (a1) {
         pauseWindowX -= 65;
@@ -766,15 +760,11 @@ int showPause(bool a1)
 
     int window = windowCreate(pauseWindowX,
         pauseWindowY,
-        frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width,
-        frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].height,
+        frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth(),
+        frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getHeight(),
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x02);
+        WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
     if (window == -1) {
-        for (int index = 0; index < PAUSE_WINDOW_FRM_COUNT; index++) {
-            artUnlock(frmHandles[index]);
-        }
-
         messageListFree(&gOptionsMessageList);
 
         debugPrint("\n** Error opening pause window! **\n");
@@ -783,15 +773,15 @@ int showPause(bool a1)
 
     unsigned char* windowBuffer = windowGetBuffer(window);
     memcpy(windowBuffer,
-        frmData[PAUSE_WINDOW_FRM_BACKGROUND],
-        frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width * frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].height);
+        frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getData(),
+        frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth() * frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getHeight());
 
-    blitBufferToBufferTrans(frmData[PAUSE_WINDOW_FRM_DONE_BOX],
-        frmSizes[PAUSE_WINDOW_FRM_DONE_BOX].width,
-        frmSizes[PAUSE_WINDOW_FRM_DONE_BOX].height,
-        frmSizes[PAUSE_WINDOW_FRM_DONE_BOX].width,
-        windowBuffer + frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width * 42 + 13,
-        frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width);
+    blitBufferToBufferTrans(frmImages[PAUSE_WINDOW_FRM_DONE_BOX].getData(),
+        frmImages[PAUSE_WINDOW_FRM_DONE_BOX].getWidth(),
+        frmImages[PAUSE_WINDOW_FRM_DONE_BOX].getHeight(),
+        frmImages[PAUSE_WINDOW_FRM_DONE_BOX].getWidth(),
+        windowBuffer + frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth() * 42 + 13,
+        frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth());
 
     gOptionsWindowOldFont = fontGetCurrent();
     fontSetCurrent(103);
@@ -799,10 +789,10 @@ int showPause(bool a1)
     char* messageItemText;
 
     messageItemText = getmsg(&gOptionsMessageList, &gOptionsMessageListItem, 300);
-    fontDrawText(windowBuffer + frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width * 45 + 52,
+    fontDrawText(windowBuffer + frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth() * 45 + 52,
         messageItemText,
-        frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width,
-        frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width,
+        frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth(),
+        frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth(),
         _colorTable[18979]);
 
     fontSetCurrent(104);
@@ -811,23 +801,23 @@ int showPause(bool a1)
     strcpy(path, messageItemText);
 
     int length = fontGetStringWidth(path);
-    fontDrawText(windowBuffer + frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width * 10 + 2 + (frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width - length) / 2,
+    fontDrawText(windowBuffer + frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth() * 10 + 2 + (frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth() - length) / 2,
         path,
-        frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width,
-        frmSizes[PAUSE_WINDOW_FRM_BACKGROUND].width,
+        frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth(),
+        frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth(),
         _colorTable[18979]);
 
     int doneBtn = buttonCreate(window,
         26,
         46,
-        frmSizes[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_UP].width,
-        frmSizes[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_UP].height,
+        frmImages[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_UP].getWidth(),
+        frmImages[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_UP].getHeight(),
         -1,
         -1,
         -1,
         504,
-        frmData[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_UP],
-        frmData[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN],
+        frmImages[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_UP].getData(),
+        frmImages[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (doneBtn != -1) {
@@ -838,7 +828,9 @@ int showPause(bool a1)
 
     bool done = false;
     while (!done) {
-        int keyCode = _get_input();
+        sharedFpsLimiter.mark();
+
+        int keyCode = inputGetInput();
         switch (keyCode) {
         case KEY_PLUS:
         case KEY_EQUAL:
@@ -857,6 +849,9 @@ int showPause(bool a1)
                 done = true;
             }
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     if (!a1) {
@@ -864,11 +859,6 @@ int showPause(bool a1)
     }
 
     windowDestroy(window);
-
-    for (int index = 0; index < PAUSE_WINDOW_FRM_COUNT; index++) {
-        artUnlock(frmHandles[index]);
-    }
-
     messageListFree(&gOptionsMessageList);
 
     if (!a1) {
@@ -915,26 +905,26 @@ static void _SetSystemPrefs()
 {
     preferencesSetDefaults(false);
 
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_GAME_DIFFICULTY_KEY, &gPreferencesGameDifficulty1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_DIFFICULTY_KEY, &gPreferencesCombatDifficulty1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_VIOLENCE_LEVEL_KEY, &gPreferencesViolenceLevel1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_TARGET_HIGHLIGHT_KEY, &gPreferencesTargetHighlight1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_MESSAGES_KEY, &gPreferencesCombatMessages1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_LOOKS_KEY, &gPreferencesCombatLooks1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_TAUNTS_KEY, &gPreferencesCombatTaunts1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_LANGUAGE_FILTER_KEY, &gPreferencesLanguageFilter1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_RUNNING_KEY, &gPreferencesRunning1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_SUBTITLES_KEY, &gPreferencesSubtitles1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_ITEM_HIGHLIGHT_KEY, &gPreferencesItemHighlight1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_SPEED_KEY, &gPreferencesCombatSpeed1);
-    configGetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_TEXT_BASE_DELAY_KEY, &gPreferencesTextBaseDelay1);
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_PLAYER_SPEEDUP_KEY, &gPreferencesPlayerSpeedup1);
-    configGetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MASTER_VOLUME_KEY, &gPreferencesMasterVolume1);
-    configGetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MUSIC_VOLUME_KEY, &gPreferencesMusicVolume1);
-    configGetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SNDFX_VOLUME_KEY, &gPreferencesSoundEffectsVolume1);
-    configGetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SPEECH_VOLUME_KEY, &gPreferencesSpeechVolume1);
-    configGetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_BRIGHTNESS_KEY, &gPreferencesBrightness1);
-    configGetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_MOUSE_SENSITIVITY_KEY, &gPreferencesMouseSensitivity1);
+    gPreferencesGameDifficulty1 = settings.preferences.game_difficulty;
+    gPreferencesCombatDifficulty1 = settings.preferences.combat_difficulty;
+    gPreferencesViolenceLevel1 = settings.preferences.violence_level;
+    gPreferencesTargetHighlight1 = settings.preferences.target_highlight;
+    gPreferencesCombatMessages1 = settings.preferences.combat_messages;
+    gPreferencesCombatLooks1 = settings.preferences.combat_looks;
+    gPreferencesCombatTaunts1 = settings.preferences.combat_taunts;
+    gPreferencesLanguageFilter1 = settings.preferences.language_filter;
+    gPreferencesRunning1 = settings.preferences.running;
+    gPreferencesSubtitles1 = settings.preferences.subtitles;
+    gPreferencesItemHighlight1 = settings.preferences.item_highlight;
+    gPreferencesCombatSpeed1 = settings.preferences.combat_speed;
+    gPreferencesTextBaseDelay1 = settings.preferences.text_base_delay;
+    gPreferencesPlayerSpeedup1 = settings.preferences.player_speedup;
+    gPreferencesMasterVolume1 = settings.sound.master_volume;
+    gPreferencesMusicVolume1 = settings.sound.music_volume;
+    gPreferencesSoundEffectsVolume1 = settings.sound.sndfx_volume;
+    gPreferencesSpeechVolume1 = settings.sound.speech_volume;
+    gPreferencesBrightness1 = settings.preferences.brightness;
+    gPreferencesMouseSensitivity1 = settings.preferences.mouse_sensitivity;
 
     _JustUpdate_();
 }
@@ -1098,7 +1088,7 @@ static void _UpdateThing(int index)
         int offsets[PRIMARY_PREF_COUNT];
         memcpy(offsets, dword_48FC1C, sizeof(dword_48FC1C));
 
-        blitBufferToBuffer(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_BACKGROUND] + 640 * offsets[primaryOptionIndex] + 23, 160, 54, 640, gPreferencesWindowBuffer + 640 * offsets[primaryOptionIndex] + 23, 640);
+        blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + 640 * offsets[primaryOptionIndex] + 23, 160, 54, 640, gPreferencesWindowBuffer + 640 * offsets[primaryOptionIndex] + 23, 640);
 
         for (int valueIndex = 0; valueIndex < meta->valuesCount; valueIndex++) {
             const char* text = getmsg(&gOptionsMessageList, &gOptionsMessageListItem, meta->labelIds[valueIndex]);
@@ -1143,14 +1133,14 @@ static void _UpdateThing(int index)
         }
 
         int value = *(meta->valuePtr);
-        blitBufferToBufferTrans(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_PRIMARY_SWITCH] + (46 * 47) * value, 46, 47, 46, gPreferencesWindowBuffer + 640 * meta->knobY + meta->knobX, 640);
+        blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_PRIMARY_SWITCH].getData() + (46 * 47) * value, 46, 47, 46, gPreferencesWindowBuffer + 640 * meta->knobY + meta->knobX, 640);
     } else if (index >= FIRST_SECONDARY_PREF && index <= LAST_SECONDARY_PREF) {
         int secondaryOptionIndex = index - FIRST_SECONDARY_PREF;
 
         int offsets[SECONDARY_PREF_COUNT];
         memcpy(offsets, dword_48FC30, sizeof(dword_48FC30));
 
-        blitBufferToBuffer(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_BACKGROUND] + 640 * offsets[secondaryOptionIndex] + 251, 113, 34, 640, gPreferencesWindowBuffer + 640 * offsets[secondaryOptionIndex] + 251, 640);
+        blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + 640 * offsets[secondaryOptionIndex] + 251, 113, 34, 640, gPreferencesWindowBuffer + 640 * offsets[secondaryOptionIndex] + 251, 640);
 
         // Secondary options are booleans, so it's index is also it's value.
         for (int value = 0; value < 2; value++) {
@@ -1171,9 +1161,9 @@ static void _UpdateThing(int index)
         if (index == PREF_COMBAT_MESSAGES) {
             value ^= 1;
         }
-        blitBufferToBufferTrans(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_SECONDARY_SWITCH] + (22 * 25) * value, 22, 25, 22, gPreferencesWindowBuffer + 640 * meta->knobY + meta->knobX, 640);
+        blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_SECONDARY_SWITCH].getData() + (22 * 25) * value, 22, 25, 22, gPreferencesWindowBuffer + 640 * meta->knobY + meta->knobX, 640);
     } else if (index >= FIRST_RANGE_PREF && index <= LAST_RANGE_PREF) {
-        blitBufferToBuffer(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_BACKGROUND] + 640 * (meta->knobY - 12) + 384, 240, 24, 640, gPreferencesWindowBuffer + 640 * (meta->knobY - 12) + 384, 640);
+        blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + 640 * (meta->knobY - 12) + 384, 240, 24, 640, gPreferencesWindowBuffer + 640 * (meta->knobY - 12) + 384, 640);
         switch (index) {
         case PREF_COMBAT_SPEED:
             if (1) {
@@ -1181,7 +1171,7 @@ static void _UpdateThing(int index)
                 value = std::clamp(value, 0.0, 50.0);
 
                 int x = (int)((value - meta->minValue) * 219.0 / (meta->maxValue - meta->minValue) + 384.0);
-                blitBufferToBufferTrans(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_KNOB_OFF], 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
             }
             break;
         case PREF_TEXT_BASE_DELAY:
@@ -1189,7 +1179,7 @@ static void _UpdateThing(int index)
                 gPreferencesTextBaseDelay1 = std::clamp(gPreferencesTextBaseDelay1, 1.0, 6.0);
 
                 int x = (int)((6.0 - gPreferencesTextBaseDelay1) * 43.8 + 384.0);
-                blitBufferToBufferTrans(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_KNOB_OFF], 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
 
                 double value = (gPreferencesTextBaseDelay1 - 1.0) * 0.2 * 2.0;
                 value = std::clamp(value, 0.0, 2.0);
@@ -1207,7 +1197,7 @@ static void _UpdateThing(int index)
                 value = std::clamp(value, meta->minValue, meta->maxValue);
 
                 int x = (int)((value - meta->minValue) * 219.0 / (meta->maxValue - meta->minValue) + 384.0);
-                blitBufferToBufferTrans(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_KNOB_OFF], 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
 
                 switch (index) {
                 case PREF_MASTER_VOLUME:
@@ -1230,7 +1220,7 @@ static void _UpdateThing(int index)
                 gPreferencesBrightness1 = std::clamp(gPreferencesBrightness1, 1.0, 1.17999267578125);
 
                 int x = (int)((gPreferencesBrightness1 - meta->minValue) * (219.0 / (meta->maxValue - meta->minValue)) + 384.0);
-                blitBufferToBufferTrans(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_KNOB_OFF], 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
 
                 colorSetBrightness(gPreferencesBrightness1);
             }
@@ -1240,7 +1230,7 @@ static void _UpdateThing(int index)
                 gPreferencesMouseSensitivity1 = std::clamp(gPreferencesMouseSensitivity1, 1.0, 2.5);
 
                 int x = (int)((gPreferencesMouseSensitivity1 - meta->minValue) * (219.0 / (meta->maxValue - meta->minValue)) + 384.0);
-                blitBufferToBufferTrans(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_KNOB_OFF], 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
 
                 mouseSetSensitivity(gPreferencesMouseSensitivity1);
             }
@@ -1304,19 +1294,19 @@ static void _UpdateThing(int index)
 // 0x492CB0
 int _SavePrefs(bool save)
 {
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_GAME_DIFFICULTY_KEY, gPreferencesGameDifficulty1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_DIFFICULTY_KEY, gPreferencesCombatDifficulty1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_VIOLENCE_LEVEL_KEY, gPreferencesViolenceLevel1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_TARGET_HIGHLIGHT_KEY, gPreferencesTargetHighlight1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_MESSAGES_KEY, gPreferencesCombatMessages1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_LOOKS_KEY, gPreferencesCombatLooks1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_TAUNTS_KEY, gPreferencesCombatTaunts1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_LANGUAGE_FILTER_KEY, gPreferencesLanguageFilter1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_RUNNING_KEY, gPreferencesRunning1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_SUBTITLES_KEY, gPreferencesSubtitles1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_ITEM_HIGHLIGHT_KEY, gPreferencesItemHighlight1);
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_SPEED_KEY, gPreferencesCombatSpeed1);
-    configSetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_TEXT_BASE_DELAY_KEY, gPreferencesTextBaseDelay1);
+    settings.preferences.game_difficulty = gPreferencesGameDifficulty1;
+    settings.preferences.combat_difficulty = gPreferencesCombatDifficulty1;
+    settings.preferences.violence_level = gPreferencesViolenceLevel1;
+    settings.preferences.target_highlight = gPreferencesTargetHighlight1;
+    settings.preferences.combat_messages = gPreferencesCombatMessages1;
+    settings.preferences.combat_looks = gPreferencesCombatLooks1;
+    settings.preferences.combat_taunts = gPreferencesCombatTaunts1;
+    settings.preferences.language_filter = gPreferencesLanguageFilter1;
+    settings.preferences.running = gPreferencesRunning1;
+    settings.preferences.subtitles = gPreferencesSubtitles1;
+    settings.preferences.item_highlight = gPreferencesItemHighlight1;
+    settings.preferences.combat_speed = gPreferencesCombatSpeed1;
+    settings.preferences.text_base_delay = gPreferencesTextBaseDelay1;
 
     double textLineDelay = (gPreferencesTextBaseDelay1 + dbl_50C2D0) * dbl_50C2D8 * dbl_50C2E0;
     if (textLineDelay >= 0.0) {
@@ -1324,22 +1314,22 @@ int _SavePrefs(bool save)
             textLineDelay = 2.0;
         }
 
-        configSetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_TEXT_LINE_DELAY_KEY, textLineDelay);
+        settings.preferences.text_line_delay = textLineDelay;
     } else {
-        configSetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_TEXT_LINE_DELAY_KEY, 0.0);
+        settings.preferences.text_line_delay = 0.0;
     }
 
-    configSetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_PLAYER_SPEEDUP_KEY, gPreferencesPlayerSpeedup1);
-    configSetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MASTER_VOLUME_KEY, gPreferencesMasterVolume1);
-    configSetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_MUSIC_VOLUME_KEY, gPreferencesMusicVolume1);
-    configSetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SNDFX_VOLUME_KEY, gPreferencesSoundEffectsVolume1);
-    configSetInt(&gGameConfig, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SPEECH_VOLUME_KEY, gPreferencesSpeechVolume1);
+    settings.preferences.player_speedup = gPreferencesPlayerSpeedup1;
+    settings.sound.master_volume = gPreferencesMasterVolume1;
+    settings.sound.music_volume = gPreferencesMusicVolume1;
+    settings.sound.sndfx_volume = gPreferencesSoundEffectsVolume1;
+    settings.sound.speech_volume = gPreferencesSpeechVolume1;
 
-    configSetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_BRIGHTNESS_KEY, gPreferencesBrightness1);
-    configSetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_MOUSE_SENSITIVITY_KEY, gPreferencesMouseSensitivity1);
+    settings.preferences.brightness = gPreferencesBrightness1;
+    settings.preferences.mouse_sensitivity = gPreferencesMouseSensitivity1;
 
     if (save) {
-        gameConfigSave();
+        settingsSave();
     }
 
     return 0;
@@ -1435,8 +1425,7 @@ err:
 // 0x4928E4
 void brightnessIncrease()
 {
-    gPreferencesBrightness1 = 1.0;
-    configGetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_BRIGHTNESS_KEY, &gPreferencesBrightness1);
+    gPreferencesBrightness1 = settings.preferences.brightness;
 
     if (gPreferencesBrightness1 < dbl_50C168) {
         gPreferencesBrightness1 += dbl_50C170;
@@ -1451,17 +1440,16 @@ void brightnessIncrease()
 
         colorSetBrightness(gPreferencesBrightness1);
 
-        configSetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_BRIGHTNESS_KEY, gPreferencesBrightness1);
+        settings.preferences.brightness = gPreferencesBrightness1;
 
-        gameConfigSave();
+        settingsSave();
     }
 }
 
 // 0x4929C8
 void brightnessDecrease()
 {
-    gPreferencesBrightness1 = 1.0;
-    configGetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_BRIGHTNESS_KEY, &gPreferencesBrightness1);
+    gPreferencesBrightness1 = settings.preferences.brightness;
 
     if (gPreferencesBrightness1 > 1.0) {
         gPreferencesBrightness1 += dbl_50C178;
@@ -1476,9 +1464,9 @@ void brightnessDecrease()
 
         colorSetBrightness(gPreferencesBrightness1);
 
-        configSetDouble(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_BRIGHTNESS_KEY, gPreferencesBrightness1);
+        settings.preferences.brightness = gPreferencesBrightness1;
 
-        gameConfigSave();
+        settingsSave();
     }
 }
 
@@ -1499,10 +1487,9 @@ static int preferencesWindowInit()
 
     for (i = 0; i < PREFERENCES_WINDOW_FRM_COUNT; i++) {
         fid = buildFid(OBJ_TYPE_INTERFACE, gPreferencesWindowFrmIds[i], 0, 0, 0);
-        gPreferencesWindowFrmData[i] = artLockFrameDataReturningSize(fid, &(gPreferencesWindowFrmHandles[i]), &(gPreferencesWindowFrmSizes[i].width), &(gPreferencesWindowFrmSizes[i].height));
-        if (gPreferencesWindowFrmData[i] == NULL) {
-            for (; i != 0; i--) {
-                artUnlock(gPreferencesWindowFrmHandles[i - 1]);
+        if (!_preferencesFrmImages[i].lock(fid)) {
+            while (--i >= 0) {
+                _preferencesFrmImages[i].unlock();
             }
             return -1;
         }
@@ -1517,18 +1504,18 @@ static int preferencesWindowInit()
         PREFERENCES_WINDOW_WIDTH,
         PREFERENCES_WINDOW_HEIGHT,
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x02);
+        WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
     if (gPreferencesWindow == -1) {
         for (i = 0; i < PREFERENCES_WINDOW_FRM_COUNT; i++) {
-            artUnlock(gPreferencesWindowFrmHandles[i]);
+            _preferencesFrmImages[i].unlock();
         }
         return -1;
     }
 
     gPreferencesWindowBuffer = windowGetBuffer(gPreferencesWindow);
     memcpy(gPreferencesWindowBuffer,
-        gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_BACKGROUND],
-        gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_BACKGROUND].width * gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_BACKGROUND].height);
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData(),
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getWidth() * _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getHeight());
 
     fontSetCurrent(104);
 
@@ -1616,14 +1603,14 @@ static int preferencesWindowInit()
     _plyrspdbid = buttonCreate(gPreferencesWindow,
         383,
         68,
-        gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_CHECKBOX_OFF].width,
-        gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_CHECKBOX_ON].height,
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_CHECKBOX_OFF].getWidth(),
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_CHECKBOX_ON].getHeight(),
         -1,
         -1,
         524,
         524,
-        gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_CHECKBOX_OFF],
-        gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_CHECKBOX_ON],
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_CHECKBOX_OFF].getData(),
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_CHECKBOX_ON].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT | BUTTON_FLAG_0x01 | BUTTON_FLAG_0x02);
     if (_plyrspdbid != -1) {
@@ -1636,14 +1623,14 @@ static int preferencesWindowInit()
     btn = buttonCreate(gPreferencesWindow,
         23,
         450,
-        gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP].width,
-        gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].height,
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP].getWidth(),
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].getHeight(),
         -1,
         -1,
         -1,
         527,
-        gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP],
-        gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN],
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP].getData(),
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
@@ -1654,14 +1641,14 @@ static int preferencesWindowInit()
     btn = buttonCreate(gPreferencesWindow,
         148,
         450,
-        gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP].width,
-        gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].height,
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP].getWidth(),
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].getHeight(),
         -1,
         -1,
         -1,
         504,
-        gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP],
-        gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN],
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP].getData(),
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
@@ -1672,14 +1659,14 @@ static int preferencesWindowInit()
     btn = buttonCreate(gPreferencesWindow,
         263,
         450,
-        gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP].width,
-        gPreferencesWindowFrmSizes[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].height,
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP].getWidth(),
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].getHeight(),
         -1,
         -1,
         -1,
         528,
-        gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP],
-        gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN],
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_UP].getData(),
+        _preferencesFrmImages[PREFERENCES_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
@@ -1705,7 +1692,7 @@ static int preferencesWindowFree()
     windowDestroy(gPreferencesWindow);
 
     for (int index = 0; index < PREFERENCES_WINDOW_FRM_COUNT; index++) {
-        artUnlock(gPreferencesWindowFrmHandles[index]);
+        _preferencesFrmImages[index].unlock();
     }
 
     return 0;
@@ -1714,6 +1701,8 @@ static int preferencesWindowFree()
 // 0x490798
 static int _do_prefscreen()
 {
+    ScopedGameMode gm(GameMode::kPreferences);
+
     if (preferencesWindowInit() == -1) {
         debugPrint("\nPREFERENCE MENU: Error loading preference dialog data!\n");
         return -1;
@@ -1721,7 +1710,9 @@ static int _do_prefscreen()
 
     int rc = -1;
     while (rc == -1) {
-        int eventCode = _get_input();
+        sharedFpsLimiter.mark();
+
+        int eventCode = inputGetInput();
 
         switch (eventCode) {
         case KEY_RETURN:
@@ -1760,6 +1751,9 @@ static int _do_prefscreen()
             }
             break;
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     preferencesWindowFree();
@@ -1845,7 +1839,7 @@ static void _DoThing(int eventCode)
 
         if (valueChanged) {
             soundPlayFile("ib3p1xx1");
-            coreDelay(70);
+            inputBlockForTocks(70);
             soundPlayFile("ib3lu1x1");
             _UpdateThing(preferenceIndex);
             windowRefresh(gPreferencesWindow);
@@ -1879,7 +1873,7 @@ static void _DoThing(int eventCode)
 
         if (valueChanged) {
             soundPlayFile("ib2p1xx1");
-            coreDelay(70);
+            inputBlockForTocks(70);
             soundPlayFile("ib2lu1x1");
             _UpdateThing(preferenceIndex);
             windowRefresh(gPreferencesWindow);
@@ -1910,17 +1904,19 @@ static void _DoThing(int eventCode)
 
         int knobX = (int)(219.0 / (meta->maxValue - meta->minValue));
         int v31 = (int)((value - meta->minValue) * (219.0 / (meta->maxValue - meta->minValue)) + 384.0);
-        blitBufferToBuffer(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_BACKGROUND] + PREFERENCES_WINDOW_WIDTH * meta->knobY + 384, 240, 12, PREFERENCES_WINDOW_WIDTH, gPreferencesWindowBuffer + PREFERENCES_WINDOW_WIDTH * meta->knobY + 384, PREFERENCES_WINDOW_WIDTH);
-        blitBufferToBufferTrans(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_KNOB_ON], 21, 12, 21, gPreferencesWindowBuffer + PREFERENCES_WINDOW_WIDTH * meta->knobY + v31, PREFERENCES_WINDOW_WIDTH);
+        blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + PREFERENCES_WINDOW_WIDTH * meta->knobY + 384, 240, 12, PREFERENCES_WINDOW_WIDTH, gPreferencesWindowBuffer + PREFERENCES_WINDOW_WIDTH * meta->knobY + 384, PREFERENCES_WINDOW_WIDTH);
+        blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_ON].getData(), 21, 12, 21, gPreferencesWindowBuffer + PREFERENCES_WINDOW_WIDTH * meta->knobY + v31, PREFERENCES_WINDOW_WIDTH);
 
         windowRefresh(gPreferencesWindow);
 
         int sfxVolumeExample = 0;
         int speechVolumeExample = 0;
         while (true) {
-            _get_input();
+            sharedFpsLimiter.mark();
 
-            int tick = _get_time();
+            inputGetInput();
+
+            int tick = getTicks();
 
             mouseGetPositionInWindow(gPreferencesWindow, &x, &y);
 
@@ -1928,6 +1924,7 @@ static void _DoThing(int eventCode)
                 soundPlayFile("ib1lu1x1");
                 _UpdateThing(preferenceIndex);
                 windowRefresh(gPreferencesWindow);
+                renderPresent();
                 _changed = true;
                 return;
             }
@@ -2000,7 +1997,7 @@ static void _DoThing(int eventCode)
 
             if (v52) {
                 int off = PREFERENCES_WINDOW_WIDTH * (meta->knobY - 12) + 384;
-                blitBufferToBuffer(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_BACKGROUND] + off, 240, 24, PREFERENCES_WINDOW_WIDTH, gPreferencesWindowBuffer + off, PREFERENCES_WINDOW_WIDTH);
+                blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + off, 240, 24, PREFERENCES_WINDOW_WIDTH, gPreferencesWindowBuffer + off, PREFERENCES_WINDOW_WIDTH);
 
                 for (int optionIndex = 0; optionIndex < meta->valuesCount; optionIndex++) {
                     const char* str = getmsg(&gOptionsMessageList, &gOptionsMessageListItem, meta->labelIds[optionIndex]);
@@ -2049,14 +2046,17 @@ static void _DoThing(int eventCode)
                 }
             } else {
                 int off = PREFERENCES_WINDOW_WIDTH * meta->knobY + 384;
-                blitBufferToBuffer(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_BACKGROUND] + off, 240, 12, PREFERENCES_WINDOW_WIDTH, gPreferencesWindowBuffer + off, PREFERENCES_WINDOW_WIDTH);
+                blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + off, 240, 12, PREFERENCES_WINDOW_WIDTH, gPreferencesWindowBuffer + off, PREFERENCES_WINDOW_WIDTH);
             }
 
-            blitBufferToBufferTrans(gPreferencesWindowFrmData[PREFERENCES_WINDOW_FRM_KNOB_ON], 21, 12, 21, gPreferencesWindowBuffer + PREFERENCES_WINDOW_WIDTH * meta->knobY + v31, PREFERENCES_WINDOW_WIDTH);
+            blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_ON].getData(), 21, 12, 21, gPreferencesWindowBuffer + PREFERENCES_WINDOW_WIDTH * meta->knobY + v31, PREFERENCES_WINDOW_WIDTH);
             windowRefresh(gPreferencesWindow);
 
             while (getTicksSince(tick) < 35)
                 ;
+
+            renderPresent();
+            sharedFpsLimiter.throttle();
         }
     } else if (preferenceIndex == 19) {
         gPreferencesPlayerSpeedup1 ^= 1;
@@ -2070,3 +2070,5 @@ int _do_options()
 {
     return showOptionsWithInitialKeyCode(-1);
 }
+
+} // namespace fallout

@@ -31,6 +31,8 @@
 #include "trait.h"
 #include "worldmap.h"
 
+namespace fallout {
+
 // Maximum length of dude's name length.
 #define DUDE_NAME_MAX_LENGTH (32)
 
@@ -169,12 +171,14 @@ int critterInit()
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%sscrname.msg", asc_5186C8);
+    snprintf(path, sizeof(path), "%sscrname.msg", asc_5186C8);
 
     if (!messageListLoad(&gCritterMessageList, path)) {
         debugPrint("\nError: Loading critter name message file!");
         return -1;
     }
+
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRNAME, &gCritterMessageList);
 
     return 0;
 }
@@ -191,6 +195,7 @@ void critterReset()
 // 0x42D004
 void critterExit()
 {
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRNAME, nullptr);
     messageListFree(&gCritterMessageList);
 }
 
@@ -420,7 +425,7 @@ int critterAdjustRadiation(Object* obj, int amount)
     }
 
     if (amount > 0) {
-        proto->critter.data.flags |= CRITTER_FLAG_0x2;
+        proto->critter.data.flags |= CRITTER_RADIATED;
     }
 
     if (amount > 0) {
@@ -487,7 +492,7 @@ int _critter_check_rads(Object* obj)
 
     Proto* proto;
     protoGetProto(obj->pid, &proto);
-    if ((proto->critter.data.flags & CRITTER_FLAG_0x2) == 0) {
+    if ((proto->critter.data.flags & CRITTER_RADIATED) == 0) {
         return 0;
     }
 
@@ -528,7 +533,7 @@ int _critter_check_rads(Object* obj)
         queueAddEvent(GAME_TIME_TICKS_PER_HOUR * randomBetween(4, 18), obj, radiationEvent, EVENT_TYPE_RADIATION);
     }
 
-    proto->critter.data.flags &= ~(CRITTER_FLAG_0x2);
+    proto->critter.data.flags &= ~CRITTER_RADIATED;
 
     return 0;
 }
@@ -874,7 +879,7 @@ void critterKill(Object* critter, int anim, bool a3)
         rectUnion(&updatedRect, &tempRect, &updatedRect);
     }
 
-    if (!_critter_flag_check(critter->pid, CRITTER_FLAG_0x800)) {
+    if (!_critter_flag_check(critter->pid, CRITTER_FLAT)) {
         critter->flags |= OBJECT_NO_BLOCK;
         _obj_toggle_flat(critter, &tempRect);
     }
@@ -1390,3 +1395,5 @@ bool _critter_flag_check(int pid, int flag)
     protoGetProto(pid, &proto);
     return (proto->critter.data.flags & flag) != 0;
 }
+
+} // namespace fallout

@@ -6,11 +6,16 @@
 #include <algorithm>
 
 #include "color.h"
-#include "core.h"
 #include "draw.h"
+#include "input.h"
+#include "kb.h"
 #include "memory.h"
+#include "mouse.h"
+#include "svga.h"
 #include "text_font.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 typedef struct STRUCT_6B2340 {
     int field_0;
@@ -102,7 +107,7 @@ int _win_list_select_at(const char* title, char** items, int itemsLength, ListSe
     int listViewCapacity = 10;
     for (int heightMultiplier = 13; heightMultiplier > 8; heightMultiplier--) {
         windowHeight = heightMultiplier * fontGetLineHeight() + 22;
-        win = windowCreate(x, y, windowWidth, windowHeight, 256, WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+        win = windowCreate(x, y, windowWidth, windowHeight, 256, WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
         if (win != -1) {
             break;
         }
@@ -319,7 +324,9 @@ int _win_list_select_at(const char* title, char** items, int itemsLength, ListSe
     // Relative to `scrollOffset`.
     int previousSelectedItemIndex = -1;
     while (1) {
-        int keyCode = _get_input();
+        sharedFpsLimiter.mark();
+
+        int keyCode = inputGetInput();
         int mouseX;
         int mouseY;
         mouseGetPosition(&mouseX, &mouseY);
@@ -522,6 +529,9 @@ int _win_list_select_at(const char* title, char** items, int itemsLength, ListSe
                 _GNW_win_refresh(window, &itemRect, NULL);
             }
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     windowDestroy(win);
@@ -548,7 +558,7 @@ int _win_get_str(char* dest, int length, const char* title, int x, int y)
 
     int windowHeight = 5 * fontGetLineHeight() + 16;
 
-    int win = windowCreate(x, y, windowWidth, windowHeight, 256, WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+    int win = windowCreate(x, y, windowWidth, windowHeight, 256, WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (win == -1) {
         return -1;
     }
@@ -624,7 +634,7 @@ int _win_msg(const char* string, int x, int y, int flags)
 
     windowWidth += 16;
 
-    int win = windowCreate(x, y, windowWidth, windowHeight, 256, WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+    int win = windowCreate(x, y, windowWidth, windowHeight, 256, WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (win == -1) {
         return -1;
     }
@@ -657,7 +667,10 @@ int _win_msg(const char* string, int x, int y, int flags)
 
     windowRefresh(win);
 
-    while (_get_input() != KEY_ESCAPE) {
+    while (inputGetInput() != KEY_ESCAPE) {
+        sharedFpsLimiter.mark();
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     windowDestroy(win);
@@ -690,7 +703,7 @@ int _create_pull_down(char** stringList, int stringListLength, int x, int y, int
         return -1;
     }
 
-    int win = windowCreate(x, y, windowWidth, windowHeight, a6, WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+    int win = windowCreate(x, y, windowWidth, windowHeight, a6, WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (win == -1) {
         return -1;
     }
@@ -714,7 +727,7 @@ int _win_debug(char* string)
     int lineHeight = fontGetLineHeight();
 
     if (_wd == -1) {
-        _wd = windowCreate(80, 80, 300, 192, 256, WINDOW_FLAG_0x04);
+        _wd = windowCreate(80, 80, 300, 192, 256, WINDOW_MOVE_ON_TOP);
         if (_wd == -1) {
             return -1;
         }
@@ -955,7 +968,7 @@ void _win_delete_menu_bar(int win)
         window->menuBar->rect.top,
         rectGetWidth(&(window->menuBar->rect)),
         rectGetHeight(&(window->menuBar->rect)),
-        window->field_20);
+        window->color);
 
     internal_free(window->menuBar);
     window->menuBar = NULL;
@@ -999,7 +1012,7 @@ int _win_input_str(int win, char* dest, int maxLength, int x, int y, int textCol
     Window* window = windowGetWindow(win);
     unsigned char* buffer = window->buffer + window->width * y + x;
 
-    int cursorPos = strlen(dest);
+    size_t cursorPos = strlen(dest);
     dest[cursorPos] = '_';
     dest[cursorPos + 1] = '\0';
 
@@ -1020,7 +1033,9 @@ int _win_input_str(int win, char* dest, int maxLength, int x, int y, int textCol
     // decremented in the loop body when key is not handled.
     bool isFirstKey = true;
     for (; cursorPos <= maxLength; cursorPos++) {
-        int keyCode = _get_input();
+        sharedFpsLimiter.mark();
+
+        int keyCode = inputGetInput();
         if (keyCode != -1) {
             if (keyCode == KEY_ESCAPE) {
                 dest[cursorPos] = '\0';
@@ -1094,6 +1109,9 @@ int _win_input_str(int win, char* dest, int maxLength, int x, int y, int textCol
         } else {
             cursorPos--;
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     dest[cursorPos] = '\0';
@@ -1153,18 +1171,18 @@ int _GNW_process_menu(MenuBar* menuBar, int pulldownIndex)
 // Calculates max length of string needed to represent a1 or a2.
 //
 // 0x4DD03C
-int _calc_max_field_chars_wcursor(int a1, int a2)
+size_t _calc_max_field_chars_wcursor(int a1, int a2)
 {
     char* str = (char*)internal_malloc(17);
     if (str == NULL) {
         return -1;
     }
 
-    sprintf(str, "%d", a1);
-    int len1 = strlen(str);
+    snprintf(str, 17, "%d", a1);
+    size_t len1 = strlen(str);
 
-    sprintf(str, "%d", a2);
-    int len2 = strlen(str);
+    snprintf(str, 17, "%d", a2);
+    size_t len2 = strlen(str);
 
     internal_free(str);
 
@@ -1333,3 +1351,5 @@ int _tm_index_active(int a1)
     }
     return 1;
 }
+
+} // namespace fallout

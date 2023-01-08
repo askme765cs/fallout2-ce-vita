@@ -5,18 +5,24 @@
 #include <string.h>
 
 #include "color.h"
-#include "core.h"
 #include "datafile.h"
+#include "db.h"
 #include "draw.h"
 #include "game.h"
+#include "input.h"
 #include "interpreter_lib.h"
+#include "kb.h"
 #include "memory_manager.h"
+#include "mouse.h"
 #include "mouse_manager.h"
 #include "movie.h"
 #include "platform_compat.h"
+#include "svga.h"
 #include "text_font.h"
 #include "widget.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 #define MANAGED_WINDOW_COUNT (16)
 
@@ -486,7 +492,7 @@ bool _windowActivateRegion(const char* regionName, int a2)
 // 0x4B6ED0
 int _getInput()
 {
-    int keyCode = _get_input();
+    int keyCode = inputGetInput();
     if (keyCode == KEY_CTRL_Q || keyCode == KEY_CTRL_X || keyCode == KEY_F10) {
         showQuitConfirmationDialog();
     }
@@ -795,7 +801,7 @@ int _createWindow(const char* windowName, int x, int y, int width, int height, i
     managedWindow->buttons = NULL;
     managedWindow->buttonsLength = 0;
 
-    flags |= 0x101;
+    flags |= WINDOW_MANAGED | WINDOW_USE_DEFAULTS;
     if (off_672D74 != NULL) {
         off_672D74(windowIndex, managedWindow->name, &flags);
     }
@@ -882,7 +888,7 @@ int _selectWindow(const char* windowName)
         }
     }
 
-    if (!_selectWindowID(index)) {
+    if (_selectWindowID(index)) {
         return index;
     }
 
@@ -1336,37 +1342,37 @@ void _initWindow(int resolution, int a2)
     if (rc != WINDOW_MANAGER_OK) {
         switch (rc) {
         case WINDOW_MANAGER_ERR_INITIALIZING_VIDEO_MODE:
-            sprintf(err, "Error initializing video mode %dx%d\n", _xres, _yres);
+            snprintf(err, sizeof(err), "Error initializing video mode %dx%d\n", _xres, _yres);
             showMesageBox(err);
             exit(1);
             break;
         case WINDOW_MANAGER_ERR_NO_MEMORY:
-            sprintf(err, "Not enough memory to initialize video mode\n");
+            snprintf(err, sizeof(err), "Not enough memory to initialize video mode\n");
             showMesageBox(err);
             exit(1);
             break;
         case WINDOW_MANAGER_ERR_INITIALIZING_TEXT_FONTS:
-            sprintf(err, "Couldn't find/load text fonts\n");
+            snprintf(err, sizeof(err), "Couldn't find/load text fonts\n");
             showMesageBox(err);
             exit(1);
             break;
         case WINDOW_MANAGER_ERR_WINDOW_SYSTEM_ALREADY_INITIALIZED:
-            sprintf(err, "Attempt to initialize window system twice\n");
+            snprintf(err, sizeof(err), "Attempt to initialize window system twice\n");
             showMesageBox(err);
             exit(1);
             break;
         case WINDOW_MANAGER_ERR_WINDOW_SYSTEM_NOT_INITIALIZED:
-            sprintf(err, "Window system not initialized\n");
+            snprintf(err, sizeof(err), "Window system not initialized\n");
             showMesageBox(err);
             exit(1);
             break;
         case WINDOW_MANAGER_ERR_CURRENT_WINDOWS_TOO_BIG:
-            sprintf(err, "Current windows are too big for new resolution\n");
+            snprintf(err, sizeof(err), "Current windows are too big for new resolution\n");
             showMesageBox(err);
             exit(1);
             break;
         case WINDOW_MANAGER_ERR_INITIALIZING_DEFAULT_DATABASE:
-            sprintf(err, "Error initializing default database.\n");
+            snprintf(err, sizeof(err), "Error initializing default database.\n");
             showMesageBox(err);
             exit(1);
             break;
@@ -1374,22 +1380,22 @@ void _initWindow(int resolution, int a2)
             exit(1);
             break;
         case WINDOW_MANAGER_ERR_ALREADY_RUNNING:
-            sprintf(err, "Program already running.\n");
+            snprintf(err, sizeof(err), "Program already running.\n");
             showMesageBox(err);
             exit(1);
             break;
         case WINDOW_MANAGER_ERR_TITLE_NOT_SET:
-            sprintf(err, "Program title not set.\n");
+            snprintf(err, sizeof(err), "Program title not set.\n");
             showMesageBox(err);
             exit(1);
             break;
         case WINDOW_MANAGER_ERR_INITIALIZING_INPUT:
-            sprintf(err, "Failure initializing input devices.\n");
+            snprintf(err, sizeof(err), "Failure initializing input devices.\n");
             showMesageBox(err);
             exit(1);
             break;
         default:
-            sprintf(err, "Unknown error code %d\n", rc);
+            snprintf(err, sizeof(err), "Unknown error code %d\n", rc);
             showMesageBox(err);
             exit(1);
             break;
@@ -1720,7 +1726,7 @@ bool _windowAddButtonGfx(const char* buttonName, char* pressedFileName, char* no
 // 0x4BA11C
 bool _windowAddButtonProc(const char* buttonName, Program* program, int mouseEnterProc, int mouseExitProc, int mouseDownProc, int mouseUpProc)
 {
-    if (gCurrentManagedWindowIndex != -1) {
+    if (gCurrentManagedWindowIndex == -1) {
         return false;
     }
 
@@ -2639,3 +2645,5 @@ void _fillBuf3x3(unsigned char* src, int srcWidth, int srcHeight, unsigned char*
         dest + destWidth * (destHeight - chunkHeight) + (destWidth - chunkWidth),
         destWidth);
 }
+
+} // namespace fallout

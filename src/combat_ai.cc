@@ -9,13 +9,12 @@
 #include "art.h"
 #include "combat.h"
 #include "config.h"
-#include "core.h"
 #include "critter.h"
 #include "debug.h"
 #include "display_monitor.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_sound.h"
+#include "input.h"
 #include "interface.h"
 #include "item.h"
 #include "light.h"
@@ -29,10 +28,14 @@
 #include "proto_instance.h"
 #include "random.h"
 #include "scripts.h"
+#include "settings.h"
 #include "skill.h"
 #include "stat.h"
+#include "svga.h"
 #include "text_object.h"
 #include "tile.h"
+
+namespace fallout {
 
 #define AI_PACKET_CHEM_PRIMARY_DESIRE_COUNT (3)
 
@@ -120,7 +123,7 @@ static int _ai_move_steps_closer(Object* a1, Object* a2, int actionPoints, int a
 static int _ai_move_closer(Object* a1, Object* a2, int a3);
 static int _cai_retargetTileFromFriendlyFire(Object* source, Object* target, int* tilePtr);
 static int _cai_retargetTileFromFriendlyFireSubFunc(AiRetargetData* aiRetargetData, int tile);
-static bool _cai_attackWouldIntersect(Object* a1, Object* a2, Object* a3, int tile, int* distance);
+static bool _cai_attackWouldIntersect(Object* attacker, Object* defender, Object* attackerFriend, int tile, int* distance);
 static int _ai_switch_weapons(Object* a1, int* hitMode, Object** weapon, Object* a4);
 static int _ai_called_shot(Object* a1, Object* a2, int a3);
 static int _ai_attack(Object* a1, Object* a2, int a3);
@@ -920,9 +923,9 @@ static int _ai_magic_hands(Object* critter, Object* item, int num)
             char text[200];
             if (item != NULL) {
                 const char* itemName = objectGetName(item);
-                sprintf(text, "%s %s %s.", critterName, messageListItem.text, itemName);
+                snprintf(text, sizeof(text), "%s %s %s.", critterName, messageListItem.text, itemName);
             } else {
-                sprintf(text, "%s %s.", critterName, messageListItem.text);
+                snprintf(text, sizeof(text), "%s %s.", critterName, messageListItem.text);
             }
 
             displayMonitorAddMessage(text);
@@ -1567,7 +1570,7 @@ static Object* _ai_danger_source(Object* a1)
 
     for (int index = 0; index < 4; index++) {
         Object* candidate = targets[index];
-        if (candidate != NULL && objectCanHearObject(a1, candidate)) {
+        if (candidate != NULL && isWithinPerception(a1, candidate)) {
             if (pathfinderFindPath(a1, a1->tile, candidate->tile, NULL, 0, _obj_blocking_at) != 0
                 || _combat_check_bad_shot(a1, candidate, HIT_MODE_RIGHT_WEAPON_PRIMARY, false) == COMBAT_BAD_SHOT_OK) {
                 return candidate;
@@ -2421,27 +2424,27 @@ static int _cai_retargetTileFromFriendlyFireSubFunc(AiRetargetData* aiRetargetDa
 }
 
 // 0x42A518
-static bool _cai_attackWouldIntersect(Object* a1, Object* a2, Object* a3, int tile, int* distance)
+static bool _cai_attackWouldIntersect(Object* attacker, Object* defender, Object* attackerFriend, int tile, int* distance)
 {
     int hitMode = HIT_MODE_RIGHT_WEAPON_PRIMARY;
     bool aiming = false;
-    if (a1 == gDude) {
+    if (attacker == gDude) {
         interfaceGetCurrentHitMode(&hitMode, &aiming);
     }
 
-    Object* v8 = critterGetWeaponForHitMode(a1, hitMode);
-    if (v8 == NULL) {
+    Object* weapon = critterGetWeaponForHitMode(attacker, hitMode);
+    if (weapon == NULL) {
         return false;
     }
 
-    if (weaponGetRange(a1, hitMode) < 1) {
+    if (weaponGetRange(attacker, hitMode) < 1) {
         return false;
     }
 
     Object* object = NULL;
-    _make_straight_path_func(a1, a1->tile, a2->tile, NULL, &object, 32, _obj_shoot_blocking_at);
-    if (object != a3) {
-        if (!_combatTestIncidentalHit(a1, a2, a3, v8)) {
+    _make_straight_path_func(attacker, attacker->tile, defender->tile, NULL, &object, 32, _obj_shoot_blocking_at);
+    if (object != attackerFriend) {
+        if (!_combatTestIncidentalHit(attacker, defender, attackerFriend, weapon)) {
             return false;
         }
     }
@@ -2502,8 +2505,7 @@ static int _ai_called_shot(Object* a1, Object* a2, int a3)
         if (critterCanAim(a1, a3)) {
             ai = aiGetPacket(a1);
             if (randomBetween(1, ai->called_freq) == 1) {
-                combat_difficulty = 1;
-                configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_DIFFICULTY_KEY, &combat_difficulty);
+                combat_difficulty = settings.preferences.combat_difficulty;
                 if (combat_difficulty) {
                     if (combat_difficulty == 2) {
                         v6 = 3;
@@ -3085,7 +3087,7 @@ bool _combatai_want_to_stop(Object* a1)
     }
 
     Object* v4 = _ai_danger_source(a1);
-    return v4 == NULL || !objectCanHearObject(a1, v4);
+    return v4 == NULL || !isWithinPerception(a1, v4);
 }
 
 // 0x42B504
@@ -3165,9 +3167,7 @@ int _combatai_msg(Object* a1, Attack* attack, int type, int delay)
         return -1;
     }
 
-    bool combatTaunts = true;
-    configGetBool(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_TAUNTS_KEY, &combatTaunts);
-    if (!combatTaunts) {
+    if (!settings.preferences.combat_taunts) {
         return -1;
     }
 
@@ -3357,7 +3357,7 @@ int _combatai_check_retaliation(Object* a1, Object* a2)
 }
 
 // 0x42BA04
-bool objectCanHearObject(Object* a1, Object* a2)
+bool isWithinPerception(Object* a1, Object* a2)
 {
     if (a2 == NULL) {
         return false;
@@ -3367,46 +3367,46 @@ bool objectCanHearObject(Object* a1, Object* a2)
     int perception = critterGetStat(a1, STAT_PERCEPTION);
     int sneak = skillGetValue(a2, SKILL_SNEAK);
     if (_can_see(a1, a2)) {
-        int v8 = perception * 5;
+        int maxDistance = perception * 5;
         if ((a2->flags & OBJECT_TRANS_GLASS) != 0) {
-            v8 /= 2;
+            maxDistance /= 2;
         }
 
         if (a2 == gDude) {
             if (dudeIsSneaking()) {
-                v8 /= 4;
+                maxDistance /= 4;
                 if (sneak > 120) {
-                    v8 -= 1;
+                    maxDistance -= 1;
                 }
-            } else if (dudeHasState(0)) {
-                v8 = v8 * 2 / 3;
+            } else if (dudeHasState(DUDE_STATE_SNEAKING)) {
+                maxDistance = maxDistance * 2 / 3;
             }
         }
 
-        if (distance <= v8) {
+        if (distance <= maxDistance) {
             return true;
         }
     }
 
-    int v12;
+    int maxDistance;
     if (isInCombat()) {
-        v12 = perception * 2;
+        maxDistance = perception * 2;
     } else {
-        v12 = perception;
+        maxDistance = perception;
     }
 
     if (a2 == gDude) {
         if (dudeIsSneaking()) {
-            v12 /= 4;
+            maxDistance /= 4;
             if (sneak > 120) {
-                v12 -= 1;
+                maxDistance -= 1;
             }
-        } else if (dudeHasState(0)) {
-            v12 = v12 * 2 / 3;
+        } else if (dudeHasState(DUDE_STATE_SNEAKING)) {
+            maxDistance = maxDistance * 2 / 3;
         }
     }
 
-    if (distance <= v12) {
+    if (distance <= maxDistance) {
         return true;
     }
 
@@ -3423,18 +3423,17 @@ static int aiMessageListInit()
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "combatai.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "combatai.msg");
 
     if (!messageListLoad(&gCombatAiMessageList, path)) {
         return -1;
     }
 
-    bool languageFilter;
-    configGetBool(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_LANGUAGE_FILTER_KEY, &languageFilter);
-
-    if (languageFilter) {
+    if (settings.preferences.language_filter) {
         messageListFilterBadwords(&gCombatAiMessageList);
     }
+
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_COMBAT_AI, &gCombatAiMessageList);
 
     return 0;
 }
@@ -3444,6 +3443,7 @@ static int aiMessageListInit()
 // 0x42BBD8
 static int aiMessageListFree()
 {
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_COMBAT_AI, nullptr);
     if (!messageListFree(&gCombatAiMessageList)) {
         return -1;
     }
@@ -3454,8 +3454,7 @@ static int aiMessageListFree()
 // 0x42BBF0
 void aiMessageListReloadIfNeeded()
 {
-    int languageFilter = 0;
-    configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_LANGUAGE_FILTER_KEY, &languageFilter);
+    int languageFilter = static_cast<int>(settings.preferences.language_filter);
 
     if (languageFilter != gLanguageFilter) {
         gLanguageFilter = languageFilter;
@@ -3477,10 +3476,10 @@ void _combatai_notify_onlookers(Object* a1)
     for (int index = 0; index < _curr_crit_num; index++) {
         Object* obj = _curr_crit_list[index];
         if ((obj->data.critter.combat.maneuver & CRITTER_MANEUVER_0x01) == 0) {
-            if (objectCanHearObject(obj, a1)) {
+            if (isWithinPerception(obj, a1)) {
                 obj->data.critter.combat.maneuver |= CRITTER_MANEUVER_0x01;
                 if ((a1->data.critter.combat.results & DAM_DEAD) != 0) {
-                    if (!objectCanHearObject(obj, obj->data.critter.combat.whoHitMe)) {
+                    if (!isWithinPerception(obj, obj->data.critter.combat.whoHitMe)) {
                         debugPrint("\nSomebody Died and I don't know why!  Run!!!");
                         aiInfoSetFriendlyDead(obj, a1);
                     }
@@ -3498,7 +3497,7 @@ void _combatai_notify_friends(Object* a1)
     for (int index = 0; index < _curr_crit_num; index++) {
         Object* obj = _curr_crit_list[index];
         if ((obj->data.critter.combat.maneuver & CRITTER_MANEUVER_0x01) == 0 && team == obj->data.critter.combat.team) {
-            if (objectCanHearObject(obj, a1)) {
+            if (isWithinPerception(obj, a1)) {
                 obj->data.critter.combat.maneuver |= CRITTER_MANEUVER_0x01;
             }
         }
@@ -3518,3 +3517,5 @@ void _combatai_delete_critter(Object* obj)
         }
     }
 }
+
+} // namespace fallout

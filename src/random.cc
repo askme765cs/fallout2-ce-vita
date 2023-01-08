@@ -3,10 +3,14 @@
 #include <limits.h>
 #include <stdlib.h>
 
+#include <random>
+
 #include "debug.h"
 #include "platform_compat.h"
 #include "scripts.h"
 #include "sfall_config.h"
+
+namespace fallout {
 
 static int _roll_reset_();
 static int randomTranslateRoll(int delta, int criticalSuccessModifier);
@@ -35,7 +39,7 @@ static int _idum;
 void randomInit()
 {
     unsigned int randomSeed = randomGetSeed();
-    srand(randomSeed);
+    std::srand(randomSeed);
 
     int pseudorandomSeed = randomInt32();
     randomSeedPrerandomInternal(pseudorandomSeed);
@@ -181,10 +185,7 @@ void randomSeedPrerandom(int seed)
 // 0x4A31C4
 static int randomInt32()
 {
-    int high = rand() << 16;
-    int low = rand();
-
-    return (high + low) & INT_MAX;
+    return std::rand();
 }
 
 // 0x4A31E0
@@ -252,3 +253,5 @@ static void randomValidatePrerandom()
         debugPrint("Warning! Sequence is not random, 95%% confidence.\n");
     }
 }
+
+} // namespace fallout

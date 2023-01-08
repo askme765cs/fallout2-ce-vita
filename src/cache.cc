@@ -9,6 +9,8 @@
 #include "memory.h"
 #include "sound.h"
 
+namespace fallout {
+
 // The initial number of cache entries in new cache.
 #define CACHE_ENTRIES_INITIAL_CAPACITY (100)
 
@@ -192,13 +194,13 @@ bool cacheFlush(Cache* cache)
 }
 
 // 0x42019C
-bool cachePrintStats(Cache* cache, char* dest)
+bool cachePrintStats(Cache* cache, char* dest, size_t size)
 {
     if (cache == NULL || dest == NULL) {
         return false;
     }
 
-    sprintf(dest, "Cache stats are disabled.%s", "\n");
+    snprintf(dest, size, "Cache stats are disabled.%s", "\n");
 
     return true;
 }
@@ -613,3 +615,5 @@ static int cacheEntriesCompareByMostRecentHit(const void* a1, const void* a2)
         return 0;
     }
 }
+
+} // namespace fallout

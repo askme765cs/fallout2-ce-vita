@@ -10,14 +10,12 @@
 #include "color.h"
 #include "combat.h"
 #include "combat_ai.h"
-#include "core.h"
 #include "critter.h"
 #include "debug.h"
 #include "dialog.h"
 #include "display_monitor.h"
 #include "endgame.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_dialog.h"
 #include "game_movie.h"
 #include "game_sound.h"
@@ -37,12 +35,18 @@
 #include "random.h"
 #include "reaction.h"
 #include "scripts.h"
+#include "settings.h"
+#include "sfall_opcodes.h"
 #include "skill.h"
 #include "stat.h"
+#include "svga.h"
 #include "text_object.h"
 #include "tile.h"
 #include "trait.h"
+#include "vcr.h"
 #include "worldmap.h"
+
+namespace fallout {
 
 typedef enum ScriptError {
     SCRIPT_ERROR_NOT_IMPLEMENTED,
@@ -336,9 +340,6 @@ static void opTileGetObjectWithPid(Program* program);
 static void opGetObjectName(Program* program);
 static void opGetPcStat(Program* program);
 
-// 0x504B04
-static char _Error_0[] = "Error";
-
 // 0x504B0C
 static char _aCritter[] = "<Critter>";
 
@@ -389,24 +390,6 @@ static const char* _dbg_error_strs[SCRIPT_ERROR_COUNT] = {
     "follows",
 };
 
-// 0x518ED0
-static const int _ftList[11] = {
-    ANIM_FALL_BACK_BLOOD_SF,
-    ANIM_BIG_HOLE_SF,
-    ANIM_CHARRED_BODY_SF,
-    ANIM_CHUNKS_OF_FLESH_SF,
-    ANIM_FALL_FRONT_BLOOD_SF,
-    ANIM_FALL_BACK_BLOOD_SF,
-    ANIM_DANCING_AUTOFIRE_SF,
-    ANIM_SLICED_IN_HALF_SF,
-    ANIM_EXPLODED_TO_NOTHING_SF,
-    ANIM_FALL_BACK_BLOOD_SF,
-    ANIM_FALL_FRONT_BLOOD_SF,
-};
-
-// 0x518EFC
-static char* _errStr = _Error_0;
-
 // Last message type during op_float_msg sequential.
 //
 // 0x518F00
@@ -433,7 +416,7 @@ static void scriptPredefinedError(Program* program, const char* name, int error)
 {
     char string[260];
 
-    sprintf(string, "Script Error: %s: op_%s: %s", program->name, name, _dbg_error_strs[error]);
+    snprintf(string, sizeof(string), "Script Error: %s: op_%s: %s", program->name, name, _dbg_error_strs[error]);
 
     debugPrint(string);
 }
@@ -445,7 +428,7 @@ static void scriptError(const char* format, ...)
 
     va_list argptr;
     va_start(argptr, format);
-    vsprintf(string, format, argptr);
+    vsnprintf(string, sizeof(string), format, argptr);
     va_end(argptr);
 
     debugPrint(string);
@@ -563,7 +546,7 @@ static void opSetMapStart(Program* program)
     }
 
     int tile = 200 * y + x;
-    if (tileSetCenter(tile, TILE_SET_CENTER_FLAG_0x01 | TILE_SET_CENTER_FLAG_0x02) != 0) {
+    if (tileSetCenter(tile, TILE_SET_CENTER_REFRESH_WINDOW | TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS) != 0) {
         scriptError("\nScript Error: %s: op_set_map_start: tile_set_center failed", program->name);
         return;
     }
@@ -583,7 +566,7 @@ static void opOverrideMapStart(Program* program)
     int x = programStackPopInteger(program);
 
     char text[60];
-    sprintf(text, "OVERRIDE_MAP_START: x: %d, y: %d", x, y);
+    snprintf(text, sizeof(text), "OVERRIDE_MAP_START: x: %d, y: %d", x, y);
     debugPrint(text);
 
     int tile = 200 * y + x;
@@ -602,7 +585,7 @@ static void opOverrideMapStart(Program* program)
             }
         }
 
-        tileSetCenter(tile, TILE_SET_CENTER_FLAG_0x01);
+        tileSetCenter(tile, TILE_SET_CENTER_REFRESH_WINDOW);
         tileWindowRefresh();
     }
 
@@ -884,7 +867,7 @@ static void opMoveTo(Program* program)
             Rect rect;
             newTile = objectSetLocation(object, tile, elevation, &rect);
             if (newTile != -1) {
-                tileSetCenter(object->tile, TILE_SET_CENTER_FLAG_0x01);
+                tileSetCenter(object->tile, TILE_SET_CENTER_REFRESH_WINDOW);
             }
 
             if (tileLimitingEnabled) {
@@ -1074,10 +1057,7 @@ static void opDisplayMsg(Program* program)
     char* string = programStackPopString(program);
     displayMonitorAddMessage(string);
 
-    bool showScriptMessages = false;
-    configGetBool(&gGameConfig, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_SHOW_SCRIPT_MESSAGES_KEY, &showScriptMessages);
-
-    if (showScriptMessages) {
+    if (settings.debug.show_script_messages) {
         debugPrint("\n");
         debugPrint(string);
     }
@@ -1240,16 +1220,20 @@ static void opGetMapVar(Program* program)
 {
     int data = programStackPopInteger(program);
 
-    int value = mapGetGlobalVar(data);
+    ProgramValue value;
+    if (mapGetGlobalVar(data, value) == -1) {
+        value.opcode = VALUE_TYPE_INT;
+        value.integerValue = -1;
+    }
 
-    programStackPushInteger(program, value);
+    programStackPushValue(program, value);
 }
 
 // set_map_var
 // 0x4558C8
 static void opSetMapVar(Program* program)
 {
-    int value = programStackPopInteger(program);
+    ProgramValue value = programStackPopValue(program);
     int variable = programStackPopInteger(program);
 
     mapSetGlobalVar(variable, value);
@@ -1824,23 +1808,19 @@ static void opObjectCanSeeObject(Program* program)
     Object* object2 = static_cast<Object*>(programStackPopPointer(program));
     Object* object1 = static_cast<Object*>(programStackPopPointer(program));
 
-    int result = 0;
+    bool canSee = false;
 
-    if (object1 != NULL && object2 != NULL) {
-        if (object2->tile != -1) {
-            // NOTE: Looks like dead code, I guess these checks were incorporated
-            // into higher level functions, but this code left intact.
-            if (object2 == gDude) {
-                dudeHasState(0);
-            }
-
-            critterGetStat(object1, STAT_PERCEPTION);
-
-            if (objectCanHearObject(object1, object2)) {
-                Object* a5;
-                _make_straight_path(object1, object1->tile, object2->tile, NULL, &a5, 16);
-                if (a5 == object2) {
-                    result = 1;
+    if (object2 != nullptr && object1 != nullptr) {
+        // SFALL: Check objects are on the same elevation.
+        // CE: These checks are on par with |opObjectCanHearObject|.
+        if (object2->elevation == object1->elevation) {
+            if (object2->tile != -1 && object1->tile != -1) {
+                if (isWithinPerception(object1, object2)) {
+                    Object* obstacle;
+                    _make_straight_path(object1, object1->tile, object2->tile, nullptr, &obstacle, 16);
+                    if (obstacle == object2) {
+                        canSee = true;
+                    }
                 }
             }
         }
@@ -1848,7 +1828,7 @@ static void opObjectCanSeeObject(Program* program)
         scriptPredefinedError(program, "obj_can_see_obj", SCRIPT_ERROR_OBJECT_IS_NULL);
     }
 
-    programStackPushInteger(program, result);
+    programStackPushInteger(program, canSee);
 }
 
 // attack_complex
@@ -2086,7 +2066,7 @@ static void opMetarule3(Program* program)
         }
         break;
     case METARULE3_TILE_SET_CENTER:
-        result.integerValue = tileSetCenter(param1.integerValue, TILE_SET_CENTER_FLAG_0x01);
+        result.integerValue = tileSetCenter(param1.integerValue, TILE_SET_CENTER_REFRESH_WINDOW);
         break;
     case METARULE3_109:
         result.integerValue = aiGetChemUse(static_cast<Object*>(param1.pointerValue));
@@ -2230,7 +2210,7 @@ static void opSetExitGrids(Program* program)
 
     Object* object = objectFindFirstAtElevation(elevation);
     while (object != NULL) {
-        if (object->pid >= PROTO_ID_0x5000010 && object->pid <= PROTO_ID_0x5000017) {
+        if (object->pid >= FIRST_EXIT_GRID_PID && object->pid <= LAST_EXIT_GRID_PID) {
             object->data.misc.map = destinationMap;
             object->data.misc.tile = destinationTile;
             object->data.misc.elevation = destinationElevation;
@@ -2362,11 +2342,8 @@ static void opKillCritter(Program* program)
 static int _correctDeath(Object* critter, int anim, bool forceBack)
 {
     if (anim >= ANIM_BIG_HOLE_SF && anim <= ANIM_FALL_FRONT_BLOOD_SF) {
-        int violenceLevel = VIOLENCE_LEVEL_MAXIMUM_BLOOD;
-        configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_VIOLENCE_LEVEL_KEY, &violenceLevel);
-
         bool useStandardDeath = false;
-        if (violenceLevel < VIOLENCE_LEVEL_MAXIMUM_BLOOD) {
+        if (settings.preferences.violence_level < VIOLENCE_LEVEL_MAXIMUM_BLOOD) {
             useStandardDeath = true;
         } else {
             int fid = buildFid(OBJ_TYPE_CRITTER, critter->fid & 0xFFF, anim, (critter->fid & 0xF000) >> 12, critter->rotation + 1);
@@ -2396,6 +2373,21 @@ static int _correctDeath(Object* critter, int anim, bool forceBack)
 // 0x457CB4
 static void opKillCritterType(Program* program)
 {
+    // 0x518ED0
+    static const int ftList[] = {
+        ANIM_FALL_BACK_BLOOD_SF,
+        ANIM_BIG_HOLE_SF,
+        ANIM_CHARRED_BODY_SF,
+        ANIM_CHUNKS_OF_FLESH_SF,
+        ANIM_FALL_FRONT_BLOOD_SF,
+        ANIM_FALL_BACK_BLOOD_SF,
+        ANIM_DANCING_AUTOFIRE_SF,
+        ANIM_SLICED_IN_HALF_SF,
+        ANIM_EXPLODED_TO_NOTHING_SF,
+        ANIM_FALL_BACK_BLOOD_SF,
+        ANIM_FALL_FRONT_BLOOD_SF,
+    };
+
     int deathFrame = programStackPopInteger(program);
     int pid = programStackPopInteger(program);
 
@@ -2408,51 +2400,74 @@ static void opKillCritterType(Program* program)
 
     Object* previousObj = NULL;
     int count = 0;
-    int v3 = 0;
+    int ftIndex = 0;
 
     Object* obj = objectFindFirst();
     while (obj != NULL) {
-        if (FID_ANIM_TYPE(obj->fid) >= ANIM_FALL_BACK_SF) {
-            obj = objectFindNext();
-            continue;
-        }
-
-        if ((obj->flags & OBJECT_HIDDEN) == 0 && obj->pid == pid && !critterIsDead(obj)) {
-            if (obj == previousObj || count > 200) {
-                scriptPredefinedError(program, "kill_critter_type", SCRIPT_ERROR_FOLLOWS);
-                debugPrint(" Infinite loop destroying critters!");
-                program->flags &= ~PROGRAM_FLAG_0x20;
-                return;
-            }
-
-            reg_anim_clear(obj);
-
-            if (deathFrame != 0) {
-                _combat_delete_critter(obj);
-                if (deathFrame == 1) {
-                    int anim = _correctDeath(obj, _ftList[v3], 1);
-                    critterKill(obj, anim, 1);
-                    v3 += 1;
-                    if (v3 >= 11) {
-                        v3 = 0;
-                    }
-                } else {
-                    critterKill(obj, ANIM_FALL_BACK_SF, 1);
+        if (FID_ANIM_TYPE(obj->fid) < ANIM_FALL_BACK_SF) {
+            if ((obj->flags & OBJECT_HIDDEN) == 0 && obj->pid == pid && !critterIsDead(obj)) {
+                if (obj == previousObj || count > 200) {
+                    scriptPredefinedError(program, "kill_critter_type", SCRIPT_ERROR_FOLLOWS);
+                    debugPrint(" Infinite loop destroying critters!");
+                    program->flags &= ~PROGRAM_FLAG_0x20;
+                    return;
                 }
-            } else {
+
                 reg_anim_clear(obj);
 
-                Rect rect;
-                objectDestroy(obj, &rect);
-                tileWindowRefreshRect(&rect, gElevation);
+                if (deathFrame != 0) {
+                    _combat_delete_critter(obj);
+                    if (deathFrame == 1) {
+                        // Pick next animation from the |ftList|.
+                        int anim = _correctDeath(obj, ftList[ftIndex], true);
+
+                        // SFALL: Fix for incorrect death animation.
+                        // CE: The fix is slightly different. Sfall passes
+                        // |false| to |correctDeath| to disambiguate usage
+                        // between this function and |opAnim|. On |false| it
+                        // simply returns |ANIM_FALL_BACK_SF|. Instead of doing
+                        // the same, check for standard death animations
+                        // returned from |correctDeath| and convert them to
+                        // appropariate single frame cousins.
+                        switch (anim) {
+                        case ANIM_FALL_BACK:
+                            anim = ANIM_FALL_BACK_SF;
+                            break;
+                        case ANIM_FALL_FRONT:
+                            anim = ANIM_FALL_FRONT_SF;
+                            break;
+                        }
+
+                        critterKill(obj, anim, true);
+
+                        ftIndex += 1;
+                        if (ftIndex >= (sizeof(ftList) / sizeof(ftList[0]))) {
+                            ftIndex = 0;
+                        }
+                    } else if (deathFrame >= FIRST_SF_DEATH_ANIM && deathFrame <= LAST_SF_DEATH_ANIM) {
+                        // CE: In some cases user-space scripts randomize death
+                        // frame between front/back animations but technically
+                        // speaking a scripter can provide any single frame
+                        // death animation which original code simply ignores.
+                        critterKill(obj, deathFrame, true);
+                    } else {
+                        critterKill(obj, ANIM_FALL_BACK_SF, true);
+                    }
+                } else {
+                    reg_anim_clear(obj);
+
+                    Rect rect;
+                    objectDestroy(obj, &rect);
+                    tileWindowRefreshRect(&rect, gElevation);
+                }
+
+                previousObj = obj;
+                count += 1;
+
+                objectFindFirst();
+
+                gMapHeader.lastVisitTime = gameTimeGetTime();
             }
-
-            previousObj = obj;
-            count += 1;
-
-            objectFindFirst();
-
-            gMapHeader.lastVisitTime = gameTimeGetTime();
         }
 
         obj = objectFindNext();
@@ -2619,12 +2634,13 @@ static void opObjectCanHearObject(Program* program)
 
     bool canHear = false;
 
-    // FIXME: This is clearly an error. If any of the object is NULL
-    // dereferencing will crash the game.
-    if (object2 == NULL || object1 == NULL) {
+    // SFALL: Fix broken implementation.
+    // CE: In Sfall this fix is available under "ObjCanHearObjFix" switch and
+    // it's not enabled by default. Probably needs testing.
+    if (object2 != nullptr && object1 != nullptr) {
         if (object2->elevation == object1->elevation) {
             if (object2->tile != -1 && object1->tile != -1) {
-                if (objectCanHearObject(object2, object1)) {
+                if (isWithinPerception(object1, object2)) {
                     canHear = true;
                 }
             }
@@ -2696,7 +2712,7 @@ static void opGameDialogSystemEnter(Program* program)
         return;
     }
 
-    if (_game_state_request(GAME_STATE_4) == -1) {
+    if (gameRequestState(GAME_STATE_4) == -1) {
         return;
     }
 
@@ -2978,6 +2994,9 @@ static void opGetProtoData(Program* program)
 // 0x458E10
 static void opGetMessageString(Program* program)
 {
+    // 0x518EFC
+    static char errStr[] = "Error";
+
     int messageIndex = programStackPopInteger(program);
     int messageListIndex = programStackPopInteger(program);
 
@@ -2986,10 +3005,10 @@ static void opGetMessageString(Program* program)
         string = _scr_get_msg_str_speech(messageListIndex, messageIndex, 1);
         if (string == NULL) {
             debugPrint("\nError: No message file EXISTS!: index %d, line %d", messageListIndex, messageIndex);
-            string = _errStr;
+            string = errStr;
         }
     } else {
-        string = _errStr;
+        string = errStr;
     }
 
     programStackPushString(program, string);
@@ -3144,7 +3163,7 @@ static void opFloatMessage(Program* program)
         color = _colorTable[31744];
         a5 = _colorTable[0];
         font = 103;
-        tileSetCenter(gDude->tile, TILE_SET_CENTER_FLAG_0x01);
+        tileSetCenter(gDude->tile, TILE_SET_CENTER_REFRESH_WINDOW);
         break;
     case FLOATING_MESSAGE_TYPE_NORMAL:
     case FLOATING_MESSAGE_TYPE_YELLOW:
@@ -3281,10 +3300,10 @@ static void opMetarule(Program* program)
         }
         break;
     case METARULE_LANGUAGE_FILTER:
-        configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_LANGUAGE_FILTER_KEY, &result);
+        result = static_cast<int>(settings.preferences.language_filter);
         break;
     case METARULE_VIOLENCE_FILTER:
-        configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_VIOLENCE_LEVEL_KEY, &result);
+        result = settings.preferences.violence_level;
         break;
     case METARULE_WEAPON_DAMAGE_TYPE:
         if (1) {
@@ -3311,7 +3330,7 @@ static void opMetarule(Program* program)
             if (PID_TYPE(object->pid) == OBJ_TYPE_CRITTER) {
                 Proto* proto;
                 protoGetProto(object->pid, &proto);
-                if ((proto->critter.data.flags & CRITTER_FLAG_0x2) != 0) {
+                if ((proto->critter.data.flags & CRITTER_BARTER) != 0) {
                     result = 1;
                 }
             }
@@ -3473,8 +3492,7 @@ static void opRegAnimAnimate(Program* program)
     Object* object = static_cast<Object*>(programStackPopPointer(program));
 
     if (!isInCombat()) {
-        int violenceLevel = VIOLENCE_LEVEL_NONE;
-        if (anim != 20 || object == NULL || object->pid != 0x100002F || (configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_VIOLENCE_LEVEL_KEY, &violenceLevel) && violenceLevel >= 2)) {
+        if (anim != 20 || object == NULL || object->pid != 0x100002F || (settings.preferences.violence_level >= 2)) {
             if (object != NULL) {
                 animationRegisterAnimate(object, anim, delay);
             } else {
@@ -4001,24 +4019,14 @@ static void _op_gdialog_barter(Program* program)
 // 0x45B010
 static void opGetGameDifficulty(Program* program)
 {
-    int gameDifficulty;
-    if (!configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_GAME_DIFFICULTY_KEY, &gameDifficulty)) {
-        gameDifficulty = GAME_DIFFICULTY_NORMAL;
-    }
-
-    programStackPushInteger(program, gameDifficulty);
+    programStackPushInteger(program, settings.preferences.game_difficulty);
 }
 
 // running_burning_guy
 // 0x45B05C
 static void opGetRunningBurningGuy(Program* program)
 {
-    int runningBurningGuy;
-    if (!configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_RUNNING_BURNING_GUY_KEY, &runningBurningGuy)) {
-        runningBurningGuy = 1;
-    }
-
-    programStackPushInteger(program, runningBurningGuy);
+    programStackPushInteger(program, static_cast<int>(settings.preferences.running_burning_guy));
 }
 
 // inven_unwield
@@ -4671,12 +4679,7 @@ static void opGameDialogSetBarterMod(Program* program)
 // 0x45C830
 static void opGetCombatDifficulty(Program* program)
 {
-    int combatDifficulty;
-    if (!configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_DIFFICULTY_KEY, &combatDifficulty)) {
-        combatDifficulty = 0;
-    }
-
-    programStackPushInteger(program, combatDifficulty);
+    programStackPushInteger(program, settings.preferences.combat_difficulty);
 }
 
 // obj_on_screen
@@ -4764,9 +4767,7 @@ static void opDebugMessage(Program* program)
     char* string = programStackPopString(program);
 
     if (string != NULL) {
-        bool showScriptMessages = false;
-        configGetBool(&gGameConfig, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_SHOW_SCRIPT_MESSAGES_KEY, &showScriptMessages);
-        if (showScriptMessages) {
+        if (settings.debug.show_script_messages) {
             debugPrint("\n");
             debugPrint(string);
         }
@@ -4838,6 +4839,7 @@ static void opGetPcStat(Program* program)
 // 0x45CDD4
 void _intExtraClose_()
 {
+    sfallOpcodesExit();
 }
 
 // 0x45CDD8
@@ -5024,6 +5026,8 @@ void _initIntExtra()
     interpreterRegisterOpcode(0x8153, opTerminateCombat); // op_terminate_combat
     interpreterRegisterOpcode(0x8154, opDebugMessage); // op_debug_msg
     interpreterRegisterOpcode(0x8155, opCritterStopAttacking); // op_critter_stop_attacking
+
+    sfallOpcodesInit();
 }
 
 // NOTE: Uncollapsed 0x45D878.
@@ -5039,3 +5043,5 @@ void intExtraUpdate()
 void intExtraRemoveProgramReferences(Program* program)
 {
 }
+
+} // namespace fallout

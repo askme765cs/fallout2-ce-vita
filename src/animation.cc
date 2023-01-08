@@ -7,18 +7,19 @@
 #include "color.h"
 #include "combat.h"
 #include "combat_ai.h"
-#include "core.h"
 #include "critter.h"
 #include "debug.h"
 #include "display_monitor.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "geometry.h"
+#include "input.h"
 #include "interface.h"
 #include "item.h"
+#include "kb.h"
 #include "map.h"
+#include "mouse.h"
 #include "object.h"
 #include "party_member.h"
 #include "perk.h"
@@ -26,10 +27,15 @@
 #include "proto_instance.h"
 #include "random.h"
 #include "scripts.h"
+#include "settings.h"
 #include "stat.h"
+#include "svga.h"
 #include "text_object.h"
 #include "tile.h"
 #include "trait.h"
+#include "vcr.h"
+
+namespace fallout {
 
 #define ANIMATION_SEQUENCE_LIST_CAPACITY 32
 #define ANIMATION_DESCRIPTION_LIST_CAPACITY 55
@@ -278,6 +284,8 @@ static int _anim_hide(Object* object, int animationSequenceIndex);
 static int _anim_change_fid(Object* obj, int animationSequenceIndex, int fid);
 static int _check_gravity(int tile, int elevation);
 static unsigned int animationComputeTicksPerFrame(Object* object, int fid);
+
+static void reportOverloaded(Object* critter);
 
 // 0x510718
 static int gAnimationCurrentSad = 0;
@@ -661,20 +669,9 @@ int animationRegisterRunToObject(Object* owner, Object* destination, int actionP
 
     if (critterIsEncumbered(owner)) {
         if (objectIsPartyMember(owner)) {
-            char formattedText[92];
-            MessageListItem messageListItem;
-
-            if (owner == gDude) {
-                // You are overloaded.
-                strcpy(formattedText, getmsg(&gMiscMessageList, &messageListItem, 8000));
-            } else {
-                // %s is overloaded.
-                sprintf(formattedText,
-                    getmsg(&gMiscMessageList, &messageListItem, 8001),
-                    critterGetName(owner));
-            }
-            displayMonitorAddMessage(formattedText);
+            reportOverloaded(owner);
         }
+
         return animationRegisterMoveToObject(owner, destination, actionPoints, delay);
     }
 
@@ -684,7 +681,7 @@ int animationRegisterRunToObject(Object* owner, Object* destination, int actionP
     animationDescription->destination = destination;
 
     if ((FID_TYPE(owner->fid) == OBJ_TYPE_CRITTER && (owner->data.critter.combat.results & DAM_CRIP_LEG_ANY) != 0)
-        || (owner == gDude && dudeHasState(0) && !perkGetRank(gDude, PERK_SILENT_RUNNING))
+        || (owner == gDude && dudeHasState(DUDE_STATE_SNEAKING) && !perkGetRank(gDude, PERK_SILENT_RUNNING))
         || !artExists(buildFid(FID_TYPE(owner->fid), owner->fid & 0xFFF, ANIM_RUNNING, 0, owner->rotation + 1))) {
         animationDescription->anim = ANIM_WALK;
     } else {
@@ -754,20 +751,7 @@ int animationRegisterRunToTile(Object* owner, int tile, int elevation, int actio
 
     if (critterIsEncumbered(owner)) {
         if (objectIsPartyMember(owner)) {
-            MessageListItem messageListItem;
-            char formattedText[72];
-
-            if (owner == gDude) {
-                // You are overloaded.
-                strcpy(formattedText, getmsg(&gMiscMessageList, &messageListItem, 8000));
-            } else {
-                // %s is overloaded.
-                sprintf(formattedText,
-                    getmsg(&gMiscMessageList, &messageListItem, 8001),
-                    critterGetName(owner));
-            }
-
-            displayMonitorAddMessage(formattedText);
+            reportOverloaded(owner);
         }
 
         return animationRegisterMoveToTile(owner, tile, elevation, actionPoints, delay);
@@ -780,7 +764,7 @@ int animationRegisterRunToTile(Object* owner, int tile, int elevation, int actio
     animationDescription->elevation = elevation;
 
     if ((FID_TYPE(owner->fid) == OBJ_TYPE_CRITTER && (owner->data.critter.combat.results & DAM_CRIP_LEG_ANY) != 0)
-        || (owner == gDude && dudeHasState(0) && !perkGetRank(gDude, PERK_SILENT_RUNNING))
+        || (owner == gDude && dudeHasState(DUDE_STATE_SNEAKING) && !perkGetRank(gDude, PERK_SILENT_RUNNING))
         || !artExists(buildFid(FID_TYPE(owner->fid), owner->fid & 0xFFF, ANIM_RUNNING, 0, owner->rotation + 1))) {
         animationDescription->anim = ANIM_WALK;
     } else {
@@ -2781,7 +2765,7 @@ void _object_animate()
 
         Object* object = sad->obj;
 
-        unsigned int time = _get_time();
+        unsigned int time = getTicks();
         if (getTicksBetween(time, sad->animationTimestamp) < sad->ticksPerFrame) {
             continue;
         }
@@ -2994,9 +2978,7 @@ int _check_move(int* a1)
             }
         }
     } else {
-        bool interruptWalk;
-        configGetBool(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_INTERRUPT_WALK_KEY, &interruptWalk);
-        if (interruptWalk) {
+        if (settings.system.interrupt_walk) {
             reg_anim_clear(gDude);
         }
     }
@@ -3039,7 +3021,7 @@ int _dude_run(int a1)
     }
 
     if (!perkGetRank(gDude, PERK_SILENT_RUNNING)) {
-        dudeDisableState(0);
+        dudeDisableState(DUDE_STATE_SNEAKING);
     }
 
     reg_anim_begin(ANIMATION_REQUEST_RESERVED);
@@ -3328,13 +3310,8 @@ static unsigned int animationComputeTicksPerFrame(Object* object, int fid)
 
     if (isInCombat()) {
         if (FID_ANIM_TYPE(fid) == ANIM_WALK) {
-            int playerSpeedup = 0;
-            configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_PLAYER_SPEEDUP_KEY, &playerSpeedup);
-
-            if (object != gDude || playerSpeedup == 1) {
-                int combatSpeed = 0;
-                configGetInt(&gGameConfig, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_COMBAT_SPEED_KEY, &combatSpeed);
-                fps += combatSpeed;
+            if (object != gDude || settings.preferences.player_speedup) {
+                fps += settings.preferences.combat_speed;
             }
         }
     }
@@ -3362,3 +3339,25 @@ int animationRegisterSetLightIntensity(Object* owner, int lightDistance, int lig
 
     return 0;
 }
+
+static void reportOverloaded(Object* critter)
+{
+    MessageListItem messageListItem;
+    char formattedText[100];
+
+    if (critter == gDude) {
+        // You are overloaded.
+        snprintf(formattedText, sizeof(formattedText),
+            "%s",
+            getmsg(&gMiscMessageList, &messageListItem, 8000));
+    } else {
+        // %s is overloaded.
+        snprintf(formattedText, sizeof(formattedText),
+            getmsg(&gMiscMessageList, &messageListItem, 8001),
+            critterGetName(critter));
+    }
+
+    displayMonitorAddMessage(formattedText);
+}
+
+} // namespace fallout

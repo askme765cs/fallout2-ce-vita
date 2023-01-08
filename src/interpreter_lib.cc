@@ -1,19 +1,23 @@
 #include "interpreter_lib.h"
 
 #include "color.h"
-#include "core.h"
 #include "datafile.h"
 #include "debug.h"
 #include "dialog.h"
+#include "input.h"
 #include "interpreter_extra.h"
 #include "memory_manager.h"
+#include "mouse.h"
 #include "mouse_manager.h"
 #include "nevs.h"
 #include "select_file_list.h"
 #include "sound.h"
+#include "svga.h"
 #include "text_font.h"
 #include "window.h"
 #include "window_manager_private.h"
+
+namespace fallout {
 
 #define INT_LIB_SOUNDS_CAPACITY (32)
 #define INT_LIB_KEY_HANDLERS_CAPACITY (256)
@@ -209,16 +213,28 @@ static void opPrint(Program* program)
     _selectWindowID(program->windowId);
 
     ProgramValue value = programStackPopValue(program);
+    char string[80];
 
+    // SFALL: Fix broken Print() script function.
+    // CE: Original code uses `interpretOutput` to handle printing. However
+    // this function looks invalid or broken itself. Check `opSelect` - it sets
+    // `outputFunc` to `windowOutput`, but `outputFunc` is never called. I'm not
+    // sure if this fix can be moved into `interpretOutput` because it is also
+    // used in procedure setup functions.
+    //
+    // The fix is slightly different, Sfall fixes strings only, ints and floats
+    // are still passed to `interpretOutput`.
     switch (value.opcode & VALUE_TYPE_MASK) {
     case VALUE_TYPE_STRING:
-        _interpretOutput("%s", programGetString(program, value.opcode, value.integerValue));
+        _windowOutput(programGetString(program, value.opcode, value.integerValue));
         break;
     case VALUE_TYPE_FLOAT:
-        _interpretOutput("%.5f", value.floatValue);
+        snprintf(string, sizeof(string), "%.5f", value.floatValue);
+        _windowOutput(string);
         break;
     case VALUE_TYPE_INT:
-        _interpretOutput("%d", value.integerValue);
+        snprintf(string, sizeof(string), "%d", value.integerValue);
+        _windowOutput(string);
         break;
     }
 }
@@ -341,13 +357,13 @@ static void opPrintRect(Program* program)
     char string[80];
     switch (value.opcode & VALUE_TYPE_MASK) {
     case VALUE_TYPE_STRING:
-        sprintf(string, "%s", programGetString(program, value.opcode, value.integerValue));
+        snprintf(string, sizeof(string), "%s", programGetString(program, value.opcode, value.integerValue));
         break;
     case VALUE_TYPE_FLOAT:
-        sprintf(string, "%.5f", value.floatValue);
+        snprintf(string, sizeof(string), "%.5f", value.floatValue);
         break;
     case VALUE_TYPE_INT:
-        sprintf(string, "%d", value.integerValue);
+        snprintf(string, sizeof(string), "%d", value.integerValue);
         break;
     }
 
@@ -405,12 +421,13 @@ static void _interpretFadePaletteBK(unsigned char* oldPalette, unsigned char* ne
     int index;
     unsigned char palette[256 * 3];
 
-    time = _get_time();
+    time = getTicks();
     previousTime = time;
     steps = (int)duration;
     step = 0;
     delta = 0;
 
+    // TODO: Check if it needs throttling.
     if (duration != 0.0) {
         while (step < steps) {
             if (delta != 0) {
@@ -419,6 +436,7 @@ static void _interpretFadePaletteBK(unsigned char* oldPalette, unsigned char* ne
                 }
 
                 _setSystemPalette(palette);
+                renderPresent();
 
                 previousTime = time;
                 step += delta;
@@ -428,12 +446,13 @@ static void _interpretFadePaletteBK(unsigned char* oldPalette, unsigned char* ne
                 _process_bk();
             }
 
-            time = _get_time();
+            time = getTicks();
             delta = time - previousTime;
         }
     }
 
     _setSystemPalette(newPalette);
+    renderPresent();
 }
 
 // NOTE: Unused.
@@ -1461,8 +1480,9 @@ static void opSetTextColor(Program* program)
     }
 
     for (int arg = 0; arg < 3; arg++) {
-        if (((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT && (value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_INT)
-            || value[arg].floatValue == 0.0) {
+        if ((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT
+            && (value[arg].opcode & VALUE_TYPE_MASK) == VALUE_TYPE_INT
+            && value[arg].integerValue != 0) {
             programFatalError("Invalid type given to settextcolor");
         }
     }
@@ -1488,8 +1508,9 @@ static void opSayOptionColor(Program* program)
     }
 
     for (int arg = 0; arg < 3; arg++) {
-        if (((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT && (value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_INT)
-            || value[arg].floatValue == 0.0) {
+        if ((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT
+            && (value[arg].opcode & VALUE_TYPE_MASK) == VALUE_TYPE_INT
+            && value[arg].integerValue != 0) {
             programFatalError("Invalid type given to sayoptioncolor");
         }
     }
@@ -1515,8 +1536,9 @@ static void opSayReplyColor(Program* program)
     }
 
     for (int arg = 0; arg < 3; arg++) {
-        if (((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT && (value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_INT)
-            || value[arg].floatValue == 0.0) {
+        if ((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT
+            && (value[arg].opcode & VALUE_TYPE_MASK) == VALUE_TYPE_INT
+            && value[arg].integerValue != 0) {
             programFatalError("Invalid type given to sayreplycolor");
         }
     }
@@ -1542,8 +1564,9 @@ static void opSetHighlightColor(Program* program)
     }
 
     for (int arg = 0; arg < 3; arg++) {
-        if (((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT && (value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_INT)
-            || value[arg].floatValue == 0.0) {
+        if ((value[arg].opcode & VALUE_TYPE_MASK) != VALUE_TYPE_FLOAT
+            && (value[arg].opcode & VALUE_TYPE_MASK) == VALUE_TYPE_INT
+            && value[arg].integerValue != 0) {
             programFatalError("Invalid type given to sayreplycolor");
         }
     }
@@ -2306,3 +2329,5 @@ void intLibRemoveProgramReferences(Program* program)
         }
     }
 }
+
+} // namespace fallout

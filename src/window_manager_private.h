@@ -1,7 +1,11 @@
 #ifndef WINDOW_MANAGER_PRIVATE_H
 #define WINDOW_MANAGER_PRIVATE_H
 
+#include <stddef.h>
+
 #include "geometry.h"
+
+namespace fallout {
 
 typedef struct MenuBar MenuBar;
 
@@ -25,7 +29,7 @@ int _win_width_needed(char** fileNameList, int fileNameListLength);
 int _win_input_str(int win, char* dest, int maxLength, int x, int y, int textColor, int backgroundColor);
 int sub_4DBD04(int win, Rect* rect, char** items, int itemsLength, int a5, int a6, MenuBar* menuBar, int pulldownIndex);
 int _GNW_process_menu(MenuBar* menuBar, int pulldownIndex);
-int _calc_max_field_chars_wcursor(int a1, int a2);
+size_t _calc_max_field_chars_wcursor(int a1, int a2);
 void _GNW_intr_init();
 void _GNW_intr_exit();
 void _tm_watch_msgs();
@@ -33,5 +37,7 @@ void _tm_kill_msg();
 void _tm_kill_out_of_order(int a1);
 void _tm_click_response(int btn);
 int _tm_index_active(int a1);
+
+} // namespace fallout
 
 #endif /* WINDOW_MANAGER_PRIVATE_H */

@@ -4,19 +4,23 @@
 
 #include "art.h"
 #include "color.h"
-#include "core.h"
 #include "cycle.h"
 #include "db.h"
 #include "debug.h"
 #include "draw.h"
 #include "game_mouse.h"
+#include "input.h"
 #include "memory.h"
 #include "message.h"
+#include "mouse.h"
 #include "palette.h"
 #include "platform_compat.h"
 #include "sound.h"
+#include "svga.h"
 #include "text_font.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 #define CREDITS_WINDOW_WIDTH (640)
 #define CREDITS_WINDOW_HEIGHT (480)
@@ -61,7 +65,7 @@ void creditsOpen(const char* filePath, int backgroundFid, bool useReversedStyle)
     soundContinueAll();
 
     char localizedPath[COMPAT_MAX_PATH];
-    if (_message_make_path(localizedPath, filePath)) {
+    if (_message_make_path(localizedPath, sizeof(localizedPath), filePath)) {
         gCreditsFile = fileOpen(localizedPath, "rt");
         if (gCreditsFile != NULL) {
             soundContinueAll();
@@ -149,7 +153,9 @@ void creditsOpen(const char* filePath, int backgroundFid, bool useReversedStyle)
                                     unsigned char* dest = intermediateBuffer + CREDITS_WINDOW_WIDTH * CREDITS_WINDOW_HEIGHT - CREDITS_WINDOW_WIDTH + (CREDITS_WINDOW_WIDTH - v19) / 2;
                                     unsigned char* src = stringBuffer;
                                     for (int index = 0; index < lineHeight; index++) {
-                                        if (_get_input() != -1) {
+                                        sharedFpsLimiter.mark();
+
+                                        if (inputGetInput() != -1) {
                                             stop = true;
                                             break;
                                         }
@@ -174,11 +180,14 @@ void creditsOpen(const char* filePath, int backgroundFid, bool useReversedStyle)
                                         while (getTicksSince(tick) < CREDITS_WINDOW_SCROLLING_DELAY) {
                                         }
 
-                                        tick = _get_time();
+                                        tick = getTicks();
 
                                         windowRefresh(window);
 
                                         src += CREDITS_WINDOW_WIDTH;
+
+                                        sharedFpsLimiter.throttle();
+                                        renderPresent();
                                     }
 
                                     if (stop) {
@@ -188,7 +197,9 @@ void creditsOpen(const char* filePath, int backgroundFid, bool useReversedStyle)
 
                                 if (!stop) {
                                     for (int index = 0; index < CREDITS_WINDOW_HEIGHT; index++) {
-                                        if (_get_input() != -1) {
+                                        sharedFpsLimiter.mark();
+
+                                        if (inputGetInput() != -1) {
                                             break;
                                         }
 
@@ -212,9 +223,12 @@ void creditsOpen(const char* filePath, int backgroundFid, bool useReversedStyle)
                                         while (getTicksSince(tick) < CREDITS_WINDOW_SCROLLING_DELAY) {
                                         }
 
-                                        tick = _get_time();
+                                        tick = getTicks();
 
                                         windowRefresh(window);
+
+                                        sharedFpsLimiter.throttle();
+                                        renderPresent();
                                     }
                                 }
 
@@ -274,3 +288,5 @@ static bool creditsFileParseNextLine(char* dest, int* font, int* color)
 
     return false;
 }
+
+} // namespace fallout

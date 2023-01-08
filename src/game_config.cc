@@ -6,6 +6,8 @@
 #include "main.h"
 #include "platform_compat.h"
 
+namespace fallout {
+
 // A flag indicating if [gGameConfig] was initialized.
 //
 // 0x5186D0
@@ -123,7 +125,7 @@ bool gameConfigInit(bool isMapper, int argc, char** argv)
     char* ch = strrchr(executable, '\\');
     if (ch != NULL) {
         *ch = '\0';
-        sprintf(gGameConfigFilePath, "%s\\%s", executable, GAME_CONFIG_FILE_NAME);
+        snprintf(gGameConfigFilePath, sizeof(gGameConfigFilePath), "%s\\%s", executable, GAME_CONFIG_FILE_NAME);
         *ch = '\\';
     } else {
         strcpy(gGameConfigFilePath, GAME_CONFIG_FILE_NAME);
@@ -181,3 +183,5 @@ bool gameConfigExit(bool shouldSave)
 
     return result;
 }
+
+} // namespace fallout

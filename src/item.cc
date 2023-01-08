@@ -33,6 +33,8 @@
 #include "tile.h"
 #include "trait.h"
 
+namespace fallout {
+
 #define ADDICTION_COUNT (9)
 
 // Max number of books that can be loaded from books.ini. This limit is imposed
@@ -193,11 +195,13 @@ int itemsInit()
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "item.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "item.msg");
 
     if (!messageListLoad(&gItemsMessageList, path)) {
         return -1;
     }
+
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_ITEM, &gItemsMessageList);
 
     // SFALL
     booksInit();
@@ -217,6 +221,7 @@ void itemsReset()
 // 0x477148
 void itemsExit()
 {
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_ITEM, nullptr);
     messageListFree(&gItemsMessageList);
 
     // SFALL
@@ -1027,11 +1032,15 @@ int itemGetQuantity(Object* obj, Object* item)
         InventoryItem* inventoryItem = &(inventory->items[index]);
         if (inventoryItem->item == item) {
             quantity = inventoryItem->quantity;
+
+            // SFALL: Fix incorrect value being returned if there is a container
+            // item in the inventory.
+            break;
         } else {
             if (itemGetType(inventoryItem->item) == ITEM_TYPE_CONTAINER) {
                 quantity = itemGetQuantity(inventoryItem->item, item);
                 if (quantity > 0) {
-                    return quantity;
+                    break;
                 }
             }
         }
@@ -1605,7 +1614,7 @@ int weaponGetRange(Object* critter, int hitMode)
         return range;
     }
 
-    if (_critter_flag_check(critter->pid, CRITTER_FLAG_0x2000)) {
+    if (_critter_flag_check(critter->pid, CRITTER_LONG_LIMBS)) {
         return 2;
     }
 
@@ -2245,7 +2254,7 @@ int _item_m_use_charged_item(Object* critter, Object* miscItem)
             if (messageListGetItem(&gItemsMessageList, &messageListItem)) {
                 char text[80];
                 const char* itemName = objectGetName(miscItem);
-                sprintf(text, messageListItem.text, itemName);
+                snprintf(text, sizeof(text), messageListItem.text, itemName);
                 displayMonitorAddMessage(text);
             }
         }
@@ -2291,7 +2300,7 @@ int miscItemTrickleEventProcess(Object* item, void* data)
             if (messageListGetItem(&gItemsMessageList, &messageListItem)) {
                 char text[80];
                 const char* itemName = objectGetName(item);
-                sprintf(text, messageListItem.text, itemName);
+                snprintf(text, sizeof(text), messageListItem.text, itemName);
                 displayMonitorAddMessage(text);
             }
         }
@@ -2340,7 +2349,7 @@ int miscItemTurnOn(Object* item)
             messageListItem.num = 5;
             if (messageListGetItem(&gItemsMessageList, &messageListItem)) {
                 char* name = objectGetName(item);
-                sprintf(text, messageListItem.text, name);
+                snprintf(text, sizeof(text), messageListItem.text, name);
                 displayMonitorAddMessage(text);
             }
         }
@@ -2366,7 +2375,7 @@ int miscItemTurnOn(Object* item)
         messageListItem.num = 6;
         if (messageListGetItem(&gItemsMessageList, &messageListItem)) {
             char* name = objectGetName(item);
-            sprintf(text, messageListItem.text, name);
+            snprintf(text, sizeof(text), messageListItem.text, name);
             displayMonitorAddMessage(text);
         }
 
@@ -2375,7 +2384,7 @@ int miscItemTurnOn(Object* item)
             messageListItem.num = 8;
             if (messageListGetItem(&gItemsMessageList, &messageListItem)) {
                 int radiation = critterGetRadiation(critter);
-                sprintf(text, messageListItem.text, radiation);
+                snprintf(text, sizeof(text), messageListItem.text, radiation);
                 displayMonitorAddMessage(text);
             }
         }
@@ -2414,7 +2423,7 @@ int miscItemTurnOff(Object* item)
         if (messageListGetItem(&gItemsMessageList, &messageListItem)) {
             const char* name = objectGetName(item);
             char text[80];
-            sprintf(text, messageListItem.text, name);
+            snprintf(text, sizeof(text), messageListItem.text, name);
             displayMonitorAddMessage(text);
         }
     }
@@ -2658,7 +2667,7 @@ static void _perform_drug_effect(Object* critter, int* stats, int* mods, bool is
                 name = critterGetName(critter);
                 // %s succumbs to the adverse effects of chems.
                 text = getmsg(&gItemsMessageList, &messageListItem, 600);
-                sprintf(v24, text, name);
+                snprintf(v24, sizeof(v24), text, name);
                 _combatKillCritterOutsideCombat(critter, v24);
             }
         }
@@ -2677,7 +2686,7 @@ static void _perform_drug_effect(Object* critter, int* stats, int* mods, bool is
                 messageListItem.num = after < before ? 2 : 1;
                 if (messageListGetItem(&gItemsMessageList, &messageListItem)) {
                     char* statName = statGetName(stat);
-                    sprintf(str, messageListItem.text, after < before ? before - after : after - before, statName);
+                    snprintf(str, sizeof(str), messageListItem.text, after < before ? before - after : after - before, statName);
                     displayMonitorAddMessage(str);
                     statsChanged = true;
                 }
@@ -2705,7 +2714,7 @@ static void _perform_drug_effect(Object* critter, int* stats, int* mods, bool is
             name = critterGetName(critter);
             // %s succumbs to the adverse effects of chems.
             text = getmsg(&gItemsMessageList, &messageListItem, 600);
-            sprintf(v24, text, name);
+            snprintf(v24, sizeof(v24), text, name);
             // TODO: Why message is ignored?
         }
     }
@@ -3297,7 +3306,7 @@ static void booksInitCustom()
                 char sectionKey[4];
                 for (int index = 0; index < bookCount; index++) {
                     // Books numbering starts with 1.
-                    sprintf(sectionKey, "%d", index + 1);
+                    snprintf(sectionKey, sizeof(sectionKey), "%d", index + 1);
 
                     int bookPid;
                     if (!configGetInt(&booksConfig, sectionKey, "PID", &bookPid)) continue;
@@ -3603,3 +3612,5 @@ bool itemIsHealing(int pid)
 
     return false;
 }
+
+} // namespace fallout

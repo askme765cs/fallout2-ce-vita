@@ -5,7 +5,6 @@
 
 #include "art.h"
 #include "color.h"
-#include "core.h"
 #include "cycle.h"
 #include "debug.h"
 #include "draw.h"
@@ -13,15 +12,20 @@
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "geometry.h"
+#include "input.h"
 #include "interface.h"
+#include "kb.h"
 #include "map.h"
 #include "memory.h"
 #include "message.h"
 #include "object.h"
 #include "platform_compat.h"
 #include "skill.h"
+#include "svga.h"
 #include "text_font.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 #define SKILLDEX_WINDOW_RIGHT_MARGIN 4
 #define SKILLDEX_WINDOW_BOTTOM_MARGIN 6
@@ -80,9 +84,6 @@ static const int gSkilldexSkills[SKILLDEX_SKILL_COUNT] = {
     SKILL_REPAIR,
 };
 
-// 0x668088
-static Size gSkilldexFrmSizes[SKILLDEX_FRM_COUNT];
-
 // 0x6680B8
 static unsigned char* gSkilldexButtonsData[SKILLDEX_SKILL_BUTTON_BUFFER_COUNT];
 
@@ -93,12 +94,6 @@ static MessageList gSkilldexMessageList;
 // 0x668100
 static MessageListItem gSkilldexMessageListItem;
 
-// 0x668110
-static unsigned char* gSkilldexFrmData[SKILLDEX_FRM_COUNT];
-
-// 0x668128
-static CacheEntry* gSkilldexFrmHandles[SKILLDEX_FRM_COUNT];
-
 // 0x668140
 static int gSkilldexWindow;
 
@@ -108,10 +103,14 @@ static unsigned char* gSkilldexWindowBuffer;
 // 0x668148
 static int gSkilldexWindowOldFont;
 
+static FrmImage _skilldexFrmImages[SKILLDEX_FRM_COUNT];
+
 // skilldex_select
 // 0x4ABFD0
 int skilldexOpen()
 {
+    ScopedGameMode gm(GameMode::kSkilldex);
+
     if (skilldexWindowInit() == -1) {
         debugPrint("\n ** Error loading skilldex dialog data! **\n");
         return -1;
@@ -119,7 +118,9 @@ int skilldexOpen()
 
     int rc = -1;
     while (rc == -1) {
-        int keyCode = _get_input();
+        sharedFpsLimiter.mark();
+
+        int keyCode = inputGetInput();
 
         // SFALL: Close with 'S'.
         if (keyCode == KEY_ESCAPE || keyCode == KEY_UPPERCASE_S || keyCode == KEY_LOWERCASE_S || keyCode == 500 || _game_user_wants_to_quit != 0) {
@@ -130,10 +131,13 @@ int skilldexOpen()
         } else if (keyCode >= 501 && keyCode <= 509) {
             rc = keyCode - 500;
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     if (rc != 0) {
-        coreDelay(1000 / 9);
+        inputBlockForTocks(1000 / 9);
     }
 
     skilldexWindowFree();
@@ -155,7 +159,7 @@ static int skilldexWindowInit()
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "skilldex.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "skilldex.msg");
 
     if (!messageListLoad(&gSkilldexMessageList, path)) {
         return -1;
@@ -164,15 +168,14 @@ static int skilldexWindowInit()
     int frmIndex;
     for (frmIndex = 0; frmIndex < SKILLDEX_FRM_COUNT; frmIndex++) {
         int fid = buildFid(OBJ_TYPE_INTERFACE, gSkilldexFrmIds[frmIndex], 0, 0, 0);
-        gSkilldexFrmData[frmIndex] = artLockFrameDataReturningSize(fid, &(gSkilldexFrmHandles[frmIndex]), &(gSkilldexFrmSizes[frmIndex].width), &(gSkilldexFrmSizes[frmIndex].height));
-        if (gSkilldexFrmData[frmIndex] == NULL) {
+        if (!_skilldexFrmImages[frmIndex].lock(fid)) {
             break;
         }
     }
 
     if (frmIndex < SKILLDEX_FRM_COUNT) {
         while (--frmIndex >= 0) {
-            artUnlock(gSkilldexFrmHandles[frmIndex]);
+            _skilldexFrmImages[frmIndex].unlock();
         }
 
         messageListFree(&gSkilldexMessageList);
@@ -183,7 +186,7 @@ static int skilldexWindowInit()
     bool cycle = false;
     int buttonDataIndex;
     for (buttonDataIndex = 0; buttonDataIndex < SKILLDEX_SKILL_BUTTON_BUFFER_COUNT; buttonDataIndex++) {
-        gSkilldexButtonsData[buttonDataIndex] = (unsigned char*)internal_malloc(gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_ON].height * gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_ON].width + 512);
+        gSkilldexButtonsData[buttonDataIndex] = (unsigned char*)internal_malloc(_skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getHeight() * _skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getWidth() + 512);
         if (gSkilldexButtonsData[buttonDataIndex] == NULL) {
             break;
         }
@@ -194,11 +197,11 @@ static int skilldexWindowInit()
         unsigned char* data;
         int size;
         if (cycle) {
-            size = gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_OFF].width * gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_OFF].height;
-            data = gSkilldexFrmData[SKILLDEX_FRM_BUTTON_OFF];
+            size = _skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getWidth() * _skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getHeight();
+            data = _skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getData();
         } else {
-            size = gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_ON].width * gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_ON].height;
-            data = gSkilldexFrmData[SKILLDEX_FRM_BUTTON_ON];
+            size = _skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getWidth() * _skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getHeight();
+            data = _skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getData();
         }
 
         memcpy(gSkilldexButtonsData[buttonDataIndex], data, size);
@@ -210,7 +213,7 @@ static int skilldexWindowInit()
         }
 
         for (int index = 0; index < SKILLDEX_FRM_COUNT; index++) {
-            artUnlock(gSkilldexFrmHandles[index]);
+            _skilldexFrmImages[index].unlock();
         }
 
         messageListFree(&gSkilldexMessageList);
@@ -219,21 +222,21 @@ static int skilldexWindowInit()
     }
 
     // Maintain original position relative to centered interface bar.
-    int skilldexWindowX = (screenGetWidth() - 640) / 2 + 640 - gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width - SKILLDEX_WINDOW_RIGHT_MARGIN;
-    int skilldexWindowY = screenGetHeight() - INTERFACE_BAR_HEIGHT - 1 - gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].height - SKILLDEX_WINDOW_BOTTOM_MARGIN;
+    int skilldexWindowX = (screenGetWidth() - gInterfaceBarWidth) / 2 + gInterfaceBarWidth - _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() - SKILLDEX_WINDOW_RIGHT_MARGIN;
+    int skilldexWindowY = screenGetHeight() - INTERFACE_BAR_HEIGHT - 1 - _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getHeight() - SKILLDEX_WINDOW_BOTTOM_MARGIN;
     gSkilldexWindow = windowCreate(skilldexWindowX,
         skilldexWindowY,
-        gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width,
-        gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].height,
+        _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth(),
+        _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getHeight(),
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x02);
+        WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
     if (gSkilldexWindow == -1) {
         for (int index = 0; index < SKILLDEX_SKILL_BUTTON_BUFFER_COUNT; index++) {
             internal_free(gSkilldexButtonsData[index]);
         }
 
         for (int index = 0; index < SKILLDEX_FRM_COUNT; index++) {
-            artUnlock(gSkilldexFrmHandles[index]);
+            _skilldexFrmImages[index].unlock();
         }
 
         messageListFree(&gSkilldexMessageList);
@@ -248,17 +251,17 @@ static int skilldexWindowInit()
 
     gSkilldexWindowBuffer = windowGetBuffer(gSkilldexWindow);
     memcpy(gSkilldexWindowBuffer,
-        gSkilldexFrmData[SKILLDEX_FRM_BACKGROUND],
-        gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width * gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].height);
+        _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getData(),
+        _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getHeight());
 
     fontSetCurrent(103);
 
     // Render "SKILLDEX" title.
     char* title = getmsg(&gSkilldexMessageList, &gSkilldexMessageListItem, 100);
-    fontDrawText(gSkilldexWindowBuffer + 14 * gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width + 55,
+    fontDrawText(gSkilldexWindowBuffer + 14 * _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() + 55,
         title,
-        gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width,
-        gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width,
+        _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth(),
+        _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth(),
         _colorTable[18979]);
 
     // Render skill values.
@@ -275,10 +278,10 @@ static int skilldexWindowInit()
         // because -5 is also a legitimate skill value.
         //
         // TODO: Provide other error code in `skillGetValue`.
-        unsigned char* numbersFrmData = gSkilldexFrmData[SKILLDEX_FRM_BIG_NUMBERS];
+        unsigned char* numbersFrmData = _skilldexFrmImages[SKILLDEX_FRM_BIG_NUMBERS].getData();
         if (value < 0) {
             // First half of the bignum.frm is white, second half is red.
-            numbersFrmData += gSkilldexFrmSizes[SKILLDEX_FRM_BIG_NUMBERS].width / 2;
+            numbersFrmData += _skilldexFrmImages[SKILLDEX_FRM_BIG_NUMBERS].getWidth() / 2;
             value = -value;
         }
 
@@ -287,24 +290,24 @@ static int skilldexWindowInit()
             14,
             24,
             336,
-            gSkilldexWindowBuffer + gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width * valueY + 110,
-            gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width);
+            gSkilldexWindowBuffer + _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * valueY + 110,
+            _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth());
 
         int tens = (value % 100) / 10;
         blitBufferToBuffer(numbersFrmData + 14 * tens,
             14,
             24,
             336,
-            gSkilldexWindowBuffer + gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width * valueY + 124,
-            gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width);
+            gSkilldexWindowBuffer + _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * valueY + 124,
+            _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth());
 
         int ones = (value % 100) % 10;
         blitBufferToBuffer(numbersFrmData + 14 * ones,
             14,
             24,
             336,
-            gSkilldexWindowBuffer + gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width * valueY + 138,
-            gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width);
+            gSkilldexWindowBuffer + _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * valueY + 138,
+            _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth());
 
         valueY += 36;
     }
@@ -313,33 +316,33 @@ static int skilldexWindowInit()
     int lineHeight = fontGetLineHeight();
 
     int buttonY = 45;
-    int nameY = ((gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_OFF].height - lineHeight) / 2) + 1;
+    int nameY = ((_skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getHeight() - lineHeight) / 2) + 1;
     for (int index = 0; index < SKILLDEX_SKILL_COUNT; index++) {
         char name[MESSAGE_LIST_ITEM_FIELD_MAX_SIZE];
         strcpy(name, getmsg(&gSkilldexMessageList, &gSkilldexMessageListItem, 102 + index));
 
-        int nameX = ((gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_OFF].width - fontGetStringWidth(name)) / 2) + 1;
+        int nameX = ((_skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getWidth() - fontGetStringWidth(name)) / 2) + 1;
         if (nameX < 0) {
             nameX = 0;
         }
 
-        fontDrawText(gSkilldexButtonsData[index * 2] + gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_ON].width * nameY + nameX,
+        fontDrawText(gSkilldexButtonsData[index * 2] + _skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getWidth() * nameY + nameX,
             name,
-            gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_ON].width,
-            gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_ON].width,
+            _skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getWidth(),
+            _skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getWidth(),
             _colorTable[18979]);
 
-        fontDrawText(gSkilldexButtonsData[index * 2 + 1] + gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_OFF].width * nameY + nameX,
+        fontDrawText(gSkilldexButtonsData[index * 2 + 1] + _skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getWidth() * nameY + nameX,
             name,
-            gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_OFF].width,
-            gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_OFF].width,
+            _skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getWidth(),
+            _skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getWidth(),
             _colorTable[14723]);
 
         int btn = buttonCreate(gSkilldexWindow,
             15,
             buttonY,
-            gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_OFF].width,
-            gSkilldexFrmSizes[SKILLDEX_FRM_BUTTON_OFF].height,
+            _skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getWidth(),
+            _skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF].getHeight(),
             -1,
             -1,
             -1,
@@ -357,23 +360,23 @@ static int skilldexWindowInit()
 
     // Render "CANCEL" button.
     char* cancel = getmsg(&gSkilldexMessageList, &gSkilldexMessageListItem, 101);
-    fontDrawText(gSkilldexWindowBuffer + gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width * 337 + 72,
+    fontDrawText(gSkilldexWindowBuffer + _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * 337 + 72,
         cancel,
-        gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width,
-        gSkilldexFrmSizes[SKILLDEX_FRM_BACKGROUND].width,
+        _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth(),
+        _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth(),
         _colorTable[18979]);
 
     int cancelBtn = buttonCreate(gSkilldexWindow,
         48,
         338,
-        gSkilldexFrmSizes[SKILLDEX_FRM_LITTLE_RED_BUTTON_UP].width,
-        gSkilldexFrmSizes[SKILLDEX_FRM_LITTLE_RED_BUTTON_UP].height,
+        _skilldexFrmImages[SKILLDEX_FRM_LITTLE_RED_BUTTON_UP].getWidth(),
+        _skilldexFrmImages[SKILLDEX_FRM_LITTLE_RED_BUTTON_UP].getHeight(),
         -1,
         -1,
         -1,
         500,
-        gSkilldexFrmData[SKILLDEX_FRM_LITTLE_RED_BUTTON_UP],
-        gSkilldexFrmData[SKILLDEX_FRM_LITTLE_RED_BUTTON_DOWN],
+        _skilldexFrmImages[SKILLDEX_FRM_LITTLE_RED_BUTTON_UP].getData(),
+        _skilldexFrmImages[SKILLDEX_FRM_LITTLE_RED_BUTTON_DOWN].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (cancelBtn != -1) {
@@ -395,7 +398,7 @@ static void skilldexWindowFree()
     }
 
     for (int index = 0; index < SKILLDEX_FRM_COUNT; index++) {
-        artUnlock(gSkilldexFrmHandles[index]);
+        _skilldexFrmImages[index].unlock();
     }
 
     messageListFree(&gSkilldexMessageList);
@@ -410,3 +413,5 @@ static void skilldexWindowFree()
 
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
 }
+
+} // namespace fallout

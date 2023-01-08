@@ -32,6 +32,8 @@
 #include "tile.h"
 #include "worldmap.h"
 
+namespace fallout {
+
 static int _obj_remove_from_inven(Object* critter, Object* item);
 static int _obj_use_book(Object* item_obj);
 static int _obj_use_flare(Object* critter_obj, Object* item_obj);
@@ -214,7 +216,7 @@ int _obj_look_at_func(Object* a1, Object* a2, void (*a3)(char* string))
             const char* objectName = objectGetName(a2);
 
             char formattedText[260];
-            sprintf(formattedText, messageListItem.text, objectName);
+            snprintf(formattedText, sizeof(formattedText), messageListItem.text, objectName);
 
             a3(formattedText);
         }
@@ -324,7 +326,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                 }
 
                 char format[80];
-                sprintf(format, "%s%s", hpMessageListItem.text, weaponMessageListItem.text);
+                snprintf(format, sizeof(format), "%s%s", hpMessageListItem.text, weaponMessageListItem.text);
 
                 if (ammoGetCaliber(item2) != 0) {
                     const int ammoTypePid = weaponGetAmmoTypePid(item2);
@@ -334,7 +336,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                     const char* weaponName = objectGetName(item2);
                     const int maxiumHitPoints = critterGetStat(target, STAT_MAXIMUM_HIT_POINTS);
                     const int currentHitPoints = critterGetStat(target, STAT_CURRENT_HIT_POINTS);
-                    sprintf(formattedText,
+                    snprintf(formattedText, sizeof(formattedText),
                         format,
                         currentHitPoints,
                         maxiumHitPoints,
@@ -346,7 +348,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                     const char* weaponName = objectGetName(item2);
                     const int maxiumHitPoints = critterGetStat(target, STAT_MAXIMUM_HIT_POINTS);
                     const int currentHitPoints = critterGetStat(target, STAT_CURRENT_HIT_POINTS);
-                    sprintf(formattedText,
+                    snprintf(formattedText, sizeof(formattedText),
                         format,
                         currentHitPoints,
                         maxiumHitPoints,
@@ -368,7 +370,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
 
                 const int maxiumHitPoints = critterGetStat(target, STAT_MAXIMUM_HIT_POINTS);
                 const int currentHitPoints = critterGetStat(target, STAT_CURRENT_HIT_POINTS);
-                sprintf(formattedText, hpMessageListItem.text, currentHitPoints, maxiumHitPoints);
+                snprintf(formattedText, sizeof(formattedText), hpMessageListItem.text, currentHitPoints, maxiumHitPoints);
                 strcat(formattedText, endingMessageListItem.text);
             }
         } else {
@@ -417,7 +419,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                     exit(1);
                 }
 
-                sprintf(formattedText, v66.text, hpMessageListItem.text);
+                snprintf(formattedText, sizeof(formattedText), v66.text, hpMessageListItem.text);
             } else {
                 // %s %s
                 v66.num = 521 + v12;
@@ -433,7 +435,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                     exit(1);
                 }
 
-                sprintf(formattedText, v63.text, hpMessageListItem.text);
+                snprintf(formattedText, sizeof(formattedText), v63.text, hpMessageListItem.text);
             }
         }
 
@@ -473,7 +475,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
             }
 
             if (car != 0) {
-                sprintf(formattedText, carMessageListItem.text, 100 * wmCarGasAmount() / 80000);
+                snprintf(formattedText, sizeof(formattedText), carMessageListItem.text, 100 * wmCarGasAmount() / 80000);
             } else {
                 strcpy(formattedText, carMessageListItem.text);
             }
@@ -496,7 +498,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                 const char* ammoName = protoGetName(ammoTypePid);
                 int ammoCapacity = ammoGetCapacity(target);
                 int ammoQuantity = ammoGetQuantity(target);
-                sprintf(formattedText, weaponMessageListItem.text, ammoQuantity, ammoCapacity, ammoName);
+                snprintf(formattedText, sizeof(formattedText), weaponMessageListItem.text, ammoQuantity, ammoCapacity, ammoName);
                 fn(formattedText);
             }
         } else if (itemType == ITEM_TYPE_AMMO) {
@@ -514,7 +516,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                 exit(1);
             }
 
-            sprintf(formattedText,
+            snprintf(formattedText, sizeof(formattedText),
                 ammoMessageListItem.text,
                 ammoGetArmorClassModifier(target));
             if (fn == gameDialogRenderSupplementaryMessage) {
@@ -529,7 +531,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                 exit(1);
             }
 
-            sprintf(formattedText,
+            snprintf(formattedText, sizeof(formattedText),
                 ammoMessageListItem.text,
                 ammoGetDamageResistanceModifier(target));
             if (fn == gameDialogRenderSupplementaryMessage) {
@@ -545,7 +547,7 @@ int _obj_examine_func(Object* critter, Object* target, void (*fn)(char* string))
                 exit(1);
             }
 
-            sprintf(formattedText,
+            snprintf(formattedText, sizeof(formattedText),
                 ammoMessageListItem.text,
                 ammoGetDamageMultiplier(target),
                 ammoGetDamageDivisor(target));
@@ -1199,7 +1201,7 @@ static int _protinst_default_use_item(Object* a1, Object* a2, Object* item)
                 return -1;
             }
 
-            sprintf(formattedText, messageListItem.text, objectGetName(item), objectGetName(a2));
+            snprintf(formattedText, sizeof(formattedText), messageListItem.text, objectGetName(item), objectGetName(a2));
             displayMonitorAddMessage(formattedText);
         }
 
@@ -1231,7 +1233,7 @@ static int _protinst_default_use_item(Object* a1, Object* a2, Object* item)
 
     messageListItem.num = 582;
     if (messageListGetItem(&gProtoMessageList, &messageListItem)) {
-        sprintf(formattedText, "%s", messageListItem.text);
+        snprintf(formattedText, sizeof(formattedText), "%s", messageListItem.text);
         displayMonitorAddMessage(formattedText);
     }
     return -1;
@@ -1360,26 +1362,29 @@ int _obj_use_item_on(Object* a1, Object* a2, Object* a3)
             int flags = a3->flags & OBJECT_IN_ANY_HAND;
             itemRemove(a1, a3, 1);
 
-            Object* v7 = itemReplace(a1, a3, flags);
+            Object* replacedItem = itemReplace(a1, a3, flags);
 
-            int leftItemAction;
-            int rightItemAction;
+            // CE: Fix rare crash when using uninitialized action variables. The
+            // following code is on par with |_obj_use_item| which does not
+            // crash.
             if (a1 == gDude) {
+                int leftItemAction;
+                int rightItemAction;
                 interfaceGetItemActions(&leftItemAction, &rightItemAction);
-            }
 
-            if (v7 == NULL) {
-                if ((flags & OBJECT_IN_LEFT_HAND) != 0) {
-                    leftItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
-                } else if ((flags & OBJECT_IN_RIGHT_HAND) != 0) {
-                    rightItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
-                } else {
-                    leftItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
-                    rightItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                if (replacedItem == NULL) {
+                    if ((flags & OBJECT_IN_LEFT_HAND) != 0) {
+                        leftItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                    } else if ((flags & OBJECT_IN_RIGHT_HAND) != 0) {
+                        rightItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                    } else {
+                        leftItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                        rightItemAction = INTERFACE_ITEM_ACTION_DEFAULT;
+                    }
                 }
-            }
 
-            interfaceUpdateItems(false, leftItemAction, rightItemAction);
+                interfaceUpdateItems(false, leftItemAction, rightItemAction);
+            }
         }
 
         _obj_destroy(a3);
@@ -1489,7 +1494,7 @@ int _obj_use(Object* a1, Object* a2)
 
             char formattedText[260];
             const char* name = objectGetName(a2);
-            sprintf(formattedText, messageListItem.text, name);
+            snprintf(formattedText, sizeof(formattedText), messageListItem.text, name);
             displayMonitorAddMessage(formattedText);
         }
     }
@@ -1852,7 +1857,7 @@ int _obj_use_container(Object* critter, Object* item)
 
         char formattedText[260];
         const char* objectName = objectGetName(item);
-        sprintf(formattedText, messageListItem.text, objectName);
+        snprintf(formattedText, sizeof(formattedText), messageListItem.text, objectName);
         displayMonitorAddMessage(formattedText);
     }
 
@@ -2263,3 +2268,5 @@ int _objPMAttemptPlacement(Object* obj, int tile, int elevation)
 
     return 0;
 }
+
+} // namespace fallout

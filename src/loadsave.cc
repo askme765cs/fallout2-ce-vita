@@ -13,7 +13,6 @@
 #include "color.h"
 #include "combat.h"
 #include "combat_ai.h"
-#include "core.h"
 #include "critter.h"
 #include "cycle.h"
 #include "db.h"
@@ -23,16 +22,18 @@
 #include "draw.h"
 #include "file_utils.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_mouse.h"
 #include "game_movie.h"
 #include "game_sound.h"
 #include "geometry.h"
+#include "input.h"
 #include "interface.h"
 #include "item.h"
+#include "kb.h"
 #include "map.h"
 #include "memory.h"
 #include "message.h"
+#include "mouse.h"
 #include "object.h"
 #include "options.h"
 #include "party_member.h"
@@ -43,8 +44,10 @@
 #include "queue.h"
 #include "random.h"
 #include "scripts.h"
+#include "settings.h"
 #include "skill.h"
 #include "stat.h"
+#include "svga.h"
 #include "text_font.h"
 #include "tile.h"
 #include "trait.h"
@@ -52,6 +55,8 @@
 #include "window_manager.h"
 #include "word_wrap.h"
 #include "worldmap.h"
+
+namespace fallout {
 
 #define LS_WINDOW_WIDTH 640
 #define LS_WINDOW_HEIGHT 480
@@ -92,6 +97,12 @@ typedef enum LoadSaveSlotState {
     SLOT_STATE_ERROR,
     SLOT_STATE_UNSUPPORTED_VERSION,
 } LoadSaveSlotState;
+
+typedef enum LoadSaveScrollDirection {
+    LOAD_SAVE_SCROLL_DIRECTION_NONE,
+    LOAD_SAVE_SCROLL_DIRECTION_UP,
+    LOAD_SAVE_SCROLL_DIRECTION_DOWN,
+} LoadSaveScrollDirection;
 
 typedef int LoadGameHandler(File* stream);
 typedef int SaveGameHandler(File* stream);
@@ -190,10 +201,7 @@ static int _map_backup_count = -1;
 static int _automap_db_flag = 0;
 
 // 0x5193CC
-static char* _patches = NULL;
-
-// 0x5193D0
-static char _emgpath[] = "\\FALLOUT\\CD\\DATA\\SAVEGAME";
+static const char* _patches = NULL;
 
 // 0x5193EC
 static SaveGameHandler* _master_save_list[LOAD_SAVE_HANDLER_COUNT] = {
@@ -260,9 +268,6 @@ static LoadGameHandler* _master_load_list[LOAD_SAVE_HANDLER_COUNT] = {
 // 0x5194C4
 static int _loadingGame = 0;
 
-// 0x613CE0
-static Size gLoadSaveFrmSizes[LOAD_SAVE_FRM_COUNT];
-
 // lsgame.msg
 //
 // 0x613D28
@@ -288,9 +293,6 @@ static int _dbleclkcntr;
 
 // 0x6142C4
 static int gLoadSaveWindow;
-
-// 0x6142C8
-static unsigned char* gLoadSaveFrmData[LOAD_SAVE_FRM_COUNT];
 
 // 0x6142EC
 static unsigned char* _snapshot;
@@ -322,19 +324,14 @@ static int _ls_error_code;
 // 0x614810
 static int gLoadSaveWindowOldFont;
 
-// 0x614814
-static CacheEntry* gLoadSaveFrmHandles[LOAD_SAVE_FRM_COUNT];
+static FrmImage _loadsaveFrmImages[LOAD_SAVE_FRM_COUNT];
 
 // 0x47B7E4
 void _InitLoadSave()
 {
     _quick_done = false;
     _slot_cursor = 0;
-
-    if (!configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &_patches)) {
-        debugPrint("\nLOADSAVE: Error reading patches config variable! Using default.\n");
-        _patches = _emgpath;
-    }
+    _patches = settings.system.master_patches_path.c_str();
 
     _MapDirErase("MAPS\\", "SAV");
     _MapDirErase(PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME "\\", PROTO_FILE_EXT);
@@ -353,17 +350,15 @@ void _ResetLoadSave()
 // 0x47B88C
 int lsgSaveGame(int mode)
 {
+    ScopedGameMode gm(GameMode::kSaveGame);
+
     MessageListItem messageListItem;
 
     _ls_error_code = 0;
-
-    if (!configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &_patches)) {
-        debugPrint("\nLOADSAVE: Error reading patches config variable! Using default.\n");
-        _patches = _emgpath;
-    }
+    _patches = settings.system.master_patches_path.c_str();
 
     if (mode == LOAD_SAVE_MODE_QUICK && _quick_done) {
-        sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+        snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
         strcat(_gmpath, "SAVE.DAT");
 
         _flptr = fileOpen(_gmpath, "rb");
@@ -396,7 +391,7 @@ int lsgSaveGame(int mode)
         }
 
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "%s%s", asc_5186C8, "LSGAME.MSG");
+        snprintf(path, sizeof(path), "%s%s", asc_5186C8, "LSGAME.MSG");
         if (!messageListLoad(&gLoadSaveMessageList, path)) {
             return -1;
         }
@@ -438,7 +433,7 @@ int lsgSaveGame(int mode)
         // Save game directory:
         strcpy(_str1, getmsg(&gLoadSaveMessageList, &messageListItem, 107));
 
-        sprintf(_str2, "\"%s\\\"", "SAVEGAME");
+        snprintf(_str2, sizeof(_str2), "\"%s\\\"", "SAVEGAME");
 
         // TODO: Check.
         strcpy(_str2, getmsg(&gLoadSaveMessageList, &messageListItem, 108));
@@ -454,16 +449,28 @@ int lsgSaveGame(int mode)
         return -1;
     }
 
-    unsigned char* src;
-    int v33 = _LSstatus[_slot_cursor];
-    if (v33 != 0 && v33 != 2 && v33 != 3) {
+    switch (_LSstatus[_slot_cursor]) {
+    case SLOT_STATE_EMPTY:
+    case SLOT_STATE_ERROR:
+    case SLOT_STATE_UNSUPPORTED_VERSION:
+        blitBufferToBuffer(_snapshotBuf,
+            LS_PREVIEW_WIDTH - 1,
+            LS_PREVIEW_HEIGHT - 1,
+            LS_PREVIEW_WIDTH,
+            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+            LS_WINDOW_WIDTH);
+        break;
+    default:
         _LoadTumbSlot(_slot_cursor);
-        src = _thumbnail_image;
-    } else {
-        src = _snapshotBuf;
+        blitBufferToBuffer(_thumbnail_image,
+            LS_PREVIEW_WIDTH - 1,
+            LS_PREVIEW_HEIGHT - 1,
+            LS_PREVIEW_WIDTH,
+            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+            LS_WINDOW_WIDTH);
+        break;
     }
 
-    blitBufferToBuffer(src, 223, 132, LS_PREVIEW_WIDTH, gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366, LS_WINDOW_WIDTH);
     _ShowSlotList(0);
     _DrawInfoBox(_slot_cursor);
     windowRefresh(gLoadSaveWindow);
@@ -471,12 +478,14 @@ int lsgSaveGame(int mode)
     _dbleclkcntr = 24;
 
     int rc = -1;
-    int v103 = -1;
+    int doubleClickSlot = -1;
     while (rc == -1) {
-        int tick = _get_time();
-        int keyCode = _get_input();
-        int v37 = 0;
-        int v102 = 0;
+        sharedFpsLimiter.mark();
+
+        unsigned int tick = getTicks();
+        int keyCode = inputGetInput();
+        bool selectionChanged = false;
+        int scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_NONE;
 
         convertMouseWheelToArrowKey(&keyCode);
 
@@ -489,32 +498,32 @@ int lsgSaveGame(int mode)
                 if (_slot_cursor < 0) {
                     _slot_cursor = 0;
                 }
-                v37 = 1;
-                v103 = -1;
+                selectionChanged = true;
+                doubleClickSlot = -1;
                 break;
             case KEY_ARROW_DOWN:
                 _slot_cursor += 1;
                 if (_slot_cursor > 9) {
                     _slot_cursor = 9;
                 }
-                v37 = 1;
-                v103 = -1;
+                selectionChanged = true;
+                doubleClickSlot = -1;
                 break;
             case KEY_HOME:
-                v37 = 1;
-                v103 = -1;
                 _slot_cursor = 0;
+                selectionChanged = true;
+                doubleClickSlot = -1;
                 break;
             case KEY_END:
-                v103 = -1;
-                v37 = 1;
                 _slot_cursor = 9;
+                selectionChanged = true;
+                doubleClickSlot = -1;
                 break;
             case 506:
-                v102 = 1;
+                scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_UP;
                 break;
             case 504:
-                v102 = 2;
+                scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_DOWN;
                 break;
             case 502:
                 if (1) {
@@ -530,15 +539,15 @@ int lsgSaveGame(int mode)
                         _slot_cursor = 9;
                     }
 
-                    v37 = 1;
+                    selectionChanged = 1;
 
-                    if (_slot_cursor == v103) {
+                    if (_slot_cursor == doubleClickSlot) {
                         keyCode = 500;
                         soundPlayFile("ib1p1xx1");
                     }
 
-                    v103 = _slot_cursor;
-                    v102 = 0;
+                    doubleClickSlot = _slot_cursor;
+                    scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_NONE;
                 }
                 break;
             case KEY_CTRL_Q:
@@ -565,8 +574,8 @@ int lsgSaveGame(int mode)
         }
 
         if (keyCode == 500) {
-            rc = _LSstatus[_slot_cursor];
-            if (rc == 1) {
+            if (_LSstatus[_slot_cursor] == SLOT_STATE_OCCUPIED) {
+                rc = 1;
                 // Save game already exists, overwrite?
                 const char* title = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 131);
                 if (showDialogBox(title, NULL, 0, 169, 131, _colorTable[32328], NULL, _colorTable[32328], DIALOG_BOX_YES_NO) == 0) {
@@ -576,28 +585,107 @@ int lsgSaveGame(int mode)
                 rc = 1;
             }
 
-            v37 = 1;
-            v102 = 0;
+            selectionChanged = true;
+            scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_NONE;
         }
 
-        if (v102) {
-            // TODO: Incomplete.
-        } else {
-            if (v37) {
-                unsigned char* src;
-                int v49 = _LSstatus[_slot_cursor];
-                if (v49 != 0 && v49 != 2 && v49 != 3) {
-                    _LoadTumbSlot(_slot_cursor);
-                    src = _thumbnail_image;
-                } else {
-                    src = _snapshotBuf;
+        if (scrollDirection) {
+            unsigned int scrollVelocity = 4;
+            bool isScrolling = false;
+            int scrollCounter = 0;
+            do {
+                sharedFpsLimiter.mark();
+
+                unsigned int start = getTicks();
+                scrollCounter += 1;
+
+                if ((!isScrolling && scrollCounter == 1) || (isScrolling && scrollCounter > 14.4)) {
+                    isScrolling = true;
+
+                    if (scrollCounter > 14.4) {
+                        scrollVelocity += 1;
+                        if (scrollVelocity > 24) {
+                            scrollVelocity = 24;
+                        }
+                    }
+
+                    if (scrollDirection == LOAD_SAVE_SCROLL_DIRECTION_UP) {
+                        _slot_cursor -= 1;
+                        if (_slot_cursor < 0) {
+                            _slot_cursor = 0;
+                        }
+                    } else {
+                        _slot_cursor += 1;
+                        if (_slot_cursor > 9) {
+                            _slot_cursor = 9;
+                        }
+                    }
+
+                    // TODO: Does not check for unsupported version error like
+                    // other switches do.
+                    switch (_LSstatus[_slot_cursor]) {
+                    case SLOT_STATE_EMPTY:
+                    case SLOT_STATE_ERROR:
+                        blitBufferToBuffer(_snapshotBuf,
+                            LS_PREVIEW_WIDTH - 1,
+                            LS_PREVIEW_HEIGHT - 1,
+                            LS_PREVIEW_WIDTH,
+                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+                            LS_WINDOW_WIDTH);
+                        break;
+                    default:
+                        _LoadTumbSlot(_slot_cursor);
+                        blitBufferToBuffer(_thumbnail_image,
+                            LS_PREVIEW_WIDTH - 1,
+                            LS_PREVIEW_HEIGHT - 1,
+                            LS_PREVIEW_WIDTH,
+                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+                            LS_WINDOW_WIDTH);
+                        break;
+                    }
+
+                    _ShowSlotList(LOAD_SAVE_WINDOW_TYPE_SAVE_GAME);
+                    _DrawInfoBox(_slot_cursor);
+                    windowRefresh(gLoadSaveWindow);
                 }
 
-                blitBufferToBuffer(src, 223, 132, LS_PREVIEW_WIDTH, gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366, LS_WINDOW_WIDTH);
+                if (scrollCounter > 14.4) {
+                    while (getTicksSince(start) < 1000 / scrollVelocity) { }
+                } else {
+                    while (getTicksSince(start) < 1000 / 24) { }
+                }
+
+                keyCode = inputGetInput();
+
+                renderPresent();
+                sharedFpsLimiter.throttle();
+            } while (keyCode != 505 && keyCode != 503);
+        } else {
+            if (selectionChanged) {
+                switch (_LSstatus[_slot_cursor]) {
+                case SLOT_STATE_EMPTY:
+                case SLOT_STATE_ERROR:
+                case SLOT_STATE_UNSUPPORTED_VERSION:
+                    blitBufferToBuffer(_snapshotBuf,
+                        LS_PREVIEW_WIDTH - 1,
+                        LS_PREVIEW_HEIGHT - 1,
+                        LS_PREVIEW_WIDTH,
+                        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+                        LS_WINDOW_WIDTH);
+                    break;
+                default:
+                    _LoadTumbSlot(_slot_cursor);
+                    blitBufferToBuffer(_thumbnail_image,
+                        LS_PREVIEW_WIDTH - 1,
+                        LS_PREVIEW_HEIGHT - 1,
+                        LS_PREVIEW_WIDTH,
+                        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+                        LS_WINDOW_WIDTH);
+                    break;
+                }
 
                 _DrawInfoBox(_slot_cursor);
-
-                _ShowSlotList(0);
+                _ShowSlotList(LOAD_SAVE_WINDOW_TYPE_SAVE_GAME);
             }
 
             windowRefresh(gLoadSaveWindow);
@@ -605,7 +693,7 @@ int lsgSaveGame(int mode)
             _dbleclkcntr -= 1;
             if (_dbleclkcntr == 0) {
                 _dbleclkcntr = 24;
-                v103 = -1;
+                doubleClickSlot = -1;
             }
 
             while (getTicksSince(tick) < 1000 / 24) {
@@ -624,12 +712,11 @@ int lsgSaveGame(int mode)
                 // Unable to save game.
                 strcpy(_str1, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 133));
 
-                rc = -1;
-
                 const char* body[1] = {
                     _str1,
                 };
                 showDialogBox(_str0, body, 1, 169, 116, _colorTable[32328], NULL, _colorTable[32328], DIALOG_BOX_LARGE);
+                rc = -1;
             } else if (v50 == 0) {
                 gameMouseSetCursor(MOUSE_CURSOR_ARROW);
                 rc = -1;
@@ -659,7 +746,7 @@ int lsgSaveGame(int mode)
                         // Save game directory:
                         strcpy(_str1, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 107));
 
-                        sprintf(_str2, "\"%s\\\"", "SAVEGAME");
+                        snprintf(_str2, sizeof(_str2), "\"%s\\\"", "SAVEGAME");
 
                         char text[260];
                         // Doesn't exist or is corrupted.
@@ -676,28 +763,43 @@ int lsgSaveGame(int mode)
                         return -1;
                     }
 
-                    unsigned char* src;
-                    int state = _LSstatus[_slot_cursor];
-                    if (state == SLOT_STATE_EMPTY || state == SLOT_STATE_ERROR || state == SLOT_STATE_UNSUPPORTED_VERSION) {
-                        src = _snapshotBuf;
-                    } else {
+                    switch (_LSstatus[_slot_cursor]) {
+                    case SLOT_STATE_EMPTY:
+                    case SLOT_STATE_ERROR:
+                    case SLOT_STATE_UNSUPPORTED_VERSION:
+                        blitBufferToBuffer(_snapshotBuf,
+                            LS_PREVIEW_WIDTH - 1,
+                            LS_PREVIEW_HEIGHT - 1,
+                            LS_PREVIEW_WIDTH,
+                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+                            LS_WINDOW_WIDTH);
+                        break;
+                    default:
                         _LoadTumbSlot(_slot_cursor);
-                        src = _thumbnail_image;
+                        blitBufferToBuffer(_thumbnail_image,
+                            LS_PREVIEW_WIDTH - 1,
+                            LS_PREVIEW_HEIGHT - 1,
+                            LS_PREVIEW_WIDTH,
+                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+                            LS_WINDOW_WIDTH);
+                        break;
                     }
 
-                    blitBufferToBuffer(src, 223, 132, LS_PREVIEW_WIDTH, gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366, LS_WINDOW_WIDTH);
-                    _ShowSlotList(0);
+                    _ShowSlotList(LOAD_SAVE_WINDOW_TYPE_SAVE_GAME);
                     _DrawInfoBox(_slot_cursor);
                     windowRefresh(gLoadSaveWindow);
                     _dbleclkcntr = 24;
                 }
             }
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
 
-    lsgWindowFree(0);
+    lsgWindowFree(LOAD_SAVE_WINDOW_TYPE_SAVE_GAME);
 
     tileWindowRefresh();
 
@@ -754,8 +856,9 @@ static int _QuickSnapShot()
 // 0x47C640
 int lsgLoadGame(int mode)
 {
+    ScopedGameMode gm(GameMode::kLoadGame);
+
     MessageListItem messageListItem;
-    const char* messageListItemText;
 
     const char* body[] = {
         _str1,
@@ -763,11 +866,7 @@ int lsgLoadGame(int mode)
     };
 
     _ls_error_code = 0;
-
-    if (!configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &_patches)) {
-        debugPrint("\nLOADSAVE: Error reading patches config variable! Using default.\n");
-        _patches = _emgpath;
-    }
+    _patches = settings.system.master_patches_path.c_str();
 
     if (mode == LOAD_SAVE_MODE_QUICK && _quick_done) {
         int quickSaveWindowX = (screenGetWidth() - LS_WINDOW_WIDTH) / 2;
@@ -777,11 +876,12 @@ int lsgLoadGame(int mode)
             LS_WINDOW_WIDTH,
             LS_WINDOW_HEIGHT,
             256,
-            WINDOW_FLAG_0x10 | WINDOW_FLAG_0x02);
+            WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
         if (window != -1) {
             unsigned char* windowBuffer = windowGetBuffer(window);
             bufferFill(windowBuffer, LS_WINDOW_WIDTH, LS_WINDOW_HEIGHT, LS_WINDOW_WIDTH, _colorTable[0]);
             windowRefresh(window);
+            renderPresent();
         }
 
         if (lsgLoadGameInSlot(_slot_cursor) != -1) {
@@ -797,7 +897,7 @@ int lsgLoadGame(int mode)
         }
 
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "%s\\%s", asc_5186C8, "LSGAME.MSG");
+        snprintf(path, sizeof(path), "%s\\%s", asc_5186C8, "LSGAME.MSG");
         if (!messageListLoad(&gLoadSaveMessageList, path)) {
             return -1;
         }
@@ -808,363 +908,353 @@ int lsgLoadGame(int mode)
 
         gameMouseSetCursor(MOUSE_CURSOR_ARROW);
         soundPlayFile("iisxxxx1");
-
-        messageListItemText = getmsg(&gLoadSaveMessageList, &messageListItem, 134);
-        strcpy(_str0, messageListItemText);
-
-        messageListItemText = getmsg(&gLoadSaveMessageList, &messageListItem, 135);
-        strcpy(_str1, messageListItemText);
-
+        strcpy(_str0, getmsg(&gLoadSaveMessageList, &messageListItem, 134));
+        strcpy(_str1, getmsg(&gLoadSaveMessageList, &messageListItem, 135));
         showDialogBox(_str0, body, 1, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
 
         messageListFree(&gLoadSaveMessageList);
-
         mapNewMap();
-
         _game_user_wants_to_quit = 2;
 
         return -1;
-    } else {
-        _quick_done = false;
+    }
 
-        int windowType;
-        switch (mode) {
-        case LOAD_SAVE_MODE_FROM_MAIN_MENU:
-            windowType = LOAD_SAVE_WINDOW_TYPE_LOAD_GAME_FROM_MAIN_MENU;
-            break;
-        case LOAD_SAVE_MODE_NORMAL:
-            windowType = LOAD_SAVE_WINDOW_TYPE_LOAD_GAME;
-            break;
-        case LOAD_SAVE_MODE_QUICK:
-            windowType = LOAD_SAVE_WINDOW_TYPE_PICK_QUICK_LOAD_SLOT;
-            break;
-        default:
-            assert(false && "Should be unreachable");
-        }
+    _quick_done = false;
 
-        if (lsgWindowInit(windowType) == -1) {
-            debugPrint("\nLOADSAVE: ** Error loading save game screen data! **\n");
-            return -1;
-        }
+    int windowType;
+    switch (mode) {
+    case LOAD_SAVE_MODE_FROM_MAIN_MENU:
+        windowType = LOAD_SAVE_WINDOW_TYPE_LOAD_GAME_FROM_MAIN_MENU;
+        break;
+    case LOAD_SAVE_MODE_NORMAL:
+        windowType = LOAD_SAVE_WINDOW_TYPE_LOAD_GAME;
+        break;
+    case LOAD_SAVE_MODE_QUICK:
+        windowType = LOAD_SAVE_WINDOW_TYPE_PICK_QUICK_LOAD_SLOT;
+        break;
+    default:
+        assert(false && "Should be unreachable");
+    }
 
-        if (_GetSlotList() == -1) {
-            gameMouseSetCursor(MOUSE_CURSOR_ARROW);
-            windowRefresh(gLoadSaveWindow);
-            soundPlayFile("iisxxxx1");
+    if (lsgWindowInit(windowType) == -1) {
+        debugPrint("\nLOADSAVE: ** Error loading save game screen data! **\n");
+        return -1;
+    }
 
-            const char* text1 = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 106);
-            strcpy(_str0, text1);
-
-            const char* text2 = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 107);
-            strcpy(_str1, text1);
-
-            sprintf(_str2, "\"%s\\\"", "SAVEGAME");
-
-            showDialogBox(_str0, body, 2, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
-
-            return -1;
-        }
-
-        int v36 = _LSstatus[_slot_cursor];
-        if (v36 != 0 && v36 != 2 && v36 != 3) {
-            _LoadTumbSlot(_slot_cursor);
-            blitBufferToBuffer(_thumbnail_image, 223, 132, LS_PREVIEW_WIDTH, gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366, LS_WINDOW_WIDTH);
-        } else {
-            blitBufferToBuffer(gLoadSaveFrmData[LOAD_SAVE_FRM_PREVIEW_COVER],
-                gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].width,
-                gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].height,
-                gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].width,
-                gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                LS_WINDOW_WIDTH);
-        }
-
-        _ShowSlotList(2);
-        _DrawInfoBox(_slot_cursor);
+    if (_GetSlotList() == -1) {
+        gameMouseSetCursor(MOUSE_CURSOR_ARROW);
         windowRefresh(gLoadSaveWindow);
-        _dbleclkcntr = 24;
+        renderPresent();
+        soundPlayFile("iisxxxx1");
+        strcpy(_str0, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 106));
+        strcpy(_str1, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 107));
+        snprintf(_str2, sizeof(_str2), "\"%s\\\"", "SAVEGAME");
+        showDialogBox(_str0, body, 2, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
+        lsgWindowFree(windowType);
+        return -1;
+    }
 
-        int rc = -1;
-        while (rc == -1) {
-            while (rc == -1) {
-                int v37 = _get_time();
-                int keyCode = _get_input();
-                int v39 = 0;
-                int v107 = 0;
-                int v108 = -1;
+    switch (_LSstatus[_slot_cursor]) {
+    case SLOT_STATE_EMPTY:
+    case SLOT_STATE_ERROR:
+    case SLOT_STATE_UNSUPPORTED_VERSION:
+        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getData(),
+            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
+            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
+            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
+            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
+            LS_WINDOW_WIDTH);
+        break;
+    default:
+        _LoadTumbSlot(_slot_cursor);
+        blitBufferToBuffer(_thumbnail_image,
+            LS_PREVIEW_WIDTH - 1,
+            LS_PREVIEW_HEIGHT - 1,
+            LS_PREVIEW_WIDTH,
+            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+            LS_WINDOW_WIDTH);
+        break;
+    }
 
-                convertMouseWheelToArrowKey(&keyCode);
+    _ShowSlotList(2);
+    _DrawInfoBox(_slot_cursor);
+    windowRefresh(gLoadSaveWindow);
+    renderPresent();
+    _dbleclkcntr = 24;
 
-                if (keyCode == KEY_ESCAPE || keyCode == 501 || _game_user_wants_to_quit != 0) {
+    int rc = -1;
+    int doubleClickSlot = -1;
+    while (rc == -1) {
+        sharedFpsLimiter.mark();
+
+        unsigned int time = getTicks();
+        int keyCode = inputGetInput();
+        bool selectionChanged = false;
+        int scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_NONE;
+
+        convertMouseWheelToArrowKey(&keyCode);
+
+        if (keyCode == KEY_ESCAPE || keyCode == 501 || _game_user_wants_to_quit != 0) {
+            rc = 0;
+        } else {
+            switch (keyCode) {
+            case KEY_ARROW_UP:
+                _slot_cursor--;
+                if (_slot_cursor < 0) {
+                    _slot_cursor = 0;
+                }
+                selectionChanged = true;
+                doubleClickSlot = -1;
+                break;
+            case KEY_ARROW_DOWN:
+                _slot_cursor++;
+                if (_slot_cursor > 9) {
+                    _slot_cursor = 9;
+                }
+                selectionChanged = true;
+                doubleClickSlot = -1;
+                break;
+            case KEY_HOME:
+                _slot_cursor = 0;
+                selectionChanged = true;
+                doubleClickSlot = -1;
+                break;
+            case KEY_END:
+                _slot_cursor = 9;
+                selectionChanged = true;
+                doubleClickSlot = -1;
+                break;
+            case 506:
+                scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_UP;
+                break;
+            case 504:
+                scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_DOWN;
+                break;
+            case 502:
+                if (1) {
+                    int mouseX;
+                    int mouseY;
+                    mouseGetPositionInWindow(gLoadSaveWindow, &mouseX, &mouseY);
+
+                    int clickedSlot = (mouseY - 79) / (3 * fontGetLineHeight() + 4);
+                    if (clickedSlot < 0) {
+                        clickedSlot = 0;
+                    } else if (clickedSlot > 9) {
+                        clickedSlot = 9;
+                    }
+
+                    _slot_cursor = clickedSlot;
+                    if (clickedSlot == doubleClickSlot) {
+                        keyCode = 500;
+                        soundPlayFile("ib1p1xx1");
+                    }
+
+                    selectionChanged = true;
+                    scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_NONE;
+                    doubleClickSlot = _slot_cursor;
+                }
+                break;
+            case KEY_MINUS:
+            case KEY_UNDERSCORE:
+                brightnessDecrease();
+                break;
+            case KEY_EQUAL:
+            case KEY_PLUS:
+                brightnessIncrease();
+                break;
+            case KEY_RETURN:
+                keyCode = 500;
+                break;
+            case KEY_CTRL_Q:
+            case KEY_CTRL_X:
+            case KEY_F10:
+                showQuitConfirmationDialog();
+                if (_game_user_wants_to_quit != 0) {
                     rc = 0;
-                } else {
-                    switch (keyCode) {
-                    case KEY_ARROW_UP:
-                        if (--_slot_cursor < 0) {
+                }
+                break;
+            }
+        }
+
+        if (keyCode == 500) {
+            if (_LSstatus[_slot_cursor] != SLOT_STATE_EMPTY) {
+                rc = 1;
+            } else {
+                rc = -1;
+            }
+
+            selectionChanged = true;
+            scrollDirection = LOAD_SAVE_SCROLL_DIRECTION_NONE;
+        }
+
+        if (scrollDirection != LOAD_SAVE_SCROLL_DIRECTION_NONE) {
+            unsigned int scrollVelocity = 4;
+            bool isScrolling = false;
+            int scrollCounter = 0;
+            do {
+                sharedFpsLimiter.mark();
+
+                unsigned int start = getTicks();
+                scrollCounter += 1;
+
+                if ((!isScrolling && scrollCounter == 1) || (isScrolling && scrollCounter > 14.4)) {
+                    isScrolling = true;
+
+                    if (scrollCounter > 14.4) {
+                        scrollVelocity += 1;
+                        if (scrollVelocity > 24) {
+                            scrollVelocity = 24;
+                        }
+                    }
+
+                    if (scrollDirection == LOAD_SAVE_SCROLL_DIRECTION_UP) {
+                        _slot_cursor -= 1;
+                        if (_slot_cursor < 0) {
                             _slot_cursor = 0;
                         }
-                        v39 = 1;
-                        v108 = -1;
-                        break;
-                    case KEY_ARROW_DOWN:
-                        if (++_slot_cursor > 9) {
+                    } else {
+                        _slot_cursor += 1;
+                        if (_slot_cursor > 9) {
                             _slot_cursor = 9;
                         }
-                        v39 = 1;
-                        v108 = -1;
-                        break;
-                    case KEY_HOME:
-                        _slot_cursor = 0;
-                        v108 = -1;
-                        v39 = 1;
-                        break;
-                    case KEY_END:
-                        v39 = 1;
-                        v108 = -1;
-                        _slot_cursor = 9;
-                        break;
-                    case 506:
-                        v107 = 1;
-                        break;
-                    case 504:
-                        v107 = 2;
-                        break;
-                    case 502:
-                        do {
-                            int mouseX;
-                            int mouseY;
-                            mouseGetPositionInWindow(gLoadSaveWindow, &mouseX, &mouseY);
-                            int v41 = (mouseY - 79) / (3 * fontGetLineHeight() + 4);
-                            if (v41 < 0) {
-                                v41 = 0;
-                            } else if (v41 > 9) {
-                                v41 = 9;
-                            }
-
-                            _slot_cursor = v41;
-                            if (v41 == v108) {
-                                soundPlayFile("ib1p1xx1");
-                            }
-
-                            v39 = 1;
-                            v107 = 0;
-                            v108 = _slot_cursor;
-                        } while (0);
-                        break;
-                    case KEY_MINUS:
-                    case KEY_UNDERSCORE:
-                        brightnessDecrease();
-                        break;
-                    case KEY_EQUAL:
-                    case KEY_PLUS:
-                        brightnessIncrease();
-                        break;
-                    case KEY_RETURN:
-                        keyCode = 500;
-                        break;
-                    case KEY_CTRL_Q:
-                    case KEY_CTRL_X:
-                    case KEY_F10:
-                        showQuitConfirmationDialog();
-                        if (_game_user_wants_to_quit != 0) {
-                            rc = 0;
-                        }
-                        break;
-                    }
-                }
-
-                if (keyCode == 500) {
-                    if (_LSstatus[_slot_cursor]) {
-                        rc = 1;
-                    } else {
-                        rc = -1;
                     }
 
-                    v39 = 1;
-                    v107 = 0;
-                }
-
-                if (v107) {
-                    unsigned int v42 = 4;
-                    int v106 = 0;
-                    int v109 = 0;
-                    do {
-                        int v45 = _get_time();
-                        int v44 = v109 + 1;
-
-                        if ((v106 == 0 && v44 == 1) || (v106 == 1 && v109 > 14.4)) {
-                            v106 = 1;
-
-                            if (v109 > 14.4) {
-                                v42 += 1;
-                                if (v42 > 24) {
-                                    v42 = 24;
-                                }
-                            }
-
-                            if (v107 == 1) {
-                                _slot_cursor -= 1;
-                                if (_slot_cursor < 0) {
-                                    _slot_cursor = 0;
-                                }
-                            } else {
-                                _slot_cursor += 1;
-                                if (_slot_cursor > 9) {
-                                    _slot_cursor = 9;
-                                }
-                            }
-
-                            int v46 = _LSstatus[_slot_cursor];
-                            if (v46 != 0 && v46 != 2 && v46 != 3) {
-                                _LoadTumbSlot(_slot_cursor);
-
-                                blitBufferToBuffer(gLoadSaveFrmData[LOAD_SAVE_FRM_BACKGROUND] + LS_WINDOW_WIDTH * 39 + 340,
-                                    gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].width,
-                                    gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].height,
-                                    LS_WINDOW_WIDTH,
-                                    gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                                    LS_WINDOW_WIDTH);
-
-                                blitBufferToBuffer(_thumbnail_image,
-                                    223,
-                                    132,
-                                    LS_PREVIEW_WIDTH,
-                                    gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
-                                    LS_WINDOW_WIDTH);
-                            } else {
-                                blitBufferToBuffer(gLoadSaveFrmData[LOAD_SAVE_FRM_PREVIEW_COVER],
-                                    gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].width,
-                                    gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].height,
-                                    gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].width,
-                                    gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                                    LS_WINDOW_WIDTH);
-                            }
-
-                            _ShowSlotList(2);
-                            _DrawInfoBox(_slot_cursor);
-                            windowRefresh(gLoadSaveWindow);
-                        }
-
-                        if (v109 > 14.4) {
-                            while (getTicksSince(v45) < 1000 / v42) { }
-                        } else {
-                            while (getTicksSince(v45) < 1000 / 24) { }
-                        }
-
-                        keyCode = _get_input();
-                    } while (keyCode != 505 && keyCode != 503);
-                } else {
-                    if (v39 != 0) {
-                        int v48 = _LSstatus[_slot_cursor];
-                        if (v48 != 0 && v48 != 2 && v48 != 3) {
-                            _LoadTumbSlot(_slot_cursor);
-
-                            blitBufferToBuffer(gLoadSaveFrmData[LOAD_SAVE_FRM_BACKGROUND] + LS_WINDOW_WIDTH * 39 + 340,
-                                gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].width,
-                                gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].height,
-                                LS_WINDOW_WIDTH,
-                                gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                                LS_WINDOW_WIDTH);
-
-                            blitBufferToBuffer(_thumbnail_image,
-                                223,
-                                132,
-                                LS_PREVIEW_WIDTH,
-                                gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
-                                LS_WINDOW_WIDTH);
-                        } else {
-                            blitBufferToBuffer(gLoadSaveFrmData[LOAD_SAVE_FRM_PREVIEW_COVER],
-                                gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].width,
-                                gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].height,
-                                gLoadSaveFrmSizes[LOAD_SAVE_FRM_PREVIEW_COVER].width,
-                                gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                                LS_WINDOW_WIDTH);
-                        }
-                        _DrawInfoBox(_slot_cursor);
-                        _ShowSlotList(2);
+                    switch (_LSstatus[_slot_cursor]) {
+                    case SLOT_STATE_EMPTY:
+                    case SLOT_STATE_ERROR:
+                    case SLOT_STATE_UNSUPPORTED_VERSION:
+                        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getData(),
+                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
+                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
+                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
+                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
+                            LS_WINDOW_WIDTH);
+                        break;
+                    default:
+                        _LoadTumbSlot(_slot_cursor);
+                        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData() + LS_WINDOW_WIDTH * 39 + 340,
+                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
+                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
+                            LS_WINDOW_WIDTH,
+                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
+                            LS_WINDOW_WIDTH);
+                        blitBufferToBuffer(_thumbnail_image,
+                            LS_PREVIEW_WIDTH - 1,
+                            LS_PREVIEW_HEIGHT - 1,
+                            LS_PREVIEW_WIDTH,
+                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+                            LS_WINDOW_WIDTH);
+                        break;
                     }
 
+                    _ShowSlotList(2);
+                    _DrawInfoBox(_slot_cursor);
                     windowRefresh(gLoadSaveWindow);
-
-                    _dbleclkcntr -= 1;
-                    if (_dbleclkcntr == 0) {
-                        _dbleclkcntr = 24;
-                        v108 = -1;
-                    }
-
-                    while (getTicksSince(v37) < 1000 / 24) { }
                 }
-            }
 
-            if (rc == 1) {
-                int v50 = _LSstatus[_slot_cursor];
-                if (v50 == 3) {
-                    const char* text;
-
-                    soundPlayFile("iisxxxx1");
-
-                    text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 134);
-                    strcpy(_str0, text);
-
-                    text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 136);
-                    strcpy(_str1, text);
-
-                    text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 135);
-                    strcpy(_str2, text);
-
-                    showDialogBox(_str0, body, 2, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
-
-                    rc = -1;
-                } else if (v50 == 2) {
-                    const char* text;
-
-                    soundPlayFile("iisxxxx1");
-
-                    text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 134);
-                    strcpy(_str0, text);
-
-                    text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 136);
-                    strcpy(_str1, text);
-
-                    showDialogBox(_str0, body, 1, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
-
-                    rc = -1;
+                if (scrollCounter > 14.4) {
+                    while (getTicksSince(start) < 1000 / scrollVelocity) { }
                 } else {
-                    if (lsgLoadGameInSlot(_slot_cursor) == -1) {
-                        const char* text;
-
-                        gameMouseSetCursor(MOUSE_CURSOR_ARROW);
-                        soundPlayFile("iisxxxx1");
-
-                        text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 134);
-                        strcpy(_str0, text);
-
-                        text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 135);
-                        strcpy(_str1, text);
-
-                        showDialogBox(_str0, body, 1, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
-
-                        mapNewMap();
-
-                        _game_user_wants_to_quit = 2;
-
-                        rc = -1;
-                    }
+                    while (getTicksSince(start) < 1000 / 24) { }
                 }
+
+                keyCode = inputGetInput();
+
+                renderPresent();
+                sharedFpsLimiter.throttle();
+            } while (keyCode != 505 && keyCode != 503);
+        } else {
+            if (selectionChanged) {
+                switch (_LSstatus[_slot_cursor]) {
+                case SLOT_STATE_EMPTY:
+                case SLOT_STATE_ERROR:
+                case SLOT_STATE_UNSUPPORTED_VERSION:
+                    blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getData(),
+                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
+                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
+                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
+                        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
+                        LS_WINDOW_WIDTH);
+                    break;
+                default:
+                    _LoadTumbSlot(_slot_cursor);
+                    blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData() + LS_WINDOW_WIDTH * 39 + 340,
+                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
+                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
+                        LS_WINDOW_WIDTH,
+                        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
+                        LS_WINDOW_WIDTH);
+                    blitBufferToBuffer(_thumbnail_image,
+                        LS_PREVIEW_WIDTH - 1,
+                        LS_PREVIEW_HEIGHT - 1,
+                        LS_PREVIEW_WIDTH,
+                        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 58 + 366,
+                        LS_WINDOW_WIDTH);
+                    break;
+                }
+
+                _DrawInfoBox(_slot_cursor);
+                _ShowSlotList(2);
+            }
+
+            windowRefresh(gLoadSaveWindow);
+
+            _dbleclkcntr -= 1;
+            if (_dbleclkcntr == 0) {
+                _dbleclkcntr = 24;
+                doubleClickSlot = -1;
+            }
+
+            while (getTicksSince(time) < 1000 / 24) { }
+        }
+
+        if (rc == 1) {
+            switch (_LSstatus[_slot_cursor]) {
+            case SLOT_STATE_UNSUPPORTED_VERSION:
+                soundPlayFile("iisxxxx1");
+                strcpy(_str0, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 134));
+                strcpy(_str1, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 136));
+                strcpy(_str2, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 135));
+                showDialogBox(_str0, body, 2, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
+                rc = -1;
+                break;
+            case SLOT_STATE_ERROR:
+                soundPlayFile("iisxxxx1");
+                strcpy(_str0, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 134));
+                strcpy(_str1, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 136));
+                showDialogBox(_str0, body, 1, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
+                rc = -1;
+                break;
+            default:
+                if (lsgLoadGameInSlot(_slot_cursor) == -1) {
+                    gameMouseSetCursor(MOUSE_CURSOR_ARROW);
+                    soundPlayFile("iisxxxx1");
+                    strcpy(_str0, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 134));
+                    strcpy(_str1, getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 135));
+                    showDialogBox(_str0, body, 1, 169, 116, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
+                    mapNewMap();
+                    _game_user_wants_to_quit = 2;
+                    rc = -1;
+                }
+                break;
             }
         }
 
-        lsgWindowFree(mode == LOAD_SAVE_MODE_FROM_MAIN_MENU
-                ? LOAD_SAVE_WINDOW_TYPE_LOAD_GAME_FROM_MAIN_MENU
-                : LOAD_SAVE_WINDOW_TYPE_LOAD_GAME);
-
-        if (mode == LOAD_SAVE_MODE_QUICK) {
-            if (rc == 1) {
-                _quick_done = true;
-            }
-        }
-
-        return rc;
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
+
+    lsgWindowFree(mode == LOAD_SAVE_MODE_FROM_MAIN_MENU
+            ? LOAD_SAVE_WINDOW_TYPE_LOAD_GAME_FROM_MAIN_MENU
+            : LOAD_SAVE_WINDOW_TYPE_LOAD_GAME);
+
+    if (mode == LOAD_SAVE_MODE_QUICK) {
+        if (rc == 1) {
+            _quick_done = true;
+        }
+    }
+
+    return rc;
 }
 
 // 0x47D2E4
@@ -1178,7 +1268,7 @@ static int lsgWindowInit(int windowType)
         return -1;
     }
 
-    sprintf(_str, "%s%s", asc_5186C8, LSGAME_MSG_NAME);
+    snprintf(_str, sizeof(_str), "%s%s", asc_5186C8, LSGAME_MSG_NAME);
     if (!messageListLoad(&gLoadSaveMessageList, _str)) {
         return -1;
     }
@@ -1232,14 +1322,9 @@ static int lsgWindowInit(int windowType)
 
     for (int index = 0; index < LOAD_SAVE_FRM_COUNT; index++) {
         int fid = buildFid(OBJ_TYPE_INTERFACE, gLoadSaveFrmIds[index], 0, 0, 0);
-        gLoadSaveFrmData[index] = artLockFrameDataReturningSize(fid,
-            &(gLoadSaveFrmHandles[index]),
-            &(gLoadSaveFrmSizes[index].width),
-            &(gLoadSaveFrmSizes[index].height));
-
-        if (gLoadSaveFrmData[index] == NULL) {
+        if (!_loadsaveFrmImages[index].lock(fid)) {
             while (--index >= 0) {
-                artUnlock(gLoadSaveFrmHandles[index]);
+                _loadsaveFrmImages[index].unlock();
             }
             internal_free(_snapshot);
             messageListFree(&gLoadSaveMessageList);
@@ -1264,7 +1349,7 @@ static int lsgWindowInit(int windowType)
         LS_WINDOW_WIDTH,
         LS_WINDOW_HEIGHT,
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+        WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (gLoadSaveWindow == -1) {
         // FIXME: Leaking frms.
         internal_free(_snapshot);
@@ -1283,7 +1368,7 @@ static int lsgWindowInit(int windowType)
     }
 
     gLoadSaveWindowBuffer = windowGetBuffer(gLoadSaveWindow);
-    memcpy(gLoadSaveWindowBuffer, gLoadSaveFrmData[LOAD_SAVE_FRM_BACKGROUND], LS_WINDOW_WIDTH * LS_WINDOW_HEIGHT);
+    memcpy(gLoadSaveWindowBuffer, _loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData(), LS_WINDOW_WIDTH * LS_WINDOW_HEIGHT);
 
     int messageId;
     switch (windowType) {
@@ -1326,14 +1411,14 @@ static int lsgWindowInit(int windowType)
     btn = buttonCreate(gLoadSaveWindow,
         391,
         349,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].height,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getHeight(),
         -1,
         -1,
         -1,
         500,
-        gLoadSaveFrmData[LOAD_SAVE_FRM_RED_BUTTON_NORMAL],
-        gLoadSaveFrmData[LOAD_SAVE_FRM_RED_BUTTON_PRESSED],
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_NORMAL].getData(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
@@ -1343,14 +1428,14 @@ static int lsgWindowInit(int windowType)
     btn = buttonCreate(gLoadSaveWindow,
         495,
         349,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].height,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getHeight(),
         -1,
         -1,
         -1,
         501,
-        gLoadSaveFrmData[LOAD_SAVE_FRM_RED_BUTTON_NORMAL],
-        gLoadSaveFrmData[LOAD_SAVE_FRM_RED_BUTTON_PRESSED],
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_NORMAL].getData(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
@@ -1360,14 +1445,14 @@ static int lsgWindowInit(int windowType)
     btn = buttonCreate(gLoadSaveWindow,
         35,
         58,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_ARROW_UP_PRESSED].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_ARROW_UP_PRESSED].height,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_UP_PRESSED].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_UP_PRESSED].getHeight(),
         -1,
         505,
         506,
         505,
-        gLoadSaveFrmData[LOAD_SAVE_FRM_ARROW_UP_NORMAL],
-        gLoadSaveFrmData[LOAD_SAVE_FRM_ARROW_UP_PRESSED],
+        _loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_UP_NORMAL].getData(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_UP_PRESSED].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
@@ -1376,15 +1461,15 @@ static int lsgWindowInit(int windowType)
 
     btn = buttonCreate(gLoadSaveWindow,
         35,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_ARROW_UP_PRESSED].height + 58,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_ARROW_DOWN_PRESSED].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_ARROW_DOWN_PRESSED].height,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_UP_PRESSED].getHeight() + 58,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_DOWN_PRESSED].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_DOWN_PRESSED].getHeight(),
         -1,
         503,
         504,
         503,
-        gLoadSaveFrmData[LOAD_SAVE_FRM_ARROW_DOWN_NORMAL],
-        gLoadSaveFrmData[LOAD_SAVE_FRM_ARROW_DOWN_PRESSED],
+        _loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_DOWN_NORMAL].getData(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_DOWN_PRESSED].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
@@ -1405,7 +1490,7 @@ static int lsgWindowFree(int windowType)
     messageListFree(&gLoadSaveMessageList);
 
     for (int index = 0; index < LOAD_SAVE_FRM_COUNT; index++) {
-        artUnlock(gLoadSaveFrmHandles[index]);
+        _loadsaveFrmImages[index].unlock();
     }
 
     internal_free(_snapshot);
@@ -1431,10 +1516,10 @@ static int lsgPerformSaveGame()
 
     backgroundSoundPause();
 
-    sprintf(_gmpath, "%s\\%s", _patches, "SAVEGAME");
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s", _patches, "SAVEGAME");
     compat_mkdir(_gmpath);
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
     compat_mkdir(_gmpath);
 
     strcat(_gmpath, "\\" PROTO_DIR_NAME);
@@ -1452,7 +1537,7 @@ static int lsgPerformSaveGame()
         debugPrint("\nLOADSAVE: Warning, can't backup save file!\n");
     }
 
-    sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
     strcat(_gmpath, "SAVE.DAT");
 
     debugPrint("\nLOADSAVE: Save name: %s\n", _gmpath);
@@ -1461,7 +1546,7 @@ static int lsgPerformSaveGame()
     if (_flptr == NULL) {
         debugPrint("\nLOADSAVE: ** Error opening save game for writing! **\n");
         _RestoreSave();
-        sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+        snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
         _MapDirErase(_gmpath, "BAK");
         _partyMemberUnPrepSave();
         backgroundSoundResume();
@@ -1474,7 +1559,7 @@ static int lsgPerformSaveGame()
         debugPrint("LOADSAVE: Save file header size written: %d bytes.\n", fileTell(_flptr) - pos);
         fileClose(_flptr);
         _RestoreSave();
-        sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+        snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
         _MapDirErase(_gmpath, "BAK");
         _partyMemberUnPrepSave();
         backgroundSoundResume();
@@ -1488,7 +1573,7 @@ static int lsgPerformSaveGame()
             debugPrint("\nLOADSAVE: ** Error writing save function #%d data! **\n", index);
             fileClose(_flptr);
             _RestoreSave();
-            sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+            snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
             _MapDirErase(_gmpath, "BAK");
             _partyMemberUnPrepSave();
             backgroundSoundResume();
@@ -1502,7 +1587,7 @@ static int lsgPerformSaveGame()
 
     fileClose(_flptr);
 
-    sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
     _MapDirErase(_gmpath, "BAK");
 
     gLoadSaveMessageListItem.num = 140;
@@ -1534,7 +1619,7 @@ static int lsgLoadGameInSlot(int slot)
         gameMouseSetCursor(MOUSE_CURSOR_WAIT_PLANET);
     }
 
-    sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
     strcat(_gmpath, "SAVE.DAT");
 
     STRUCT_613D30* ptr = &(_LSData[slot]);
@@ -1577,7 +1662,7 @@ static int lsgLoadGameInSlot(int slot)
     debugPrint("LOADSAVE: Total load data read: %ld bytes.\n", fileTell(_flptr));
     fileClose(_flptr);
 
-    sprintf(_str, "%s\\", "MAPS");
+    snprintf(_str, sizeof(_str), "%s\\", "MAPS");
     _MapDirErase(_str, "BAK");
     _proto_dude_update_gender();
 
@@ -1802,7 +1887,7 @@ static int _GetSlotList()
 {
     int index = 0;
     for (; index < 10; index += 1) {
-        sprintf(_str, "%s\\%s%.2d\\%s", "SAVEGAME", "SLOT", index + 1, "SAVE.DAT");
+        snprintf(_str, sizeof(_str), "%s\\%s%.2d\\%s", "SAVEGAME", "SLOT", index + 1, "SAVE.DAT");
 
         int fileSize;
         if (dbGetFileSize(_str, &fileSize) != 0) {
@@ -1843,7 +1928,7 @@ static void _ShowSlotList(int a1)
 
         int color = index == _slot_cursor ? _colorTable[32747] : _colorTable[992];
         const char* text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, a1 != 0 ? 110 : 109);
-        sprintf(_str, "[   %s %.2d:   ]", text, index + 1);
+        snprintf(_str, sizeof(_str), "[   %s %.2d:   ]", text, index + 1);
         fontDrawText(gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * y + 55, _str, LS_WINDOW_WIDTH, LS_WINDOW_WIDTH, color);
 
         y += fontGetLineHeight();
@@ -1854,18 +1939,18 @@ static void _ShowSlotList(int a1)
         case SLOT_STATE_EMPTY:
             // - EMPTY -
             text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 111);
-            sprintf(_str, "       %s", text);
+            snprintf(_str, sizeof(_str), "       %s", text);
             break;
         case SLOT_STATE_ERROR:
             // - CORRUPT SAVE FILE -
             text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 112);
-            sprintf(_str, "%s", text);
+            snprintf(_str, sizeof(_str), "%s", text);
             color = _colorTable[32328];
             break;
         case SLOT_STATE_UNSUPPORTED_VERSION:
             // - OLD VERSION -
             text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 113);
-            sprintf(_str, " %s", text);
+            snprintf(_str, sizeof(_str), " %s", text);
             color = _colorTable[32328];
             break;
         }
@@ -1878,7 +1963,7 @@ static void _ShowSlotList(int a1)
 // 0x47E8E0
 static void _DrawInfoBox(int a1)
 {
-    blitBufferToBuffer(gLoadSaveFrmData[LOAD_SAVE_FRM_BACKGROUND] + LS_WINDOW_WIDTH * 254 + 396, 164, 60, LS_WINDOW_WIDTH, gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 254 + 396, 640);
+    blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData() + LS_WINDOW_WIDTH * 254 + 396, 164, 60, LS_WINDOW_WIDTH, gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 254 + 396, 640);
 
     unsigned char* dest;
     const char* text;
@@ -1896,14 +1981,14 @@ static void _DrawInfoBox(int a1)
             int v21 = 4 * v6 + v5;
 
             text = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 116 + ptr->field_68);
-            sprintf(_str, "%.2d %s %.4d   %.4d", ptr->field_6A, text, ptr->field_6C, v21);
+            snprintf(_str, sizeof(_str), "%.2d %s %.4d   %.4d", ptr->field_6A, text, ptr->field_6C, v21);
 
             int v2 = fontGetLineHeight();
             fontDrawText(gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * (256 + v2) + 397, _str, LS_WINDOW_WIDTH, LS_WINDOW_WIDTH, color);
 
             const char* v22 = mapGetName(ptr->field_76, ptr->field_74);
             const char* v9 = mapGetCityName(ptr->field_76);
-            sprintf(_str, "%s %s", v9, v22);
+            snprintf(_str, sizeof(_str), "%s %s", v9, v22);
 
             int y = v2 + 3 + v2 + 256;
             short beginnings[WORD_WRAP_MAX_COUNT];
@@ -1952,7 +2037,7 @@ static int _LoadTumbSlot(int a1)
 
     v2 = _LSstatus[_slot_cursor];
     if (v2 != 0 && v2 != 2 && v2 != 3) {
-        sprintf(_str, "%s\\%s%.2d\\%s", "SAVEGAME", "SLOT", _slot_cursor + 1, "SAVE.DAT");
+        snprintf(_str, sizeof(_str), "%s\\%s%.2d\\%s", "SAVEGAME", "SLOT", _slot_cursor + 1, "SAVE.DAT");
         debugPrint(" Filename %s\n", _str);
 
         stream = fileOpen(_str, "rb");
@@ -1984,25 +2069,25 @@ static int _GetComment(int a1)
 {
     // Maintain original position in original resolution, otherwise center it.
     int commentWindowX = screenGetWidth() != 640
-        ? (screenGetWidth() - gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width) / 2
+        ? (screenGetWidth() - _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth()) / 2
         : LS_COMMENT_WINDOW_X;
     int commentWindowY = screenGetHeight() != 480
-        ? (screenGetHeight() - gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].height) / 2
+        ? (screenGetHeight() - _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getHeight()) / 2
         : LS_COMMENT_WINDOW_Y;
     int window = windowCreate(commentWindowX,
         commentWindowY,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].height,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getHeight(),
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+        WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (window == -1) {
         return -1;
     }
 
     unsigned char* windowBuffer = windowGetBuffer(window);
     memcpy(windowBuffer,
-        gLoadSaveFrmData[LOAD_SAVE_FRM_BOX],
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].height * gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width);
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getData(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getHeight() * _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth());
 
     fontSetCurrent(103);
 
@@ -2010,18 +2095,18 @@ static int _GetComment(int a1)
 
     // DONE
     msg = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 104);
-    fontDrawText(windowBuffer + gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width * 57 + 56,
+    fontDrawText(windowBuffer + _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth() * 57 + 56,
         msg,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth(),
         _colorTable[18979]);
 
     // CANCEL
     msg = getmsg(&gLoadSaveMessageList, &gLoadSaveMessageListItem, 105);
-    fontDrawText(windowBuffer + gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width * 57 + 181,
+    fontDrawText(windowBuffer + _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth() * 57 + 181,
         msg,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth(),
         _colorTable[18979]);
 
     // DESCRIPTION
@@ -2031,10 +2116,10 @@ static int _GetComment(int a1)
     strcpy(title, msg);
 
     int width = fontGetStringWidth(title);
-    fontDrawText(windowBuffer + gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width * 7 + (gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width - width) / 2,
+    fontDrawText(windowBuffer + _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth() * 7 + (_loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth() - width) / 2,
         title,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_BOX].width,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth(),
         _colorTable[18979]);
 
     fontSetCurrent(101);
@@ -2045,14 +2130,14 @@ static int _GetComment(int a1)
     btn = buttonCreate(window,
         34,
         58,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].height,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getHeight(),
         -1,
         -1,
         -1,
         507,
-        gLoadSaveFrmData[LOAD_SAVE_FRM_RED_BUTTON_NORMAL],
-        gLoadSaveFrmData[LOAD_SAVE_FRM_RED_BUTTON_PRESSED],
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_NORMAL].getData(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (btn == -1) {
@@ -2063,14 +2148,14 @@ static int _GetComment(int a1)
     btn = buttonCreate(window,
         160,
         58,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].width,
-        gLoadSaveFrmSizes[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].height,
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getWidth(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getHeight(),
         -1,
         -1,
         -1,
         508,
-        gLoadSaveFrmData[LOAD_SAVE_FRM_RED_BUTTON_NORMAL],
-        gLoadSaveFrmData[LOAD_SAVE_FRM_RED_BUTTON_PRESSED],
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_NORMAL].getData(),
+        _loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED].getData(),
         NULL,
         BUTTON_FLAG_TRANSPARENT);
     if (btn == -1) {
@@ -2088,7 +2173,8 @@ static int _GetComment(int a1)
 
     int rc;
 
-    if (_get_input_str2(window, 507, 508, description, LOAD_SAVE_DESCRIPTION_LENGTH - 1, 24, 35, _colorTable[992], gLoadSaveFrmData[LOAD_SAVE_FRM_BOX][gLoadSaveFrmSizes[1].width * 35 + 24], 0) == 0) {
+    int backgroundColor = *(_loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getData() + _loadsaveFrmImages[LOAD_SAVE_FRM_BOX].getWidth() * 35 + 24);
+    if (_get_input_str2(window, 507, 508, description, LOAD_SAVE_DESCRIPTION_LENGTH - 1, 24, 35, _colorTable[992], backgroundColor, 0) == 0) {
         strncpy(_LSData[a1].description, description, LOAD_SAVE_DESCRIPTION_LENGTH);
         _LSData[a1].description[LOAD_SAVE_DESCRIPTION_LENGTH - 1] = '\0';
         rc = 1;
@@ -2125,6 +2211,9 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
     fontDrawText(windowBuffer + windowWidth * y + x, text, windowWidth, windowWidth, textColor);
 
     windowRefresh(win);
+    renderPresent();
+
+    beginTextInput();
 
     int blinkCounter = 3;
     bool blink = false;
@@ -2138,9 +2227,11 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
 #endif
 
     while (rc == 1) {
-        int tick = _get_time();
+        sharedFpsLimiter.mark();
 
-        int keyCode = _get_input();
+        int tick = getTicks();
+
+        int keyCode = inputGetInput();
         if ((keyCode & 0x80000000) == 0) {
             v1++;
         }
@@ -2193,7 +2284,12 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
 
         while (getTicksSince(tick) < 1000 / 24) {
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
+
+    endTextInput();
 
     if (rc == 0) {
         text[textLength] = '\0';
@@ -2258,14 +2354,14 @@ static int _GameMap2Slot(File* stream)
         const char* critterItemPath = (pid >> 24) == OBJ_TYPE_CRITTER
             ? PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME
             : PROTO_DIR_NAME "\\" ITEMS_DIR_NAME;
-        sprintf(_str0, "%s\\%s\\%s", _patches, critterItemPath, path);
-        sprintf(_str1, "%s\\%s\\%s%.2d\\%s\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, critterItemPath, path);
+        snprintf(_str0, sizeof(_str0), "%s\\%s\\%s", _patches, critterItemPath, path);
+        snprintf(_str1, sizeof(_str1), "%s\\%s\\%s%.2d\\%s\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, critterItemPath, path);
         if (fileCopyCompressed(_str0, _str1) == -1) {
             return -1;
         }
     }
 
-    sprintf(_str0, "%s\\*.%s", "MAPS", "SAV");
+    snprintf(_str0, sizeof(_str0), "%s\\*.%s", "MAPS", "SAV");
 
     char** fileNameList;
     int fileNameListLength = fileNameListInit(_str0, &fileNameList, 0, 0);
@@ -2283,14 +2379,14 @@ static int _GameMap2Slot(File* stream)
         return -1;
     }
 
-    sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
 
     if (_MapDirErase(_gmpath, "SAV") == -1) {
         fileNameListFree(&fileNameList, 0);
         return -1;
     }
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
     _strmfe(_str0, "AUTOMAP.DB", "SAV");
     strcat(_gmpath, _str0);
     compat_remove(_gmpath);
@@ -2302,8 +2398,8 @@ static int _GameMap2Slot(File* stream)
             return -1;
         }
 
-        sprintf(_str0, "%s\\%s\\%s", _patches, "MAPS", string);
-        sprintf(_str1, "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, string);
+        snprintf(_str0, sizeof(_str0), "%s\\%s\\%s", _patches, "MAPS", string);
+        snprintf(_str1, sizeof(_str1), "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, string);
         if (fileCopyCompressed(_str0, _str1) == -1) {
             fileNameListFree(&fileNameList, 0);
             return -1;
@@ -2313,14 +2409,14 @@ static int _GameMap2Slot(File* stream)
     fileNameListFree(&fileNameList, 0);
 
     _strmfe(_str0, "AUTOMAP.DB", "SAV");
-    sprintf(_str1, "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, _str0);
-    sprintf(_str0, "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
+    snprintf(_str1, sizeof(_str1), "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, _str0);
+    snprintf(_str0, sizeof(_str0), "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
 
     if (fileCopyCompressed(_str0, _str1) == -1) {
         return -1;
     }
 
-    sprintf(_str0, "%s\\%s", "MAPS", "AUTOMAP.DB");
+    snprintf(_str0, sizeof(_str0), "%s\\%s", "MAPS", "AUTOMAP.DB");
     File* inStream = fileOpen(_str0, "rb");
     if (inStream == NULL) {
         return -1;
@@ -2351,94 +2447,90 @@ static int _SlotMap2Game(File* stream)
 {
     debugPrint("LOADSAVE: in SlotMap2Game\n");
 
-    int v2;
-    if (fileReadInt32(stream, &v2) == 1) {
+    int fileNameListLength;
+    if (fileReadInt32(stream, &fileNameListLength) == -1) {
         debugPrint("LOADSAVE: returning 1\n");
         return -1;
     }
 
-    if (v2 == 0) {
+    if (fileNameListLength == 0) {
         debugPrint("LOADSAVE: returning 2\n");
         return -1;
     }
 
-    sprintf(_str0, "%s\\", PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME);
+    snprintf(_str0, sizeof(_str0), "%s\\", PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME);
 
     if (_MapDirErase(_str0, PROTO_FILE_EXT) == -1) {
         debugPrint("LOADSAVE: returning 3\n");
         return -1;
     }
 
-    sprintf(_str0, "%s\\", PROTO_DIR_NAME "\\" ITEMS_DIR_NAME);
+    snprintf(_str0, sizeof(_str0), "%s\\", PROTO_DIR_NAME "\\" ITEMS_DIR_NAME);
     if (_MapDirErase(_str0, PROTO_FILE_EXT) == -1) {
         debugPrint("LOADSAVE: returning 4\n");
         return -1;
     }
 
-    sprintf(_str0, "%s\\", "MAPS");
+    snprintf(_str0, sizeof(_str0), "%s\\", "MAPS");
     if (_MapDirErase(_str0, "SAV") == -1) {
         debugPrint("LOADSAVE: returning 5\n");
         return -1;
     }
 
-    sprintf(_str0, "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
+    snprintf(_str0, sizeof(_str0), "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
     compat_remove(_str0);
 
-    if (gPartyMemberDescriptionsLength > 1) {
-        for (int index = 1; index < gPartyMemberDescriptionsLength; index += 1) {
-            int pid = gPartyMemberPids[index];
-            if (pid != -2) {
-                char protoPath[COMPAT_MAX_PATH];
-                if (_proto_list_str(pid, protoPath) == 0) {
-                    const char* basePath = pid >> 24 == OBJ_TYPE_CRITTER
-                        ? PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME
-                        : PROTO_DIR_NAME "\\" ITEMS_DIR_NAME;
-                    sprintf(_str0, "%s\\%s\\%s", _patches, basePath, protoPath);
-                    sprintf(_str1, "%s\\%s\\%s%.2d\\%s\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, basePath, protoPath);
+    for (int index = 1; index < gPartyMemberDescriptionsLength; index += 1) {
+        int pid = gPartyMemberPids[index];
+        if (pid != -2) {
+            char protoPath[COMPAT_MAX_PATH];
+            if (_proto_list_str(pid, protoPath) == 0) {
+                const char* basePath = PID_TYPE(pid) == OBJ_TYPE_CRITTER
+                    ? PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME
+                    : PROTO_DIR_NAME "\\" ITEMS_DIR_NAME;
+                snprintf(_str0, sizeof(_str0), "%s\\%s\\%s", _patches, basePath, protoPath);
+                snprintf(_str1, sizeof(_str1), "%s\\%s\\%s%.2d\\%s\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, basePath, protoPath);
 
 #ifdef __vita__
-                    if (fileCopyDecompressed(_str1, _str0) == -1) {
+                if (fileCopyDecompressed(_str1, _str0) == -1) {
 #else
-                    if (_gzdecompress_file(_str1, _str0) == -1) {
+                if (_gzdecompress_file(_str1, _str0) == -1) {
 #endif
-                        debugPrint("LOADSAVE: returning 6\n");
-                        return -1;
-                    }
+                    debugPrint("LOADSAVE: returning 6\n");
+                    return -1;
                 }
             }
         }
     }
 
-    if (v2 > 0) {
-        for (int index = 0; index < v2; index += 1) {
-            char v11[64]; // TODO: Size is probably wrong.
-            if (_mygets(v11, stream) == -1) {
-                break;
-            }
+    for (int index = 0; index < fileNameListLength; index += 1) {
+        char fileName[COMPAT_MAX_PATH];
+        if (_mygets(fileName, stream) == -1) {
+            break;
+        }
 
-            sprintf(_str0, "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, v11);
-            sprintf(_str1, "%s\\%s\\%s", _patches, "MAPS", v11);
+        snprintf(_str0, sizeof(_str0), "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, fileName);
+        snprintf(_str1, sizeof(_str1), "%s\\%s\\%s", _patches, "MAPS", fileName);
 
 #ifdef __vita__
-            if (fileCopyDecompressed(_str0, _str1) == -1) {
+        if (fileCopyDecompressed(_str0, _str1) == -1) {
 #else
-            if (_gzdecompress_file(_str0, _str1) == -1) {
+        if (_gzdecompress_file(_str0, _str1) == -1) {
 #endif
-                debugPrint("LOADSAVE: returning 7\n");
-                return -1;
-            }
+            debugPrint("LOADSAVE: returning 7\n");
+            return -1;
         }
     }
 
-    const char* v9 = _strmfe(_str1, "AUTOMAP.DB", "SAV");
-    sprintf(_str0, "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, v9);
-    sprintf(_str1, "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
+    const char* automapFileName = _strmfe(_str1, "AUTOMAP.DB", "SAV");
+    snprintf(_str0, sizeof(_str0), "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, automapFileName);
+    snprintf(_str1, sizeof(_str1), "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
     if (fileCopyDecompressed(_str0, _str1) == -1) {
         debugPrint("LOADSAVE: returning 8\n");
         return -1;
     }
 
-    sprintf(_str1, "%s\\%s", "MAPS", "AUTOMAP.DB");
+    snprintf(_str1, sizeof(_str1), "%s\\%s", "MAPS", "AUTOMAP.DB");
 
     int v12;
     if (fileReadInt32(stream, &v12) == -1) {
@@ -2558,7 +2650,7 @@ out:
 void lsgInit()
 {
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s\\", "MAPS");
+    snprintf(path, sizeof(path), "%s\\", "MAPS");
     _MapDirErase(path, "SAV");
 }
 
@@ -2566,12 +2658,12 @@ void lsgInit()
 static int _MapDirErase(const char* relativePath, const char* extension)
 {
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s*.%s", relativePath, extension);
+    snprintf(path, sizeof(path), "%s*.%s", relativePath, extension);
 
     char** fileList;
     int fileListLength = fileNameListInit(path, &fileList, 0, 0);
     while (--fileListLength >= 0) {
-        sprintf(path, "%s\\%s%s", _patches, relativePath, fileList[fileListLength]);
+        snprintf(path, sizeof(path), "%s\\%s%s", _patches, relativePath, fileList[fileListLength]);
         compat_remove(path);
     }
     fileNameListFree(&fileList, 0);
@@ -2584,7 +2676,7 @@ int _MapDirEraseFile_(const char* a1, const char* a2)
 {
     char path[COMPAT_MAX_PATH];
 
-    sprintf(path, "%s\\%s%s", _patches, a1, a2);
+    snprintf(path, sizeof(path), "%s\\%s%s", _patches, a1, a2);
     if (compat_remove(path) != 0) {
         return -1;
     }
@@ -2597,7 +2689,7 @@ static int _SaveBackup()
 {
     debugPrint("\nLOADSAVE: Backing up save slot files..\n");
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
     strcpy(_str0, _gmpath);
 
     strcat(_str0, "SAVE.DAT");
@@ -2612,8 +2704,8 @@ static int _SaveBackup()
         }
     }
 
-    sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
-    sprintf(_str0, "%s*.%s", _gmpath, "SAV");
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_str0, sizeof(_str0), "%s*.%s", _gmpath, "SAV");
 
     char** fileList;
     int fileListLength = fileNameListInit(_str0, &fileList, 0, 0);
@@ -2623,7 +2715,7 @@ static int _SaveBackup()
 
     _map_backup_count = fileListLength;
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
     for (int index = fileListLength - 1; index >= 0; index--) {
         strcpy(_str0, _gmpath);
         strcat(_str0, fileList[index]);
@@ -2639,13 +2731,13 @@ static int _SaveBackup()
 
     debugPrint("\nLOADSAVE: %d map files backed up.\n", fileListLength);
 
-    sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
 
     char* v1 = _strmfe(_str2, "AUTOMAP.DB", "SAV");
-    sprintf(_str0, "%s\\%s", _gmpath, v1);
+    snprintf(_str0, sizeof(_str0), "%s\\%s", _gmpath, v1);
 
     char* v2 = _strmfe(_str2, "AUTOMAP.DB", "BAK");
-    sprintf(_str1, "%s\\%s", _gmpath, v2);
+    snprintf(_str1, sizeof(_str1), "%s\\%s", _gmpath, v2);
 
     _automap_db_flag = 0;
 
@@ -2670,7 +2762,7 @@ static int _RestoreSave()
 
     _EraseSave();
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
     strcpy(_str0, _gmpath);
     strcat(_str0, "SAVE.DAT");
     _strmfe(_str1, _str0, "BAK");
@@ -2681,8 +2773,8 @@ static int _RestoreSave()
         return -1;
     }
 
-    sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
-    sprintf(_str0, "%s*.%s", _gmpath, "BAK");
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_str0, sizeof(_str0), "%s*.%s", _gmpath, "BAK");
 
     char** fileList;
     int fileListLength = fileNameListInit(_str0, &fileList, 0, 0);
@@ -2696,7 +2788,7 @@ static int _RestoreSave()
         return -1;
     }
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
 
     for (int index = fileListLength - 1; index >= 0; index--) {
         strcpy(_str0, _gmpath);
@@ -2716,7 +2808,7 @@ static int _RestoreSave()
         return 0;
     }
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
     char* v1 = _strmfe(_str2, "AUTOMAP.DB", "BAK");
     strcpy(_str0, _gmpath);
     strcat(_str0, v1);
@@ -2758,13 +2850,13 @@ static int _EraseSave()
 {
     debugPrint("\nLOADSAVE: Erasing save(bad) slot...\n");
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
     strcpy(_str0, _gmpath);
     strcat(_str0, "SAVE.DAT");
     compat_remove(_str0);
 
-    sprintf(_gmpath, "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
-    sprintf(_str0, "%s*.%s", _gmpath, "SAV");
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s%.2d\\", "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_str0, sizeof(_str0), "%s*.%s", _gmpath, "SAV");
 
     char** fileList;
     int fileListLength = fileNameListInit(_str0, &fileList, 0, 0);
@@ -2772,7 +2864,7 @@ static int _EraseSave()
         return -1;
     }
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
     for (int index = fileListLength - 1; index >= 0; index--) {
         strcpy(_str0, _gmpath);
         strcat(_str0, fileList[index]);
@@ -2781,7 +2873,7 @@ static int _EraseSave()
 
     fileNameListFree(&fileList, 0);
 
-    sprintf(_gmpath, "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
+    snprintf(_gmpath, sizeof(_gmpath), "%s\\%s\\%s%.2d\\", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1);
 
     char* v1 = _strmfe(_str1, "AUTOMAP.DB", "SAV");
     strcpy(_str0, _gmpath);
@@ -2791,3 +2883,5 @@ static int _EraseSave()
 
     return 0;
 }
+
+} // namespace fallout

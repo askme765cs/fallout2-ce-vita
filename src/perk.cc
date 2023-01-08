@@ -4,7 +4,6 @@
 
 #include "debug.h"
 #include "game.h"
-#include "game_config.h"
 #include "memory.h"
 #include "message.h"
 #include "object.h"
@@ -12,6 +11,8 @@
 #include "platform_compat.h"
 #include "skill.h"
 #include "stat.h"
+
+namespace fallout {
 
 typedef struct PerkDescription {
     char* name;
@@ -191,7 +192,7 @@ int perksInit()
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "perk.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "perk.msg");
 
     if (!messageListLoad(&gPerksMessageList, path)) {
         return -1;
@@ -211,6 +212,8 @@ int perksInit()
         }
     }
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_PERK, &gPerksMessageList);
+
     return 0;
 }
 
@@ -223,6 +226,7 @@ void perksReset()
 // 0x4966B8
 void perksExit()
 {
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_PERK, nullptr);
     messageListFree(&gPerksMessageList);
 
     if (gPartyMemberPerkRanks != NULL) {
@@ -713,3 +717,5 @@ int perkGetSkillModifier(Object* critter, int skill)
 
     return modifier;
 }
+
+} // namespace fallout

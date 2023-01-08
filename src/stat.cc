@@ -6,7 +6,6 @@
 
 #include "art.h"
 #include "combat.h"
-#include "core.h"
 #include "critter.h"
 #include "display_monitor.h"
 #include "game.h"
@@ -23,8 +22,11 @@
 #include "random.h"
 #include "scripts.h"
 #include "skill.h"
+#include "svga.h"
 #include "tile.h"
 #include "trait.h"
+
+namespace fallout {
 
 // Provides metadata about stats.
 typedef struct StatDescription {
@@ -109,7 +111,7 @@ int statsInit()
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "stat.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "stat.msg");
 
     if (!messageListLoad(&gStatsMessageList, path)) {
         return -1;
@@ -129,6 +131,8 @@ int statsInit()
         gStatValueDescriptions[index] = getmsg(&gStatsMessageList, &messageListItem, 301 + index);
     }
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_STAT, &gStatsMessageList);
+
     return 0;
 }
 
@@ -144,6 +148,7 @@ int statsReset()
 // 0x4AEEE4
 int statsExit()
 {
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_STAT, nullptr);
     messageListFree(&gStatsMessageList);
 
     return 0;
@@ -826,3 +831,5 @@ int pcSetExperience(int xp)
 
     return 0;
 }
+
+} // namespace fallout

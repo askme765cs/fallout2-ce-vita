@@ -5,6 +5,8 @@
 
 #include "platform_compat.h"
 
+namespace fallout {
+
 #define SFALL_CONFIG_FILE_NAME "ddraw.ini"
 
 bool gSfallConfigInitialized = false;
@@ -47,13 +49,14 @@ bool sfallConfigInit(int argc, char** argv)
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_BURST_MOD_CENTER_DIVISOR_KEY, SFALL_CONFIG_BURST_MOD_DEFAULT_CENTER_DIVISOR);
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_BURST_MOD_TARGET_MULTIPLIER_KEY, SFALL_CONFIG_BURST_MOD_DEFAULT_TARGET_MULTIPLIER);
     configSetInt(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_BURST_MOD_TARGET_DIVISOR_KEY, SFALL_CONFIG_BURST_MOD_DEFAULT_TARGET_DIVISOR);
+    configSetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_EXTRA_MESSAGE_LISTS_KEY, "");
 
     char path[COMPAT_MAX_PATH];
     char* executable = argv[0];
     char* ch = strrchr(executable, '\\');
     if (ch != NULL) {
         *ch = '\0';
-        sprintf(path, "%s\\%s", executable, SFALL_CONFIG_FILE_NAME);
+        snprintf(path, sizeof(path), "%s\\%s", executable, SFALL_CONFIG_FILE_NAME);
         *ch = '\\';
     } else {
         strcpy(path, SFALL_CONFIG_FILE_NAME);
@@ -75,3 +78,5 @@ void sfallConfigExit()
         gSfallConfigInitialized = false;
     }
 }
+
+} // namespace fallout

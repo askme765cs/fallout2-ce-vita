@@ -1,6 +1,8 @@
 #ifndef OBJ_TYPES_H
 #define OBJ_TYPES_H
 
+namespace fallout {
+
 // Rotation
 typedef enum Rotation {
     ROTATION_NE, // 0
@@ -71,18 +73,20 @@ typedef enum ObjectFlags {
 } ObjectFlags;
 
 typedef enum CritterFlags {
-    CRITTER_FLAG_0x2 = 0x2,
-    CRITTER_FLAG_0x20 = 0x20,
-    CRITTER_FLAG_0x40 = 0x40,
-    CRITTER_FLAG_0x80 = 0x80,
-    CRITTER_FLAG_0x100 = 0x100,
-    CRITTER_FLAG_0x200 = 0x200,
-    CRITTER_FLAG_0x400 = 0x400,
-    CRITTER_FLAG_0x800 = 0x800,
-    CRITTER_FLAG_0x1000 = 0x1000,
-    CRITTER_FLAG_0x2000 = 0x2000,
-    CRITTER_FLAG_0x4000 = 0x4000,
+    CRITTER_BARTER = 0x02,
+    CRITTER_NO_STEAL = 0x20,
+    CRITTER_NO_DROP = 0x40,
+    CRITTER_NO_LIMBS = 0x80,
+    CRITTER_NO_AGE = 0x100,
+    CRITTER_NO_HEAL = 0x200,
+    CRITTER_INVULNERABLE = 0x400,
+    CRITTER_FLAT = 0x800,
+    CRITTER_SPECIAL_DEATH = 0x1000,
+    CRITTER_LONG_LIMBS = 0x2000,
+    CRITTER_NO_KNOCKBACK = 0x4000,
 } CritterFlags;
+
+#define CRITTER_RADIATED 0x02
 
 #define OUTLINE_TYPE_MASK 0xFFFFFF
 #define OUTLINE_PALETTED 0x40000000
@@ -298,5 +302,7 @@ static inline int builtTileCreate(int tile, int elevation)
 {
     return tile | ((elevation << BUILT_TILE_ELEVATION_SHIFT) & BUILT_TILE_ELEVATION_MASK);
 }
+
+} // namespace fallout
 
 #endif /* OBJ_TYPES_H */

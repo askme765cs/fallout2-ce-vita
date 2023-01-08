@@ -8,22 +8,26 @@
 #include "art.h"
 #include "color.h"
 #include "config.h"
-#include "core.h"
 #include "dbox.h"
 #include "debug.h"
 #include "draw.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "graph_lib.h"
+#include "input.h"
 #include "item.h"
+#include "kb.h"
 #include "map.h"
 #include "memory.h"
 #include "object.h"
 #include "platform_compat.h"
+#include "settings.h"
+#include "svga.h"
 #include "text_font.h"
 #include "window_manager.h"
+
+namespace fallout {
 
 #define AUTOMAP_OFFSET_COUNT (AUTOMAP_MAP_COUNT * ELEVATION_COUNT)
 
@@ -267,12 +271,9 @@ int automapReset()
 // 0x41B81C
 void automapExit()
 {
-    char* masterPatchesPath;
-    if (configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &masterPatchesPath)) {
-        char path[COMPAT_MAX_PATH];
-        sprintf(path, "%s\\%s\\%s", masterPatchesPath, "MAPS", AUTOMAP_DB);
-        compat_remove(path);
-    }
+    char path[COMPAT_MAX_PATH];
+    snprintf(path, sizeof(path), "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", AUTOMAP_DB);
+    compat_remove(path);
 }
 
 // 0x41B87C
@@ -296,18 +297,15 @@ int _automapDisplayMap(int map)
 // 0x41B8BC
 void automapShow(bool isInGame, bool isUsingScanner)
 {
+    ScopedGameMode gm(GameMode::kAutomap);
+
     int frmIds[AUTOMAP_FRM_COUNT];
     memcpy(frmIds, gAutomapFrmIds, sizeof(gAutomapFrmIds));
 
-    unsigned char* frmData[AUTOMAP_FRM_COUNT];
-    CacheEntry* frmHandle[AUTOMAP_FRM_COUNT];
+    FrmImage frmImages[AUTOMAP_FRM_COUNT];
     for (int index = 0; index < AUTOMAP_FRM_COUNT; index++) {
         int fid = buildFid(OBJ_TYPE_INTERFACE, frmIds[index], 0, 0, 0);
-        frmData[index] = artLockFrameData(fid, 0, 0, &(frmHandle[index]));
-        if (frmData[index] == NULL) {
-            while (--index >= 0) {
-                artUnlock(frmHandle[index]);
-            }
+        if (!frmImages[index].lock(fid)) {
             return;
         }
     }
@@ -325,19 +323,55 @@ void automapShow(bool isInGame, bool isUsingScanner)
 
     int automapWindowX = (screenGetWidth() - AUTOMAP_WINDOW_WIDTH) / 2;
     int automapWindowY = (screenGetHeight() - AUTOMAP_WINDOW_HEIGHT) / 2;
-    int window = windowCreate(automapWindowX, automapWindowY, AUTOMAP_WINDOW_WIDTH, AUTOMAP_WINDOW_HEIGHT, color, WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+    int window = windowCreate(automapWindowX, automapWindowY, AUTOMAP_WINDOW_WIDTH, AUTOMAP_WINDOW_HEIGHT, color, WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
 
-    int scannerBtn = buttonCreate(window, 111, 454, 15, 16, -1, -1, -1, KEY_LOWERCASE_S, frmData[AUTOMAP_FRM_BUTTON_UP], frmData[AUTOMAP_FRM_BUTTON_DOWN], NULL, BUTTON_FLAG_TRANSPARENT);
+    int scannerBtn = buttonCreate(window,
+        111,
+        454,
+        15,
+        16,
+        -1,
+        -1,
+        -1,
+        KEY_LOWERCASE_S,
+        frmImages[AUTOMAP_FRM_BUTTON_UP].getData(),
+        frmImages[AUTOMAP_FRM_BUTTON_DOWN].getData(),
+        NULL,
+        BUTTON_FLAG_TRANSPARENT);
     if (scannerBtn != -1) {
         buttonSetCallbacks(scannerBtn, _gsound_red_butt_press, _gsound_red_butt_release);
     }
 
-    int cancelBtn = buttonCreate(window, 277, 454, 15, 16, -1, -1, -1, KEY_ESCAPE, frmData[AUTOMAP_FRM_BUTTON_UP], frmData[AUTOMAP_FRM_BUTTON_DOWN], NULL, BUTTON_FLAG_TRANSPARENT);
+    int cancelBtn = buttonCreate(window,
+        277,
+        454,
+        15,
+        16,
+        -1,
+        -1,
+        -1,
+        KEY_ESCAPE,
+        frmImages[AUTOMAP_FRM_BUTTON_UP].getData(),
+        frmImages[AUTOMAP_FRM_BUTTON_DOWN].getData(),
+        NULL,
+        BUTTON_FLAG_TRANSPARENT);
     if (cancelBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
     }
 
-    int switchBtn = buttonCreate(window, 457, 340, 42, 74, -1, -1, KEY_LOWERCASE_L, KEY_LOWERCASE_H, frmData[AUTOMAP_FRM_SWITCH_UP], frmData[AUTOMAP_FRM_SWITCH_DOWN], NULL, BUTTON_FLAG_TRANSPARENT | BUTTON_FLAG_0x01);
+    int switchBtn = buttonCreate(window,
+        457,
+        340,
+        42,
+        74,
+        -1,
+        -1,
+        KEY_LOWERCASE_L,
+        KEY_LOWERCASE_H,
+        frmImages[AUTOMAP_FRM_SWITCH_UP].getData(),
+        frmImages[AUTOMAP_FRM_SWITCH_DOWN].getData(),
+        NULL,
+        BUTTON_FLAG_TRANSPARENT | BUTTON_FLAG_0x01);
     if (switchBtn != -1) {
         buttonSetCallbacks(switchBtn, _gsound_toggle_butt_press_, _gsound_toggle_butt_press_);
     }
@@ -358,18 +392,20 @@ void automapShow(bool isInGame, bool isUsingScanner)
         gAutomapFlags |= AUTOMAP_WITH_SCANNER;
     }
 
-    automapRenderInMapWindow(window, elevation, frmData[AUTOMAP_FRM_BACKGROUND], gAutomapFlags);
+    automapRenderInMapWindow(window, elevation, frmImages[AUTOMAP_FRM_BACKGROUND].getData(), gAutomapFlags);
 
     bool isoWasEnabled = isoDisable();
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
 
     bool done = false;
     while (!done) {
+        sharedFpsLimiter.mark();
+
         bool needsRefresh = false;
 
         // FIXME: There is minor bug in the interface - pressing H/L to toggle
         // high/low details does not update switch state.
-        int keyCode = _get_input();
+        int keyCode = inputGetInput();
         switch (keyCode) {
         case KEY_TAB:
         case KEY_ESCAPE:
@@ -442,9 +478,12 @@ void automapShow(bool isInGame, bool isUsingScanner)
         }
 
         if (needsRefresh) {
-            automapRenderInMapWindow(window, elevation, frmData[AUTOMAP_FRM_BACKGROUND], gAutomapFlags);
+            automapRenderInMapWindow(window, elevation, frmImages[AUTOMAP_FRM_BACKGROUND].getData(), gAutomapFlags);
             needsRefresh = false;
         }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
     if (isoWasEnabled) {
@@ -453,10 +492,6 @@ void automapShow(bool isInGame, bool isUsingScanner)
 
     windowDestroy(window);
     fontSetCurrent(oldFont);
-
-    for (int index = 0; index < AUTOMAP_FRM_COUNT; index++) {
-        artUnlock(frmHandle[index]);
-    }
 }
 
 // Renders automap in Map window.
@@ -674,7 +709,7 @@ int automapSaveCurrent()
 
     // NOTE: Not sure about the size.
     char path[256];
-    sprintf(path, "%s\\%s", "MAPS", AUTOMAP_DB);
+    snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_DB);
 
     File* stream1 = fileOpen(path, "r+b");
     if (stream1 == NULL) {
@@ -705,7 +740,7 @@ int automapSaveCurrent()
     }
 
     if (entryOffset != 0) {
-        sprintf(path, "%s\\%s", "MAPS", AUTOMAP_TMP);
+        snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_TMP);
 
         File* stream2 = fileOpen(path, "wb");
         if (stream2 == NULL) {
@@ -799,15 +834,9 @@ int automapSaveCurrent()
         internal_free(gAutomapEntry.data);
         internal_free(gAutomapEntry.compressedData);
 
-        char* masterPatchesPath;
-        if (!configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &masterPatchesPath)) {
-            debugPrint("\nAUTOMAP: Error reading config info!\n");
-            return -1;
-        }
-
         // NOTE: Not sure about the size.
         char automapDbPath[512];
-        sprintf(automapDbPath, "%s\\%s\\%s", masterPatchesPath, "MAPS", AUTOMAP_DB);
+        snprintf(automapDbPath, sizeof(automapDbPath), "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", AUTOMAP_DB);
         if (compat_remove(automapDbPath) != 0) {
             debugPrint("\nAUTOMAP: Error removing database!\n");
             return -1;
@@ -815,7 +844,7 @@ int automapSaveCurrent()
 
         // NOTE: Not sure about the size.
         char automapTmpPath[512];
-        sprintf(automapTmpPath, "%s\\%s\\%s", masterPatchesPath, "MAPS", AUTOMAP_TMP);
+        snprintf(automapTmpPath, sizeof(automapTmpPath), "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", AUTOMAP_TMP);
         if (compat_rename(automapTmpPath, automapDbPath) != 0) {
             debugPrint("\nAUTOMAP: Error renaming database!\n");
             return -1;
@@ -902,7 +931,7 @@ static int automapLoadEntry(int map, int elevation)
     gAutomapEntry.compressedData = NULL;
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s\\%s", "MAPS", AUTOMAP_DB);
+    snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_DB);
 
     bool success = true;
 
@@ -1077,7 +1106,7 @@ static int automapCreate()
     memcpy(gAutomapHeader.offsets, _defam, sizeof(_defam));
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s\\%s", "MAPS", AUTOMAP_DB);
+    snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_DB);
 
     File* stream = fileOpen(path, "wb");
     if (stream == NULL) {
@@ -1132,7 +1161,7 @@ static int _copy_file_data(File* stream1, File* stream2, int length)
 int automapGetHeader(AutomapHeader** automapHeaderPtr)
 {
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s\\%s", "MAPS", AUTOMAP_DB);
+    snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_DB);
 
     File* stream = fileOpen(path, "rb");
     if (stream == NULL) {
@@ -1160,3 +1189,5 @@ void automapSetDisplayMap(int map, bool available)
         _displayMapList[map] = available ? 0 : -1;
     }
 }
+
+} // namespace fallout

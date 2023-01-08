@@ -10,7 +10,6 @@
 #include "art.h"
 #include "automap.h"
 #include "combat.h"
-#include "core.h"
 #include "critter.h"
 #include "debug.h"
 #include "dialog.h"
@@ -21,6 +20,7 @@
 #include "game_dialog.h"
 #include "game_mouse.h"
 #include "game_movie.h"
+#include "input.h"
 #include "memory.h"
 #include "message.h"
 #include "object.h"
@@ -30,10 +30,14 @@
 #include "proto_instance.h"
 #include "queue.h"
 #include "stat.h"
+#include "svga.h"
 #include "tile.h"
+#include "window.h"
 #include "window_manager.h"
 #include "window_manager_private.h"
 #include "worldmap.h"
+
+namespace fallout {
 
 #define SCRIPT_LIST_EXTENT_SIZE 16
 
@@ -69,7 +73,7 @@ static int scriptsClearPendingRequests();
 static int scriptLocateProcs(Script* scr);
 static int scriptsLoadScriptsList();
 static int scriptsFreeScriptsList();
-static int scriptsGetFileName(int scriptIndex, char* name);
+static int scriptsGetFileName(int scriptIndex, char* name, size_t size);
 static int _scr_header_load();
 static int scriptWrite(Script* scr, File* stream);
 static int scriptListExtentWrite(ScriptListExtent* a1, File* stream);
@@ -77,8 +81,6 @@ static int scriptRead(Script* scr, File* stream);
 static int scriptListExtentRead(ScriptListExtent* a1, File* stream);
 static int scriptGetNewId(int scriptType);
 static int scriptsRemoveLocalVars(Script* script);
-static Script* scriptGetFirstSpatialScript(int a1);
-static Script* scriptGetNextSpatialScript();
 static int scriptsGetMessageList(int a1, MessageList** out_message_list);
 
 // 0x50D6B8
@@ -254,11 +256,6 @@ static MessageList _script_dialog_msgs[SCRIPT_DIALOG_MESSAGE_LIST_CAPACITY];
 // 0x667724
 static MessageList gScrMessageList;
 
-// time string (h:ss)
-//
-// 0x66772C
-static char _hour_str[7];
-
 // 0x667748
 static int _lasttime;
 
@@ -332,8 +329,11 @@ int gameTimeGetHour()
 // 0x4A3420
 char* gameTimeGetTimeString()
 {
-    sprintf(_hour_str, "%d:%02d", (gGameTime / 600) / 60 % 24, (gGameTime / 600) % 60);
-    return _hour_str;
+    // 0x66772C
+    static char hour_str[7];
+
+    snprintf(hour_str, sizeof(hour_str), "%d:%02d", (gGameTime / 600) / 60 % 24, (gGameTime / 600) % 60);
+    return hour_str;
 }
 
 // TODO: Make unsigned.
@@ -470,7 +470,7 @@ int _scriptsCheckGameEvents(int* moviePtr, int window)
             gameMoviePlay(movie, movieFlags);
 
             if (window != -1) {
-                windowUnhide(window);
+                windowShow(window);
             }
 
             if (adjustRep) {
@@ -744,7 +744,7 @@ static void _script_chk_timed_events()
         v1 = true;
     }
 
-    if (_game_state() != GAME_STATE_4) {
+    if (gameGetState() != GAME_STATE_4) {
         if (getTicksBetween(v0, _last_light_time) >= 30000) {
             _last_light_time = v0;
             scriptsExecMapUpdateScripts(SCRIPT_PROC_MAP_UPDATE);
@@ -1256,7 +1256,7 @@ int scriptExecProc(int sid, int proc)
         clock();
 
         char name[16];
-        if (scriptsGetFileName(script->field_14 & 0xFFFFFF, name) == -1) {
+        if (scriptsGetFileName(script->field_14 & 0xFFFFFF, name, sizeof(name)) == -1) {
             return -1;
         }
 
@@ -1429,9 +1429,9 @@ int _scr_find_str_run_info(int scriptIndex, int* a2, int sid)
 }
 
 // 0x4A4F68
-static int scriptsGetFileName(int scriptIndex, char* name)
+static int scriptsGetFileName(int scriptIndex, char* name, size_t size)
 {
-    sprintf(name, "%s.int", gScriptsListEntries[scriptIndex].name);
+    snprintf(name, size, "%s.int", gScriptsListEntries[scriptIndex].name);
     return 0;
 }
 
@@ -1520,6 +1520,8 @@ int scriptsInit()
         return -1;
     }
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRIPT, &gScrMessageList);
+
     return 0;
 }
 
@@ -1554,7 +1556,7 @@ int _scr_game_init()
         }
     }
 
-    sprintf(path, "%s%s", asc_5186C8, "script.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "script.msg");
     if (!messageListLoad(&gScrMessageList, path)) {
         debugPrint("\nError loading script message file!");
         return -1;
@@ -1575,6 +1577,8 @@ int _scr_game_init()
     // NOTE: Uninline.
     scriptsClearPendingRequests();
 
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRIPT, &gScrMessageList);
+
     return 0;
 }
 
@@ -1594,6 +1598,8 @@ int scriptsExit()
 {
     gScriptsEnabled = false;
     _script_engine_run_critters = 0;
+
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRIPT, nullptr);
     if (!messageListFree(&gScrMessageList)) {
         debugPrint("\nError exiting script message file!");
         return -1;
@@ -1645,6 +1651,7 @@ int _scr_game_exit()
     _scr_remove_all();
     programListFree();
     tickersRemove(_doBkProcesses);
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_SCRIPT, nullptr);
     messageListFree(&gScrMessageList);
     if (scriptsClearDudeScript() == -1) {
         return -1;
@@ -2351,6 +2358,11 @@ int _scr_remove_all()
                     } else {
                         next = scriptListExtent->next;
                         scriptRemove(script->sid);
+
+                        // CE: Current extent is freed in |scriptRemove|. Break
+                        // to prevent next iteration which needs to dereference
+                        // extent to obtain it's length.
+                        break;
                     }
                 }
             }
@@ -2401,7 +2413,7 @@ int _scr_remove_all_force()
 }
 
 // 0x4A6524
-static Script* scriptGetFirstSpatialScript(int elevation)
+Script* scriptGetFirstSpatialScript(int elevation)
 {
     gScriptsEnumerationElevation = elevation;
     gScriptsEnumerationScriptIndex = 0;
@@ -2420,7 +2432,7 @@ static Script* scriptGetFirstSpatialScript(int elevation)
 }
 
 // 0x4A6564
-static Script* scriptGetNextSpatialScript()
+Script* scriptGetNextSpatialScript()
 {
     ScriptListExtent* scriptListExtent = gScriptsEnumerationScriptListExtent;
     int scriptIndex = gScriptsEnumerationScriptIndex;
@@ -2644,7 +2656,7 @@ static int scriptsGetMessageList(int a1, MessageList** messageListPtr)
     if (messageList->entries_num == 0) {
         char scriptName[20];
         scriptName[0] = '\0';
-        scriptsGetFileName(messageListIndex & 0xFFFFFF, scriptName);
+        scriptsGetFileName(messageListIndex & 0xFFFFFF, scriptName, sizeof(scriptName));
 
         char* pch = strrchr(scriptName, '.');
         if (pch != NULL) {
@@ -2652,7 +2664,7 @@ static int scriptsGetMessageList(int a1, MessageList** messageListPtr)
         }
 
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "dialog\\%s.msg", scriptName);
+        snprintf(path, sizeof(path), "dialog\\%s.msg", scriptName);
 
         if (!messageListLoad(messageList, path)) {
             debugPrint("\nError loading script dialog message file!");
@@ -2738,7 +2750,7 @@ int scriptGetLocalVar(int sid, int variable, ProgramValue& value)
         debugPrint("\nError! System scripts/Map scripts not allowed local_vars! ");
 
         _tempStr1[0] = '\0';
-        scriptsGetFileName(sid & 0xFFFFFF, _tempStr1);
+        scriptsGetFileName(sid & 0xFFFFFF, _tempStr1, sizeof(_tempStr1));
 
         debugPrint(":%s\n", _tempStr1);
 
@@ -2917,3 +2929,5 @@ int _scr_explode_scenery(Object* a1, int tile, int radius, int elevation)
 
     return 0;
 }
+
+} // namespace fallout

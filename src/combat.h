@@ -6,6 +6,8 @@
 #include "obj_types.h"
 #include "proto_types.h"
 
+namespace fallout {
+
 extern int _combatNumTurns;
 extern unsigned int gCombatState;
 
@@ -17,8 +19,8 @@ void combatExit();
 int _find_cid(int a1, int a2, Object** a3, int a4);
 int combatLoad(File* stream);
 int combatSave(File* stream);
-bool _combat_safety_invalidate_weapon(Object* a1, Object* a2, int hitMode, Object* a4, int* a5);
-bool _combatTestIncidentalHit(Object* a1, Object* a2, Object* a3, Object* a4);
+bool _combat_safety_invalidate_weapon(Object* attacker, Object* weapon, int hitMode, Object* defender, int* safeDistancePtr);
+bool _combatTestIncidentalHit(Object* attacker, Object* defender, Object* attackerFriend, Object* weapon);
 Object* _combat_whose_turn();
 void _combat_data_init(Object* obj);
 Object* aiInfoGetFriendlyDead(Object* obj);
@@ -56,6 +58,7 @@ int _combat_explode_scenery(Object* a1, Object* a2);
 void _combat_delete_critter(Object* obj);
 void _combatKillCritterOutsideCombat(Object* critter_obj, char* msg);
 
+int combatGetTargetHighlight();
 int criticalsGetValue(int killType, int hitLocation, int effect, int dataMember);
 void criticalsSetValue(int killType, int hitLocation, int effect, int dataMember, int value);
 void criticalsResetValue(int killType, int hitLocation, int effect, int dataMember);
@@ -80,5 +83,7 @@ static inline bool isUnarmedHitMode(int hitMode)
         || hitMode == HIT_MODE_KICK
         || (hitMode >= FIRST_ADVANCED_UNARMED_HIT_MODE && hitMode <= LAST_ADVANCED_UNARMED_HIT_MODE);
 }
+
+} // namespace fallout
 
 #endif /* COMBAT_H */

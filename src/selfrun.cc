@@ -2,11 +2,17 @@
 
 #include <stdlib.h>
 
-#include "core.h"
 #include "db.h"
 #include "game.h"
-#include "game_config.h"
+#include "input.h"
+#include "kb.h"
+#include "mouse.h"
 #include "platform_compat.h"
+#include "settings.h"
+#include "svga.h"
+#include "vcr.h"
+
+namespace fallout {
 
 // 0x51C8D8
 int gSelfrunState = SELFRUN_STATE_TURNED_OFF;
@@ -59,7 +65,7 @@ int selfrunPreparePlayback(const char* fileName, SelfrunData* selfrunData)
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", "selfrun\\", fileName);
+    snprintf(path, sizeof(path), "%s%s", "selfrun\\", fileName);
 
     if (selfrunReadData(path, selfrunData) != 0) {
         return -1;
@@ -75,7 +81,7 @@ void selfrunPlaybackLoop(SelfrunData* selfrunData)
 {
     if (gSelfrunState == SELFRUN_STATE_PLAYING) {
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "%s%s", "selfrun\\", selfrunData->recordingFileName);
+        snprintf(path, sizeof(path), "%s%s", "selfrun\\", selfrunData->recordingFileName);
 
         if (vcrPlay(path, VCR_TERMINATE_ON_KEY_PRESS | VCR_TERMINATE_ON_MOUSE_PRESS, selfrunPlaybackCompleted)) {
             bool cursorWasHidden = cursorIsHidden();
@@ -84,14 +90,24 @@ void selfrunPlaybackLoop(SelfrunData* selfrunData)
             }
 
             while (gSelfrunState == SELFRUN_STATE_PLAYING) {
-                int keyCode = _get_input();
+                sharedFpsLimiter.mark();
+
+                int keyCode = inputGetInput();
                 if (keyCode != selfrunData->stopKeyCode) {
                     gameHandleKey(keyCode, false);
                 }
+
+                renderPresent();
+                sharedFpsLimiter.throttle();
             }
 
             while (mouseGetEvent() != 0) {
-                _get_input();
+                sharedFpsLimiter.mark();
+
+                inputGetInput();
+
+                renderPresent();
+                sharedFpsLimiter.throttle();
             }
 
             if (cursorWasHidden) {
@@ -120,13 +136,13 @@ int selfrunPrepareRecording(const char* recordingName, const char* mapFileName, 
         return -1;
     }
 
-    sprintf(selfrunData->recordingFileName, "%s%s", recordingName, ".vcr");
+    snprintf(selfrunData->recordingFileName, sizeof(selfrunData->recordingFileName), "%s%s", recordingName, ".vcr");
     strcpy(selfrunData->mapFileName, mapFileName);
 
     selfrunData->stopKeyCode = KEY_CTRL_R;
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s%s", "selfrun\\", recordingName, ".sdf");
+    snprintf(path, sizeof(path), "%s%s%s", "selfrun\\", recordingName, ".sdf");
 
     if (selfrunWriteData(path, selfrunData) != 0) {
         return -1;
@@ -142,7 +158,7 @@ void selfrunRecordingLoop(SelfrunData* selfrunData)
 {
     if (gSelfrunState == SELFRUN_STATE_RECORDING) {
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "%s%s", "selfrun\\", selfrunData->recordingFileName);
+        snprintf(path, sizeof(path), "%s%s", "selfrun\\", selfrunData->recordingFileName);
         if (vcrRecord(path)) {
             if (!cursorIsHidden()) {
                 mouseShowCursor();
@@ -150,7 +166,9 @@ void selfrunRecordingLoop(SelfrunData* selfrunData)
 
             bool done = false;
             while (!done) {
-                int keyCode = _get_input();
+                sharedFpsLimiter.mark();
+
+                int keyCode = inputGetInput();
                 if (keyCode == selfrunData->stopKeyCode) {
                     vcrStop();
                     _game_user_wants_to_quit = 2;
@@ -158,6 +176,9 @@ void selfrunRecordingLoop(SelfrunData* selfrunData)
                 } else {
                     gameHandleKey(keyCode, false);
                 }
+
+                renderPresent();
+                sharedFpsLimiter.throttle();
             }
         }
         gSelfrunState = SELFRUN_STATE_TURNED_OFF;
@@ -210,11 +231,8 @@ int selfrunWriteData(const char* path, SelfrunData* selfrunData)
         return -1;
     }
 
-    char* masterPatches;
-    configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &masterPatches);
-
     char selfrunDirectoryPath[COMPAT_MAX_PATH];
-    sprintf(selfrunDirectoryPath, "%s\\%s", masterPatches, "selfrun\\");
+    snprintf(selfrunDirectoryPath, sizeof(selfrunDirectoryPath), "%s\\%s", settings.system.master_patches_path.c_str(), "selfrun\\");
 
     compat_mkdir(selfrunDirectoryPath);
 
@@ -234,3 +252,5 @@ int selfrunWriteData(const char* path, SelfrunData* selfrunData)
 
     return rc;
 }
+
+} // namespace fallout

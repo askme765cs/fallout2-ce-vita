@@ -5,7 +5,9 @@
 
 #include <algorithm>
 
-#include "core.h"
+#include "svga.h"
+
+namespace fallout {
 
 #define COLOR_PALETTE_STACK_CAPACITY 16
 
@@ -194,6 +196,8 @@ int _Color2RGB_(int a1)
 void colorPaletteFadeBetween(unsigned char* oldPalette, unsigned char* newPalette, int steps)
 {
     for (int step = 0; step < steps; step++) {
+        sharedFpsLimiter.mark();
+
         unsigned char palette[768];
 
         for (int index = 0; index < 768; index++) {
@@ -207,9 +211,14 @@ void colorPaletteFadeBetween(unsigned char* oldPalette, unsigned char* newPalett
         }
 
         _setSystemPalette(palette);
+        renderPresent();
+        sharedFpsLimiter.throttle();
     }
 
+    sharedFpsLimiter.mark();
     _setSystemPalette(newPalette);
+    renderPresent();
+    sharedFpsLimiter.throttle();
 }
 
 // 0x4C73D4
@@ -679,3 +688,5 @@ void _colorsClose()
 
     gColorPaletteStackSize = 0;
 }
+
+} // namespace fallout

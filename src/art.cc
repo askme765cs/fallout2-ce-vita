@@ -8,11 +8,13 @@
 #include "debug.h"
 #include "draw.h"
 #include "game.h"
-#include "game_config.h"
 #include "memory.h"
 #include "object.h"
 #include "proto.h"
+#include "settings.h"
 #include "sfall_config.h"
+
+namespace fallout {
 
 typedef struct ArtListDescription {
     int flags;
@@ -130,18 +132,14 @@ int artInit()
     File* stream;
     char string[200];
 
-    int cacheSize;
-    if (!configGetInt(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_ART_CACHE_SIZE_KEY, &cacheSize)) {
-        cacheSize = 8;
-    }
-
+    int cacheSize = settings.system.art_cache_size;
     if (!cacheInit(&gArtCache, artCacheGetFileSizeImpl, artCacheReadDataImpl, artCacheFreeImpl, cacheSize << 20)) {
         debugPrint("cache_init failed in art_init\n");
         return -1;
     }
 
-    char* language;
-    if (configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_LANGUAGE_KEY, &language) && compat_stricmp(language, ENGLISH) != 0) {
+    const char* language = settings.system.language.c_str();
+    if (compat_stricmp(language, ENGLISH) != 0) {
         strcpy(gArtLanguage, language);
         gArtLanguageInitialized = true;
     }
@@ -149,7 +147,7 @@ int artInit()
     bool critterDbSelected = false;
     for (int objectType = 0; objectType < OBJ_TYPE_COUNT; objectType++) {
         gArtListDescriptions[objectType].flags = 0;
-        sprintf(path, "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[objectType].name, gArtListDescriptions[objectType].name);
+        snprintf(path, sizeof(path), "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[objectType].name, gArtListDescriptions[objectType].name);
 
         int oldDb;
         if (objectType == OBJ_TYPE_CRITTER) {
@@ -193,7 +191,7 @@ int artInit()
         gArtCritterFidShoudRunData[critterIndex] = 0;
     }
 
-    sprintf(path, "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[OBJ_TYPE_CRITTER].name, gArtListDescriptions[OBJ_TYPE_CRITTER].name);
+    snprintf(path, sizeof(path), "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[OBJ_TYPE_CRITTER].name, gArtListDescriptions[OBJ_TYPE_CRITTER].name);
 
     stream = fileOpen(path, "rt");
     if (stream == NULL) {
@@ -229,16 +227,16 @@ int artInit()
 
     char* critterFileNames = gArtListDescriptions[OBJ_TYPE_CRITTER].fileNames;
     for (int critterIndex = 0; critterIndex < gArtListDescriptions[OBJ_TYPE_CRITTER].fileNamesLength; critterIndex++) {
-        if (compat_stricmp(critterFileNames, "hmjmps") == 0) {
+        if (compat_stricmp(critterFileNames, jumpsuitMaleFileName) == 0) {
             _art_vault_person_nums[DUDE_NATIVE_LOOK_JUMPSUIT][GENDER_MALE] = critterIndex;
-        } else if (compat_stricmp(critterFileNames, "hfjmps") == 0) {
+        } else if (compat_stricmp(critterFileNames, jumpsuitFemaleFileName) == 0) {
             _art_vault_person_nums[DUDE_NATIVE_LOOK_JUMPSUIT][GENDER_FEMALE] = critterIndex;
         }
 
-        if (compat_stricmp(critterFileNames, "hmwarr") == 0) {
+        if (compat_stricmp(critterFileNames, tribalMaleFileName) == 0) {
             _art_vault_person_nums[DUDE_NATIVE_LOOK_TRIBAL][GENDER_MALE] = critterIndex;
             _art_vault_guy_num = critterIndex;
-        } else if (compat_stricmp(critterFileNames, "hfprim") == 0) {
+        } else if (compat_stricmp(critterFileNames, tribalFemaleFileName) == 0) {
             _art_vault_person_nums[DUDE_NATIVE_LOOK_TRIBAL][GENDER_FEMALE] = critterIndex;
         }
 
@@ -284,7 +282,7 @@ int artInit()
         return -1;
     }
 
-    sprintf(path, "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[OBJ_TYPE_HEAD].name, gArtListDescriptions[OBJ_TYPE_HEAD].name);
+    snprintf(path, sizeof(path), "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[OBJ_TYPE_HEAD].name, gArtListDescriptions[OBJ_TYPE_HEAD].name);
 
     stream = fileOpen(path, "rt");
     if (stream == NULL) {
@@ -655,19 +653,19 @@ char* artBuildFilePath(int fid)
             return NULL;
         }
         if (v10) {
-            sprintf(_art_name, "%s%s%s\\%s%c%c.fr%c", _cd_path_base, "art\\", gArtListDescriptions[1].name, gArtListDescriptions[1].fileNames + v8, v11, v12, v10 + 47);
+            snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s%c%c.fr%c", _cd_path_base, "art\\", gArtListDescriptions[1].name, gArtListDescriptions[1].fileNames + v8, v11, v12, v10 + 47);
         } else {
-            sprintf(_art_name, "%s%s%s\\%s%c%c.frm", _cd_path_base, "art\\", gArtListDescriptions[1].name, gArtListDescriptions[1].fileNames + v8, v11, v12);
+            snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s%c%c.frm", _cd_path_base, "art\\", gArtListDescriptions[1].name, gArtListDescriptions[1].fileNames + v8, v11, v12);
         }
     } else if (type == 8) {
         v9 = _head2[v4];
         if (v9 == 'f') {
-            sprintf(_art_name, "%s%s%s\\%s%c%c%d.frm", _cd_path_base, "art\\", gArtListDescriptions[8].name, gArtListDescriptions[8].fileNames + v8, _head1[v4], 102, v5);
+            snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s%c%c%d.frm", _cd_path_base, "art\\", gArtListDescriptions[8].name, gArtListDescriptions[8].fileNames + v8, _head1[v4], 102, v5);
         } else {
-            sprintf(_art_name, "%s%s%s\\%s%c%c.frm", _cd_path_base, "art\\", gArtListDescriptions[8].name, gArtListDescriptions[8].fileNames + v8, _head1[v4], v9);
+            snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s%c%c.frm", _cd_path_base, "art\\", gArtListDescriptions[8].name, gArtListDescriptions[8].fileNames + v8, _head1[v4], v9);
         }
     } else {
-        sprintf(_art_name, "%s%s%s\\%s", _cd_path_base, "art\\", gArtListDescriptions[type].name, gArtListDescriptions[type].fileNames + v8);
+        snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s", _cd_path_base, "art\\", gArtListDescriptions[type].name, gArtListDescriptions[type].fileNames + v8);
     }
 
     return _art_name;
@@ -974,7 +972,7 @@ static int artCacheGetFileSizeImpl(int fid, int* sizePtr)
             }
 
             char localizedPath[COMPAT_MAX_PATH];
-            sprintf(localizedPath, "art\\%s\\%s", gArtLanguage, pch);
+            snprintf(localizedPath, sizeof(localizedPath), "art\\%s\\%s", gArtLanguage, pch);
 
             if (dbGetFileSize(localizedPath, &fileSize) == 0) {
                 loaded = true;
@@ -1021,7 +1019,7 @@ static int artCacheReadDataImpl(int fid, int* sizePtr, unsigned char* data)
             }
 
             char localizedPath[COMPAT_MAX_PATH];
-            sprintf(localizedPath, "art\\%s\\%s", gArtLanguage, pch);
+            snprintf(localizedPath, sizeof(localizedPath), "art\\%s\\%s", gArtLanguage, pch);
 
             if (artRead(localizedPath, data) == 0) {
                 loaded = true;
@@ -1228,3 +1226,43 @@ int artWrite(const char* path, unsigned char* data)
     fileClose(stream);
     return 0;
 }
+
+FrmImage::FrmImage()
+{
+    _key = nullptr;
+    _data = nullptr;
+    _width = 0;
+    _height = 0;
+}
+
+FrmImage::~FrmImage()
+{
+    unlock();
+}
+
+bool FrmImage::lock(unsigned int fid)
+{
+    if (isLocked()) {
+        return false;
+    }
+
+    _data = artLockFrameDataReturningSize(fid, &_key, &_width, &_height);
+    if (!_data) {
+        return false;
+    }
+
+    return true;
+}
+
+void FrmImage::unlock()
+{
+    if (isLocked()) {
+        artUnlock(_key);
+        _key = nullptr;
+        _data = nullptr;
+        _width = 0;
+        _height = 0;
+    }
+}
+
+} // namespace fallout

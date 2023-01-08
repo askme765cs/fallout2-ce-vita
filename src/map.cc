@@ -11,17 +11,16 @@
 #include "character_editor.h"
 #include "color.h"
 #include "combat.h"
-#include "core.h"
 #include "critter.h"
 #include "cycle.h"
 #include "debug.h"
 #include "draw.h"
 #include "elevator.h"
 #include "game.h"
-#include "game_config.h"
 #include "game_mouse.h"
 #include "game_movie.h"
 #include "game_sound.h"
+#include "input.h"
 #include "interface.h"
 #include "item.h"
 #include "light.h"
@@ -36,11 +35,15 @@
 #include "queue.h"
 #include "random.h"
 #include "scripts.h"
+#include "settings.h"
+#include "svga.h"
 #include "text_object.h"
 #include "tile.h"
 #include "window_manager.h"
 #include "window_manager_private.h"
 #include "worldmap.h"
+
+namespace fallout {
 
 static char* mapBuildPath(char* name);
 static int mapLoad(File* stream);
@@ -156,10 +159,10 @@ int gIsoWindow;
 // 0x631E50
 static char _scratchStr[40];
 
-// Last map file name.
-//
-// 0x631E78
-static char _map_path[COMPAT_MAX_PATH];
+// CE: Basically the same problem described in |gMapLocalPointers|, but this
+// time Olympus folks use global map variables to store objects (looks like
+// only `self_obj`).
+static std::vector<void*> gMapGlobalPointers;
 
 // CE: There is a bug in the user-space scripting where they want to store
 // pointers to |Object| instances in local vars. This is obviously wrong as it's
@@ -279,15 +282,13 @@ void isoExit()
 // 0x481FB4
 void _map_init()
 {
-    char* executable;
-    configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, "executable", &executable);
-    if (compat_stricmp(executable, "mapper") == 0) {
+    if (compat_stricmp(settings.system.executable.c_str(), "mapper") == 0) {
         _map_scroll_refresh = isoWindowRefreshRectMapper;
     }
 
     if (messageListInit(&gMapMessageList)) {
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "%smap.msg", asc_5186C8);
+        snprintf(path, sizeof(path), "%smap.msg", asc_5186C8);
 
         if (!messageListLoad(&gMapMessageList, path)) {
             debugPrint("\nError loading map_msg_file!");
@@ -299,7 +300,9 @@ void _map_init()
     mapNewMap();
     tickersAdd(gameMouseRefresh);
     _gmouse_disable(0);
-    windowUnhide(gIsoWindow);
+    windowShow(gIsoWindow);
+
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_MAP, &gMapMessageList);
 }
 
 // 0x482084
@@ -308,6 +311,8 @@ void _map_exit()
     windowHide(gIsoWindow);
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
     tickersRemove(gameMouseRefresh);
+
+    messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_MAP, nullptr);
     if (!messageListFree(&gMapMessageList)) {
         debugPrint("\nError exiting map_msg_file!");
     }
@@ -389,27 +394,41 @@ int mapSetElevation(int elevation)
 }
 
 // 0x482220
-int mapSetGlobalVar(int var, int value)
+int mapSetGlobalVar(int var, ProgramValue& value)
 {
     if (var < 0 || var >= gMapGlobalVarsLength) {
         debugPrint("ERROR: attempt to reference map var out of range: %d", var);
         return -1;
     }
 
-    gMapGlobalVars[var] = value;
+    if (value.opcode == VALUE_TYPE_PTR) {
+        gMapGlobalVars[var] = 0;
+        gMapGlobalPointers[var] = value.pointerValue;
+    } else {
+        gMapGlobalVars[var] = value.integerValue;
+        gMapGlobalPointers[var] = nullptr;
+    }
 
     return 0;
 }
 
 // 0x482250
-int mapGetGlobalVar(int var)
+int mapGetGlobalVar(int var, ProgramValue& value)
 {
     if (var < 0 || var >= gMapGlobalVarsLength) {
         debugPrint("ERROR: attempt to reference map var out of range: %d", var);
-        return 0;
+        return -1;
     }
 
-    return gMapGlobalVars[var];
+    if (gMapGlobalPointers[var] != nullptr) {
+        value.opcode = VALUE_TYPE_PTR;
+        value.pointerValue = gMapGlobalPointers[var];
+    } else {
+        value.opcode = VALUE_TYPE_INT;
+        value.integerValue = gMapGlobalVars[var];
+    }
+
+    return 0;
 }
 
 // 0x482280
@@ -587,7 +606,7 @@ int mapScroll(int dx, int dy)
         return -2;
     }
 
-    gIsoWindowScrollTimestamp = _get_time();
+    gIsoWindowScrollTimestamp = getTicks();
 
     int screenDx = dx * 32;
     int screenDy = dy * 24;
@@ -685,10 +704,13 @@ int mapScroll(int dx, int dy)
 // 0x482900
 static char* mapBuildPath(char* name)
 {
+    // 0x631E78
+    static char map_path[COMPAT_MAX_PATH];
+
     if (*name != '\\') {
         // NOTE: Uppercased from "maps".
-        sprintf(_map_path, "MAPS\\%s", name);
-        return _map_path;
+        snprintf(map_path, sizeof(map_path), "MAPS\\%s", name);
+        return map_path;
     }
     return name;
 }
@@ -706,7 +728,7 @@ int mapSetEnteringLocation(int elevation, int tile_num, int orientation)
 void mapNewMap()
 {
     mapSetElevation(0);
-    tileSetCenter(20100, TILE_SET_CENTER_FLAG_0x02);
+    tileSetCenter(20100, TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS);
     memset(&gMapTransition, 0, sizeof(gMapTransition));
     gMapHeader.enteringElevation = 0;
     gMapHeader.enteringRotation = 0;
@@ -777,7 +799,7 @@ int mapLoadById(int map)
     scriptSetFixedParam(gMapSid, map);
 
     char name[16];
-    if (wmMapIdxToName(map, name) == -1) {
+    if (wmMapIdxToName(map, name, sizeof(name)) == -1) {
         return -1;
     }
 
@@ -801,7 +823,7 @@ static int mapLoad(File* stream)
 
     int savedMouseCursorId = gameMouseGetCursor();
     gameMouseSetCursor(MOUSE_CURSOR_WAIT_PLANET);
-    fileSetReadProgressHandler(gameMouseRefresh, 32768);
+    fileSetReadProgressHandler(gameMouseRefreshImmediately, 32768);
     tileDisable();
 
     int rc = 0;
@@ -893,7 +915,7 @@ static int mapLoad(File* stream)
     }
 
     error = "Error setting tile center";
-    if (tileSetCenter(gEnteringTile, TILE_SET_CENTER_FLAG_0x02) != 0) {
+    if (tileSetCenter(gEnteringTile, TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS) != 0) {
         goto err;
     }
 
@@ -904,7 +926,7 @@ static int mapLoad(File* stream)
 
     if ((gMapHeader.flags & 1) == 0) {
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "maps\\%s", gMapHeader.name);
+        snprintf(path, sizeof(path), "maps\\%s", gMapHeader.name);
 
         char* extension = strstr(path, ".MAP");
         if (extension == NULL) {
@@ -959,7 +981,7 @@ err:
 
     if (error != NULL) {
         char message[100]; // TODO: Size is probably wrong.
-        sprintf(message, "%s while loading map.", error);
+        snprintf(message, sizeof(message), "%s while loading map.", error);
         debugPrint(message);
         mapNewMap();
         rc = -1;
@@ -1079,7 +1101,7 @@ static int _map_age_dead_critters()
             && !objectIsPartyMember(obj)
             && !critterIsDead(obj)) {
             obj->data.critter.combat.maneuver &= ~CRITTER_MANUEVER_FLEEING;
-            if (critterGetKillType(obj) != KILL_TYPE_ROBOT && _critter_flag_check(obj->pid, CRITTER_FLAG_0x200) == 0) {
+            if (critterGetKillType(obj) != KILL_TYPE_ROBOT && !_critter_flag_check(obj->pid, CRITTER_NO_HEAL)) {
                 _critter_heal_hours(obj, hoursSinceLastVisit);
             }
         }
@@ -1104,7 +1126,7 @@ static int _map_age_dead_critters()
         int type = PID_TYPE(obj->pid);
         if (type == OBJ_TYPE_CRITTER) {
             if (obj != gDude && critterIsDead(obj)) {
-                if (critterGetKillType(obj) != KILL_TYPE_ROBOT && _critter_flag_check(obj->pid, CRITTER_FLAG_0x200) == 0) {
+                if (critterGetKillType(obj) != KILL_TYPE_ROBOT && !_critter_flag_check(obj->pid, CRITTER_NO_HEAL)) {
                     objects[count++] = obj;
 
                     if (count >= capacity) {
@@ -1135,7 +1157,7 @@ static int _map_age_dead_critters()
     for (int index = 0; index < count; index++) {
         Object* obj = objects[index];
         if (PID_TYPE(obj->pid) == OBJ_TYPE_CRITTER) {
-            if (_critter_flag_check(obj->pid, CRITTER_FLAG_0x40) == 0) {
+            if (!_critter_flag_check(obj->pid, CRITTER_NO_DROP)) {
                 itemDropAll(obj, obj->tile);
             }
 
@@ -1151,7 +1173,7 @@ static int _map_age_dead_critters()
             protoGetProto(obj->pid, &proto);
 
             int frame = randomBetween(0, 3);
-            if ((proto->critter.flags & 0x800)) {
+            if ((proto->critter.flags & CRITTER_FLAT)) {
                 frame += 6;
             } else {
                 if (critterGetKillType(obj) != KILL_TYPE_RAT
@@ -1239,7 +1261,7 @@ int mapHandleTransition()
                 objectSetRotation(gDude, gMapTransition.rotation, NULL);
             }
 
-            if (tileSetCenter(gDude->tile, TILE_SET_CENTER_FLAG_0x01) == -1) {
+            if (tileSetCenter(gDude->tile, TILE_SET_CENTER_REFRESH_WINDOW) == -1) {
                 debugPrint("\nError: map: attempt to center out-of-bounds!");
             }
 
@@ -1281,14 +1303,11 @@ static int _map_save()
     char temp[80];
     temp[0] = '\0';
 
-    char* masterPatchesPath;
-    if (configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &masterPatchesPath)) {
-        strcat(temp, masterPatchesPath);
-        compat_mkdir(temp);
+    strcat(temp, settings.system.master_patches_path.c_str());
+    compat_mkdir(temp);
 
-        strcat(temp, "\\MAPS");
-        compat_mkdir(temp);
-    }
+    strcat(temp, "\\MAPS");
+    compat_mkdir(temp);
 
     int rc = -1;
     if (gMapHeader.name[0] != '\0') {
@@ -1298,12 +1317,12 @@ static int _map_save()
             rc = _map_save_file(stream);
             fileClose(stream);
         } else {
-            sprintf(temp, "Unable to open %s to write!", gMapHeader.name);
+            snprintf(temp, sizeof(temp), "Unable to open %s to write!", gMapHeader.name);
             debugPrint(temp);
         }
 
         if (rc == 0) {
-            sprintf(temp, "%s saved.", gMapHeader.name);
+            snprintf(temp, sizeof(temp), "%s saved.", gMapHeader.name);
             debugPrint(temp);
         }
     } else {
@@ -1382,12 +1401,12 @@ static int _map_save_file(File* stream)
     char err[80];
 
     if (scriptSaveAll(stream) == -1) {
-        sprintf(err, "Error saving scripts in %s", gMapHeader.name);
+        snprintf(err, sizeof(err), "Error saving scripts in %s", gMapHeader.name);
         _win_msg(err, 80, 80, _colorTable[31744]);
     }
 
     if (objectSaveAll(stream) == -1) {
-        sprintf(err, "Error saving objects in %s", gMapHeader.name);
+        snprintf(err, sizeof(err), "Error saving objects in %s", gMapHeader.name);
         _win_msg(err, 80, 80, _colorTable[31744]);
     }
 
@@ -1463,13 +1482,7 @@ static void mapMakeMapsDirectory()
 {
     char path[COMPAT_MAX_PATH];
 
-    char* masterPatchesPath;
-    if (configGetString(&gGameConfig, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &masterPatchesPath)) {
-        strcpy(path, masterPatchesPath);
-    } else {
-        strcpy(path, "DATA");
-    }
-
+    strcpy(path, settings.system.master_patches_path.c_str());
     compat_mkdir(path);
 
     strcat(path, "\\MAPS");
@@ -1529,6 +1542,8 @@ static int mapGlobalVariablesInit(int count)
         if (gMapGlobalVars == NULL) {
             return -1;
         }
+
+        gMapGlobalPointers.resize(count);
     }
 
     gMapGlobalVarsLength = count;
@@ -1544,6 +1559,8 @@ static void mapGlobalVariablesFree()
         gMapGlobalVars = NULL;
         gMapGlobalVarsLength = 0;
     }
+
+    gMapGlobalPointers.clear();
 }
 
 // NOTE: Inlined.
@@ -1741,3 +1758,5 @@ static int mapHeaderRead(MapHeader* ptr, File* stream)
 
     return 0;
 }
+
+} // namespace fallout

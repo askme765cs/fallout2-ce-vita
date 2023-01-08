@@ -3,6 +3,8 @@
 
 #include <SDL.h>
 
+namespace fallout {
+
 typedef struct MouseData {
     int x;
     int y;
@@ -43,5 +45,7 @@ enum TouchpadMode
 
 void handleTouchEventDirect(const SDL_TouchFingerEvent& event);
 #endif
+
+} // namespace fallout
 
 #endif /* DINPUT_H */

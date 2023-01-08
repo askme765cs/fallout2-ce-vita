@@ -32,6 +32,17 @@
 #include "tile.h"
 #include "window_manager.h"
 
+namespace fallout {
+
+// SFALL: Enable party members with level 6 protos to reach level 6.
+// CE: There are several party members who have 6 pids, but for unknown reason
+// the original code cap was 5. This fix affects:
+// - Dogmeat
+// - Goris
+// - Sulik
+// - Vik
+#define PARTY_MEMBER_MAX_LEVEL 6
+
 typedef struct PartyMemberDescription {
     bool areaAttackMode[AREA_ATTACK_MODE_COUNT];
     bool runAwayMode[RUN_AWAY_MODE_COUNT];
@@ -43,7 +54,7 @@ typedef struct PartyMemberDescription {
     int level_minimum;
     int level_up_every;
     int level_pids_num;
-    int level_pids[5];
+    int level_pids[PARTY_MEMBER_MAX_LEVEL];
 } PartyMemberDescription;
 
 typedef struct STRU_519DBC {
@@ -123,12 +134,12 @@ int partyMembersInit()
     }
 
     char section[50];
-    sprintf(section, "Party Member %d", gPartyMemberDescriptionsLength);
+    snprintf(section, sizeof(section), "Party Member %d", gPartyMemberDescriptionsLength);
 
     int partyMemberPid;
     while (configGetInt(&config, section, "party_member_pid", &partyMemberPid)) {
         gPartyMemberDescriptionsLength++;
-        sprintf(section, "Party Member %d", gPartyMemberDescriptionsLength);
+        snprintf(section, sizeof(section), "Party Member %d", gPartyMemberDescriptionsLength);
     }
 
     gPartyMemberPids = (int*)internal_malloc(sizeof(*gPartyMemberPids) * gPartyMemberDescriptionsLength);
@@ -158,7 +169,7 @@ int partyMembersInit()
     memset(_partyMemberLevelUpInfoList, 0, sizeof(*_partyMemberLevelUpInfoList) * gPartyMemberDescriptionsLength);
 
     for (int index = 0; index < gPartyMemberDescriptionsLength; index++) {
-        sprintf(section, "Party Member %d", index);
+        snprintf(section, sizeof(section), "Party Member %d", index);
 
         if (!configGetInt(&config, section, "party_member_pid", &partyMemberPid)) {
             break;
@@ -238,7 +249,7 @@ int partyMembersInit()
             }
 
             if (configGetString(&config, section, "level_pids", &string)) {
-                while (*string != '\0' && partyMemberDescription->level_pids_num < 5) {
+                while (*string != '\0' && partyMemberDescription->level_pids_num < PARTY_MEMBER_MAX_LEVEL) {
                     int levelPid;
                     strParseInt(&string, &levelPid);
                     partyMemberDescription->level_pids[partyMemberDescription->level_pids_num] = levelPid;
@@ -1472,7 +1483,8 @@ int _partyMemberIncLevels()
         obj = ptr->object;
 
         if (partyMemberGetDescription(obj, &party_member) == -1) {
-            break;
+            // SFALL: NPC level fix.
+            continue;
         }
 
         if (PID_TYPE(obj->pid) != OBJ_TYPE_CRITTER) {
@@ -1526,7 +1538,7 @@ int _partyMemberIncLevels()
                     name = critterGetName(obj);
                     // %s has gained in some abilities.
                     text = getmsg(&gMiscMessageList, &msg, 9000);
-                    sprintf(str, text, name);
+                    snprintf(str, sizeof(str), text, name);
                     displayMonitorAddMessage(str);
 
                     debugPrint(str);
@@ -1535,7 +1547,7 @@ int _partyMemberIncLevels()
                     msg.num = 9000 + 10 * v0 + ptr_519DBC->field_0 - 1;
                     if (messageListGetItem(&gMiscMessageList, &msg)) {
                         name = critterGetName(obj);
-                        sprintf(str, msg.text, name);
+                        snprintf(str, sizeof(str), msg.text, name);
                         textObjectAdd(obj, str, 101, _colorTable[0x7FFF], _colorTable[0], &v19);
                         tileWindowRefreshRect(&v19, obj->elevation);
                     }
@@ -1667,3 +1679,5 @@ int partyGetMaxWoundToHealByRest()
 
     return maxWound;
 }
+
+} // namespace fallout

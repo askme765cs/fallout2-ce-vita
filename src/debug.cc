@@ -5,10 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#endif
+#include <SDL.h>
 
 #ifdef __vita__
 #include <psp2/kernel/clib.h>
@@ -17,6 +14,8 @@
 #include "memory.h"
 #include "platform_compat.h"
 #include "window_manager_private.h"
+
+namespace fallout {
 
 static int _debug_puts(char* string);
 static void _debug_clear();
@@ -145,20 +144,19 @@ int debugPrint(const char* format, ...)
 
     if (gDebugPrintProc != NULL) {
         char string[260];
-        vsprintf(string, format, args);
+        vsnprintf(string, sizeof(string), format, args);
 
         rc = gDebugPrintProc(string);
     } else {
 #ifdef _DEBUG
+        SDL_LogMessageV(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO, format, args);
+
+#ifdef __vita__
         char string[260];
         vsprintf(string, format, args);
-#ifdef _WIN32
-        OutputDebugStringA(string);
-#elif defined(__vita__)
         sceClibPrintf("%s", string);
-#else
-        printf("%s", string);
 #endif
+
 #endif
         rc = -1;
     }
@@ -323,3 +321,5 @@ void _debug_exit(void)
         fclose(_fd);
     }
 }
+
+} // namespace fallout

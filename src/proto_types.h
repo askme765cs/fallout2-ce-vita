@@ -1,6 +1,8 @@
 #ifndef PROTO_TYPES_H
 #define PROTO_TYPES_H
 
+namespace fallout {
+
 // Number of prototypes in prototype extent.
 #define PROTO_LIST_EXTENT_SIZE 16
 
@@ -196,10 +198,8 @@ enum {
 #define PROTO_ID_0x20001D6 0x20001D6
 #define PROTO_ID_0x20001EB 0x20001EB
 #define FID_0x20001F5 0x20001F5
-// first exit grid
-#define PROTO_ID_0x5000010 0x5000010
-// last exit grid
-#define PROTO_ID_0x5000017 0x5000017
+#define FIRST_EXIT_GRID_PID 0x5000010
+#define LAST_EXIT_GRID_PID 0x5000017
 
 typedef enum ItemProtoFlags {
     ItemProtoFlags_0x08 = 0x08,
@@ -473,5 +473,7 @@ typedef struct ProtoList {
     // Number of lines in proto/{type}/{type}.lst.
     int max_entries_num;
 } ProtoList;
+
+} // namespace fallout
 
 #endif /* PROTO_TYPES_H */

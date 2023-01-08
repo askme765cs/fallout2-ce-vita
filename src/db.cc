@@ -7,6 +7,8 @@
 #include "platform_compat.h"
 #include "xfile.h"
 
+namespace fallout {
+
 typedef struct FileList {
     XList xlist;
     struct FileList* next;
@@ -336,7 +338,7 @@ int fileReadInt32(File* stream, int* valuePtr)
         return -1;
     }
 
-    *valuePtr = ((value >> 24) & 0xFF) | ((value >> 8) & 0xFF00) | ((value << 8) & 0xFF0000) | ((value << 24) & 0xFF000000);
+    *valuePtr = ((value & 0xFF000000) >> 24) | ((value & 0xFF0000) >> 8) | ((value & 0xFF00) << 8) | ((value & 0xFF) << 24);
 
     return 0;
 }
@@ -509,7 +511,7 @@ int fileReadInt32List(File* stream, int* arr, int count)
 
     for (int index = 0; index < count; index++) {
         int value = arr[index];
-        arr[index] = ((value >> 24) & 0xFF) | ((value >> 8) & 0xFF00) | ((value << 8) & 0xFF0000) | ((value << 24) & 0xFF000000);
+        arr[index] = ((value & 0xFF000000) >> 24) | ((value & 0xFF0000) >> 8) | ((value & 0xFF00) << 8) | ((value & 0xFF) << 24);
     }
 
     return 0;
@@ -653,7 +655,7 @@ int fileNameListInit(const char* pattern, char*** fileNameListPtr, int a3, int a
                 // NOTE: Quick and dirty fix to buffer overflow. See RE to
                 // understand the problem.
                 char path[COMPAT_MAX_PATH];
-                sprintf(path, "%s%s", fileName, extension);
+                snprintf(path, sizeof(path), "%s%s", fileName, extension);
                 free(xlist->fileNames[length]);
                 xlist->fileNames[length] = compat_strdup(path);
                 length++;
@@ -738,3 +740,5 @@ int _db_list_compare(const void* p1, const void* p2)
 {
     return compat_stricmp(*(const char**)p1, *(const char**)p2);
 }
+
+} // namespace fallout

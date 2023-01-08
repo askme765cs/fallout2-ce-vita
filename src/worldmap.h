@@ -3,6 +3,8 @@
 
 #include "db.h"
 
+namespace fallout {
+
 #define CAR_FUEL_MAX (80000)
 
 typedef enum MapFlags {
@@ -235,7 +237,7 @@ int wmWorldMap_reset();
 int wmWorldMap_save(File* stream);
 int wmWorldMap_load(File* stream);
 int wmMapMaxCount();
-int wmMapIdxToName(int mapIdx, char* dest);
+int wmMapIdxToName(int mapIdx, char* dest, size_t size);
 int wmMapMatchNameToIdx(char* name);
 bool wmMapIdxIsSaveable(int mapIdx);
 bool wmMapIsSaveable();
@@ -274,5 +276,7 @@ int wmMapMusicStart();
 int wmSetMapMusic(int mapIdx, const char* name);
 int wmMatchAreaContainingMapIdx(int mapIdx, int* areaIdxPtr);
 int wmTeleportToArea(int areaIdx);
+
+} // namespace fallout
 
 #endif /* WORLD_MAP_H */
