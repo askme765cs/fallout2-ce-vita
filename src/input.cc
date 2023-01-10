@@ -14,6 +14,10 @@
 #include "vcr.h"
 #include "win32.h"
 
+#ifdef __vita__
+#include "map.h"
+#endif
+
 namespace fallout {
 
 typedef struct InputEvent {
@@ -131,11 +135,7 @@ const float CONTROLLER_AXIS_SPEEDUP = 1.03f;
 enum
 {
     CONTROLLER_L_DEADZONE = 3000,
-    CONTROLLER_R_DEADZONE = 25000,
-    VITA_FULLSCREEN_WIDTH = 960,
-    VITA_FULLSCREEN_HEIGHT = 544,
-    DEFAULT_WIDTH = 640,
-    DEFAULT_HEIGHT = 480
+    CONTROLLER_R_DEADZONE = 25000
 };
 
 int16_t controllerLeftXAxis = 0;
@@ -1199,6 +1199,7 @@ void _GNW95_process_message()
         sceImeUpdate();
     }
     mapScroll(mapXScroll, mapYScroll);
+    processControllerAxisMotion();
 #endif
 
     if (gProgramIsActive && !keyboardIsDisabled()) {
@@ -1338,13 +1339,13 @@ void handleTouchEventDirect(const SDL_TouchFingerEvent& event)
         int width = screenGetWidth();
         int height = screenGetHeight();
 
-        int touchPosX = static_cast<float>(VITA_FULLSCREEN_WIDTH * event.x - renderRect.x) *
-                                    (static_cast<float>(width) / renderRect.w);
-        int touchPosY = static_cast<float>(VITA_FULLSCREEN_HEIGHT * event.y - renderRect.y) *
-                                    (static_cast<float>(height) / renderRect.h);
+        int touchPosX = static_cast<float>(VITA_FULLSCREEN_WIDTH * event.x - getRenderRect().x) *
+                                    (static_cast<float>(width) / getRenderRect().w);
+        int touchPosY = static_cast<float>(VITA_FULLSCREEN_HEIGHT * event.y - getRenderRect().y) *
+                                    (static_cast<float>(height) / getRenderRect().h);
 
-        gTouchMouseDeltaX = touchPosX - gMouseCursorX;
-        gTouchMouseDeltaY = touchPosY - gMouseCursorY;
+        gTouchMouseDeltaX = touchPosX - mouseGetMouseCursorX();
+        gTouchMouseDeltaY = touchPosY - mouseGetMouseCursorY();
     }
 }
 
@@ -1359,9 +1360,9 @@ void processControllerAxisMotion()
         const int16_t ySign = (controllerLeftYAxis > 0) - (controllerLeftYAxis < 0);
 
         gTouchMouseDeltaX += std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
-                            * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
+                            * cursorSpeedup * resolutionSpeedMod * mouseGetSensitivity() * CONTROLLER_SPEED_MOD;
         gTouchMouseDeltaY += std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
-                            * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
+                            * cursorSpeedup * resolutionSpeedMod * mouseGetSensitivity() * CONTROLLER_SPEED_MOD;
     }
 }
 

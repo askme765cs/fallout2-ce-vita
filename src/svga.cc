@@ -24,6 +24,7 @@ vita2d_texture *texBuffer;
 uint8_t *palettedTexturePointer;
 SDL_Rect renderRect;
 SDL_Surface *vitaPaletteSurface = NULL;
+bool vitaFullscreen;
 #endif
 
 static bool createRenderer(int width, int height);
@@ -266,11 +267,16 @@ int _GNW95_init_window(int width, int height, bool fullscreen)
         return -1;
     }
 
-    vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW);
-    texBuffer = vita2d_create_empty_texture_format(width, height, SCE_GXM_TEXTURE_FORMAT_P8_ABGR);
-    palettedTexturePointer = (uint8_t*)(vita2d_texture_get_datap(texBuffer));
-    memset(palettedTexturePointer, 0, width * height * sizeof(uint8_t));
-    setRenderRect(width, height, fullscreen);
+    vitaFullscreen = fullscreen;
+
+    if (!createRenderer(width, height)) {
+        destroyRenderer();
+
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+
+        return -1;
+    }
 
     float resolutionSpeedMod = static_cast<float>(height) / DEFAULT_HEIGHT;
 
@@ -482,6 +488,15 @@ int screenGetVisibleHeight()
 
 static bool createRenderer(int width, int height)
 {
+#ifdef __vita__
+    vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW);
+    texBuffer = vita2d_create_empty_texture_format(width, height, SCE_GXM_TEXTURE_FORMAT_P8_ABGR);
+    palettedTexturePointer = (uint8_t*)(vita2d_texture_get_datap(texBuffer));
+    memset(palettedTexturePointer, 0, width * height * sizeof(uint8_t));
+    setRenderRect(width, height, vitaFullscreen);
+
+    return true;
+#else
     gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 0);
     if (gSdlRenderer == NULL) {
         return false;
@@ -507,10 +522,19 @@ static bool createRenderer(int width, int height)
     }
 
     return true;
+#endif
 }
 
 static void destroyRenderer()
 {
+#ifdef __vita__
+    vita2d_wait_rendering_done();
+
+    if (texBuffer != nullptr) {
+        vita2d_free_texture(texBuffer);
+        texBuffer = nullptr;
+    }
+#else
     if (gSdlTextureSurface != NULL) {
         SDL_FreeSurface(gSdlTextureSurface);
         gSdlTextureSurface = NULL;
@@ -524,24 +548,6 @@ static void destroyRenderer()
     if (gSdlRenderer != NULL) {
         SDL_DestroyRenderer(gSdlRenderer);
         gSdlRenderer = NULL;
-    }
-
-#ifdef __vita__
-    if ( gSdlWindow != nullptr ) {
-        SDL_DestroyWindow( gSdlWindow );
-        gSdlWindow = nullptr;
-    }
-
-    if ( vitaPaletteSurface != nullptr ) {
-        SDL_FreeSurface( vitaPaletteSurface );
-        vitaPaletteSurface = nullptr;
-    }
-
-    vita2d_fini();
-
-    if ( texBuffer != nullptr ) {
-        vita2d_free_texture( texBuffer );
-        texBuffer = nullptr;
     }
 #endif
 }
@@ -620,6 +626,11 @@ void setRenderRect(int width, int height, bool fullscreen)
             renderRect.y = (VITA_FULLSCREEN_HEIGHT - height) / 2;
         }
     }
+}
+
+SDL_Rect getRenderRect()
+{
+    return renderRect;
 }
 #endif
 

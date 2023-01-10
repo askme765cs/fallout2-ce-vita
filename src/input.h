@@ -1,6 +1,13 @@
 #ifndef FALLOUT_INPUT_H_
 #define FALLOUT_INPUT_H_
 
+#ifdef __vita__
+#include <SDL.h>
+#include <psp2/libime.h>
+#include <psp2/kernel/clib.h>
+#include "dinput.h"
+#endif
+
 namespace fallout {
 
 typedef void(IdleFunc)();
@@ -48,10 +55,6 @@ void beginTextInput();
 void endTextInput();
 
 #ifdef __vita__
-#include <SDL.h>
-#include <psp2/libime.h>
-#include <psp2/kernel/clib.h>
-
 extern SDL_GameController* gameController;
 extern float gTouchMouseDeltaX;
 extern float gTouchMouseDeltaY;

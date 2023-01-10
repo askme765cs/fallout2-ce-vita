@@ -302,20 +302,16 @@ if(VITA)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${VITA_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VITA_FLAGS}")
 
-    add_definitions("-Dmemcpy=sceClibMemcpy")
-    add_definitions("-Dmemset=sceClibMemset")
-    add_definitions("-Dmemmove=sceClibMemmove")
-
     target_link_libraries(${EXECUTABLE_NAME}
         SDL2::SDL2
         SceIme_stub
+        SceAudioIn_stub
         vita2d
     )
 
     include("${CMAKE_SOURCE_DIR}/vita/vita.cmake")
     add_definitions(-D__unix)
     add_definitions(-D_DEBUG)
-    #target_compile_definitions(${EXECUTABLE_NAME} PRIVATE _POSIX_C_SOURCE=200809)
 endif()
 
 if (WIN32)

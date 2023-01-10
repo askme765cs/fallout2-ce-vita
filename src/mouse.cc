@@ -381,10 +381,6 @@ void _mouse_info()
         return;
     }
 
-#ifdef __vita__
-    //processControllerAxisMotion();
-#endif
-
     int x;
     int y;
     int buttons = 0;
@@ -664,6 +660,23 @@ void mouseSetSensitivity(double value)
         gMouseSensitivity = value;
     }
 }
+
+#ifdef __vita__
+double mouseGetSensitivity()
+{
+    return gMouseSensitivity;
+}
+
+int mouseGetMouseCursorX()
+{
+    return gMouseCursorX;
+}
+
+int mouseGetMouseCursorY()
+{
+    return gMouseCursorY;
+}
+#endif
 
 void mouseGetPositionInWindow(int win, int* x, int* y)
 {

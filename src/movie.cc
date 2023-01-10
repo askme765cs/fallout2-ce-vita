@@ -326,12 +326,10 @@ static void movieDirectImpl(SDL_Surface* surface, int srcWidth, int srcHeight, i
     // backbuffer surface (with palette set), all we get is shiny white box.
     SDL_SetSurfacePalette(surface, gSdlSurface->format->palette);
     SDL_BlitSurface(surface, &srcRect, gSdlSurface, &destRect);
-#ifdef __vita__
-    renderVita2dFrame(gSdlSurface);
-#else
+#ifndef __vita__
     SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
-    renderPresent();
 #endif
+    renderPresent();
 }
 
 // 0x486900

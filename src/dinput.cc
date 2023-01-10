@@ -1,5 +1,10 @@
 #include "dinput.h"
 
+#ifdef __vita__
+#include <psp2/kernel/clib.h>
+#include "mouse.h"
+#endif
+
 namespace fallout {
 
 enum InputType {
@@ -31,9 +36,6 @@ extern int screenGetWidth();
 extern int screenGetHeight();
 
 #ifdef __vita__
-#include <psp2/kernel/clib.h>
-#include "core.h"
-
 const uint8_t TOUCH_DELAY = 2;
 
 SDL_GameController* gameController;
@@ -298,8 +300,8 @@ void handleTouchEvent(SDL_Event* event)
         gTouchMouseLastX = (int)(event->tfinger.x * windowWidth);
         gTouchMouseLastY = (int)(event->tfinger.y * windowHeight);
 #ifdef __vita__
-        gTouchMouseDeltaX += (gTouchMouseLastX - prevX) * gMouseSensitivity;
-        gTouchMouseDeltaY += (gTouchMouseLastY - prevY) * gMouseSensitivity;
+        gTouchMouseDeltaX += (gTouchMouseLastX - prevX) * mouseGetSensitivity();
+        gTouchMouseDeltaY += (gTouchMouseLastY - prevY) * mouseGetSensitivity();
 #else
         gTouchMouseDeltaX += gTouchMouseLastX - prevX;
         gTouchMouseDeltaY += gTouchMouseLastY - prevY;
@@ -312,8 +314,8 @@ void handleTouchEvent(SDL_Event* event)
         gTouchMouseLastX = (int)(event->tfinger.x * windowWidth);
         gTouchMouseLastY = (int)(event->tfinger.y * windowHeight);
 #ifdef __vita__
-        gTouchMouseDeltaX += (gTouchMouseLastX - prevX) * gMouseSensitivity;
-        gTouchMouseDeltaY += (gTouchMouseLastY - prevY) * gMouseSensitivity;
+        gTouchMouseDeltaX += (gTouchMouseLastX - prevX) * mouseGetSensitivity();
+        gTouchMouseDeltaY += (gTouchMouseLastY - prevY) * mouseGetSensitivity();
 #else
         gTouchMouseDeltaX += gTouchMouseLastX - prevX;
         gTouchMouseDeltaY += gTouchMouseLastY - prevY;
