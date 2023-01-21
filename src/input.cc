@@ -16,6 +16,7 @@
 
 #ifdef __vita__
 #include "map.h"
+#include "worldmap.h"
 #endif
 
 namespace fallout {
@@ -1199,6 +1200,7 @@ void _GNW95_process_message()
         sceImeUpdate();
     }
     mapScroll(mapXScroll, mapYScroll);
+    wmVitaScroll(mapXScroll, mapYScroll);
     processControllerAxisMotion();
 #endif
 

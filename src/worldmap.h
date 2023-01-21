@@ -277,6 +277,10 @@ int wmSetMapMusic(int mapIdx, const char* name);
 int wmMatchAreaContainingMapIdx(int mapIdx, int* areaIdxPtr);
 int wmTeleportToArea(int areaIdx);
 
+#ifdef __vita__
+void wmVitaScroll(int dx, int dy);
+#endif
+
 } // namespace fallout
 
 #endif /* WORLD_MAP_H */

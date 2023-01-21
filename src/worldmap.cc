@@ -6592,4 +6592,12 @@ void wmBlinkRndEncounterIcon(bool special)
     wmGenData.encounterIconIsVisible = false;
 }
 
+void wmVitaScroll(int dx, int dy)
+{
+    if (wmInterfaceWasInitialized)
+    {
+        wmInterfaceScroll(dx, dy, NULL);
+    }
+}
+
 } // namespace fallout
