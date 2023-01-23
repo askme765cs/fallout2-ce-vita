@@ -1294,12 +1294,21 @@ static void idleImpl()
 
 void beginTextInput()
 {
+#ifdef __vita__
+    vitaActivateIme();
+#else
     SDL_StartTextInput();
+#endif
 }
 
 void endTextInput()
 {
+#ifdef __vita__
+    sceImeClose();
+    ime_active = 0;
+#else
     SDL_StopTextInput();
+#endif
 }
 
 #ifdef __vita__
@@ -1554,9 +1563,9 @@ void vitaActivateIme()
         param.arg = NULL;
         param.work = libime_work;
 
-        int res = sceImeOpen(&param);
+        int32_t res = sceImeOpen(&param);
         if (res < 0) {
-            sceClibPrintf("Failed to init IME\n");
+            sceClibPrintf("Failed to init IME: %ld\n", res);
         }
         ime_active = 1;
     }

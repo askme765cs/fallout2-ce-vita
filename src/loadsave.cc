@@ -2222,10 +2222,6 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
 
     int rc = 1;
 
-#ifdef __vita__
-    vitaActivateIme();
-#endif
-
     while (rc == 1) {
         sharedFpsLimiter.mark();
 

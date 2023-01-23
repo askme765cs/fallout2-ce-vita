@@ -1939,10 +1939,6 @@ static int _get_input_str(int win, int cancelKeyCode, char* text, int maxLength,
 
     int rc = 1;
 
-#ifdef __vita__
-    vitaActivateIme();
-#endif
-
     while (rc == 1) {
         sharedFpsLimiter.mark();
 
