@@ -3,8 +3,6 @@
 #include <string.h>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <windows.h>
 #endif
 
@@ -185,21 +183,6 @@ void compat_makepath(char* path, const char* drive, const char* dir, const char*
 
     *path = '\0';
 #endif
-}
-
-int compat_read(int fileHandle, void* buf, unsigned int size)
-{
-    return read(fileHandle, buf, size);
-}
-
-int compat_write(int fileHandle, const void* buf, unsigned int size)
-{
-    return write(fileHandle, buf, size);
-}
-
-long compat_lseek(int fileHandle, long offset, int origin)
-{
-    return lseek(fileHandle, offset, origin);
 }
 
 long compat_tell(int fd)

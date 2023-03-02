@@ -140,6 +140,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/loadsave.h"
     "src/main.cc"
     "src/main.h"
+    "src/mainmenu.cc"
+    "src/mainmenu.h"
     "src/map_defs.h"
     "src/map.cc"
     "src/map.h"
@@ -150,8 +152,6 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/memory.h"
     "src/message.cc"
     "src/message.h"
-    "src/mmx.cc"
-    "src/mmx.h"
     "src/mouse_manager.cc"
     "src/mouse_manager.h"
     "src/mouse.cc"
@@ -259,6 +259,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/platform_compat.h"
     "src/pointer_registry.cc"
     "src/pointer_registry.h"
+    "src/preferences.cc"
+    "src/preferences.h"
     "src/settings.cc"
     "src/settings.h"
     "src/sfall_config.cc"
@@ -282,11 +284,8 @@ if(WIN32)
     target_compile_definitions(${EXECUTABLE_NAME} PUBLIC
         _CRT_SECURE_NO_WARNINGS
         _CRT_NONSTDC_NO_WARNINGS
-    )
-else()
-    target_compile_definitions(${EXECUTABLE_NAME} PRIVATE
-        $<$<CONFIG:Debug>:_DEBUG>
-        $<$<CONFIG:RelWithDebInfo>:_DEBUG>
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
     )
 endif()
 

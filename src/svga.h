@@ -12,8 +12,6 @@
 
 namespace fallout {
 
-extern bool gMmxEnabled;
-
 extern Rect _scr_size;
 extern void (*_scr_blit)(unsigned char* src, int src_pitch, int a3, int src_x, int src_y, int src_width, int src_height, int dest_x, int dest_y);
 extern void (*_zero_mem)();
@@ -25,7 +23,6 @@ extern SDL_Texture* gSdlTexture;
 extern SDL_Surface* gSdlTextureSurface;
 extern FpsLimiter sharedFpsLimiter;
 
-void mmxSetEnabled(bool a1);
 int _init_mode_320_200();
 int _init_mode_320_400();
 int _init_mode_640_480_16();

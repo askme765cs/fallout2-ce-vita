@@ -477,7 +477,7 @@ unsigned char* artLockFrameDataReturningSize(int fid, CacheEntry** handlePtr, in
 {
     *handlePtr = NULL;
 
-    Art* art;
+    Art* art = NULL;
     cacheLock(&gArtCache, fid, (void**)&art, handlePtr);
 
     if (art == NULL) {
@@ -1075,6 +1075,11 @@ static int artReadHeader(Art* art, File* stream)
     if (fileReadInt16List(stream, art->yOffsets, ROTATION_COUNT) == -1) return -1;
     if (fileReadInt32List(stream, art->dataOffsets, ROTATION_COUNT) == -1) return -1;
     if (fileReadInt32(stream, &(art->dataSize)) == -1) return -1;
+
+    // CE: Fix malformed `frm` files with `dataSize` set to 0 in Nevada.
+    if (art->dataSize == 0) {
+        art->dataSize = fileGetSize(stream);
+    }
 
     return 0;
 }
