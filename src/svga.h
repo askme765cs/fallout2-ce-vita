@@ -7,7 +7,7 @@
 #include "geometry.h"
 
 #ifdef __vita__
-#include "dinput.h"
+#include "touch.h"
 #endif
 
 namespace fallout {

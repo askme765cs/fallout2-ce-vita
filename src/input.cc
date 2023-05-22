@@ -11,12 +11,12 @@
 #include "mouse.h"
 #include "svga.h"
 #include "text_font.h"
+#include "touch.h"
 #include "vcr.h"
 #include "win32.h"
 
 #ifdef __vita__
 #include "map.h"
-#include "worldmap.h"
 #endif
 
 namespace fallout {
@@ -122,8 +122,6 @@ static TickerListNode* gTickerListHead;
 static unsigned int gTickerLastTimestamp;
 
 #ifdef __vita__
-#include "map.h"
-
 #if !defined(SCE_IME_LANGUAGE_ENGLISH_US)
 #define SCE_IME_LANGUAGE_ENGLISH_US SCE_IME_LANGUAGE_ENGLISH
 #endif
@@ -144,11 +142,12 @@ int16_t controllerLeftYAxis = 0;
 int16_t controllerRightXAxis = 0;
 int16_t controllerRightYAxis = 0;
 uint32_t lastControllerTime = 0;
-SDL_FingerID firstFingerId = 0;
 int32_t mapXScroll = 0;
 int32_t mapYScroll = 0;
 float cursorSpeedup = 1.0f;
 float resolutionSpeedMod = 1.0f;
+float controllerLeftoverX = 0;
+float controllerLeftoverY = 0;
 
 SceWChar16 libime_out[SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1];
 static char libime_initval[8] = { 1 };
@@ -1074,24 +1073,24 @@ static void buildNormalizedQwertyKeys()
     keys[SDL_SCANCODE_F13] = -1;
     keys[SDL_SCANCODE_F14] = -1;
     keys[SDL_SCANCODE_F15] = -1;
-    //keys[DIK_KANA] = -1;
-    //keys[DIK_CONVERT] = -1;
-    //keys[DIK_NOCONVERT] = -1;
-    //keys[DIK_YEN] = -1;
+    // keys[DIK_KANA] = -1;
+    // keys[DIK_CONVERT] = -1;
+    // keys[DIK_NOCONVERT] = -1;
+    // keys[DIK_YEN] = -1;
     keys[SDL_SCANCODE_KP_EQUALS] = -1;
-    //keys[DIK_PREVTRACK] = -1;
-    //keys[DIK_AT] = -1;
-    //keys[DIK_COLON] = -1;
-    //keys[DIK_UNDERLINE] = -1;
-    //keys[DIK_KANJI] = -1;
+    // keys[DIK_PREVTRACK] = -1;
+    // keys[DIK_AT] = -1;
+    // keys[DIK_COLON] = -1;
+    // keys[DIK_UNDERLINE] = -1;
+    // keys[DIK_KANJI] = -1;
     keys[SDL_SCANCODE_STOP] = -1;
-    //keys[DIK_AX] = -1;
-    //keys[DIK_UNLABELED] = -1;
+    // keys[DIK_AX] = -1;
+    // keys[DIK_UNLABELED] = -1;
     keys[SDL_SCANCODE_KP_ENTER] = SDL_SCANCODE_KP_ENTER;
     keys[SDL_SCANCODE_RCTRL] = SDL_SCANCODE_RCTRL;
     keys[SDL_SCANCODE_KP_COMMA] = -1;
     keys[SDL_SCANCODE_KP_DIVIDE] = SDL_SCANCODE_KP_DIVIDE;
-    //keys[DIK_SYSRQ] = 84;
+    // keys[DIK_SYSRQ] = 84;
     keys[SDL_SCANCODE_RALT] = SDL_SCANCODE_RALT;
     keys[SDL_SCANCODE_HOME] = SDL_SCANCODE_HOME;
     keys[SDL_SCANCODE_UP] = SDL_SCANCODE_UP;
@@ -1132,12 +1131,13 @@ void _GNW95_process_message()
             handleMouseEvent(&e);
             break;
         case SDL_FINGERDOWN:
+            touch_handle_start(&(e.tfinger));
+            break;
         case SDL_FINGERMOTION:
+            touch_handle_move(&(e.tfinger));
+            break;
         case SDL_FINGERUP:
-#ifdef __vita__
-            handleTouchEventDirect(e.tfinger);
-#endif
-            handleTouchEvent(&e);
+            touch_handle_end(&(e.tfinger));
             break;
         case SDL_KEYDOWN:
         case SDL_KEYUP:
@@ -1200,9 +1200,9 @@ void _GNW95_process_message()
         sceImeUpdate();
     }
     mapScroll(mapXScroll, mapYScroll);
-    wmVitaScroll(mapXScroll, mapYScroll);
     processControllerAxisMotion();
 #endif
+    touch_process_gesture();
 
     if (gProgramIsActive && !keyboardIsDisabled()) {
         // NOTE: Uninline
@@ -1329,66 +1329,44 @@ void closeController()
     }
 }
 
-void handleTouchEventDirect(const SDL_TouchFingerEvent& event)
-{
-    // ignore back touchpad
-    if (event.touchId == 0 && frontTouchpadMode != TouchpadMode::TOUCH_DIRECT || event.touchId == 1) {
-        return;
-    }
-
-    if (event.type == SDL_FINGERDOWN) {
-        ++numTouches;
-        if (numTouches == 1) {
-            delayedTouch = 0;
-            firstFingerId = event.fingerId;
-        }
-    } else if (event.type == SDL_FINGERUP) {
-        --numTouches;
-    }
-
-    if (firstFingerId == event.fingerId) {
-        int width = screenGetWidth();
-        int height = screenGetHeight();
-
-        int touchPosX = static_cast<float>(VITA_FULLSCREEN_WIDTH * event.x - getRenderRect().x) *
-                                    (static_cast<float>(width) / getRenderRect().w);
-        int touchPosY = static_cast<float>(VITA_FULLSCREEN_HEIGHT * event.y - getRenderRect().y) *
-                                    (static_cast<float>(height) / getRenderRect().h);
-
-        gTouchMouseDeltaX = touchPosX - mouseGetMouseCursorX();
-        gTouchMouseDeltaY = touchPosY - mouseGetMouseCursorY();
-    }
-}
-
 void processControllerAxisMotion()
 {
     const uint32_t currentTime = SDL_GetTicks();
-    const float deltaTime = currentTime - lastControllerTime;
+    const uint32_t deltaTime = currentTime - lastControllerTime;
     lastControllerTime = currentTime;
 
     if (controllerLeftXAxis != 0 || controllerLeftYAxis != 0) {
         const int16_t xSign = (controllerLeftXAxis > 0) - (controllerLeftXAxis < 0);
         const int16_t ySign = (controllerLeftYAxis > 0) - (controllerLeftYAxis < 0);
 
-        gTouchMouseDeltaX += std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
-                            * cursorSpeedup * resolutionSpeedMod * mouseGetSensitivity() * CONTROLLER_SPEED_MOD;
-        gTouchMouseDeltaY += std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
-                            * cursorSpeedup * resolutionSpeedMod * mouseGetSensitivity() * CONTROLLER_SPEED_MOD;
+        float gTouchMouseDeltaX = std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
+                            * cursorSpeedup * resolutionSpeedMod * mouseGetSensitivity() * CONTROLLER_SPEED_MOD + controllerLeftoverX;
+        float gTouchMouseDeltaY = std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
+                            * cursorSpeedup * resolutionSpeedMod * mouseGetSensitivity() * CONTROLLER_SPEED_MOD + controllerLeftoverY;
+
+        controllerLeftoverX = gTouchMouseDeltaX - static_cast<int>(gTouchMouseDeltaX);
+        controllerLeftoverY = gTouchMouseDeltaY - static_cast<int>(gTouchMouseDeltaY);
+
+        _mouse_simulate_input(gTouchMouseDeltaX, gTouchMouseDeltaY, 0);
     }
 }
 
 void handleControllerAxisEvent(const SDL_ControllerAxisEvent& motion)
 {
     if (motion.axis == SDL_CONTROLLER_AXIS_LEFTX) {
-        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE)
+        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE) {
             controllerLeftXAxis = motion.value;
-        else
+        } else {
             controllerLeftXAxis = 0;
+            controllerLeftoverX = 0;
+        }
     } else if (motion.axis == SDL_CONTROLLER_AXIS_LEFTY) {
-        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE)
+        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE) {
             controllerLeftYAxis = motion.value;
-        else
+        } else {
             controllerLeftYAxis = 0;
+            controllerLeftoverY = 0;
+        }
     } else if (motion.axis == SDL_CONTROLLER_AXIS_RIGHTX) {
         if (std::abs(motion.value) > CONTROLLER_R_DEADZONE)
             controllerRightXAxis = motion.value;

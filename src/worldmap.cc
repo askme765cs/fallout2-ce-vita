@@ -6592,12 +6592,15 @@ void wmBlinkRndEncounterIcon(bool special)
     wmGenData.encounterIconIsVisible = false;
 }
 
-void wmVitaScroll(int dx, int dy)
+void wmSetPartyWorldPos(int x, int y)
 {
-    if (wmInterfaceWasInitialized)
-    {
-        wmInterfaceScroll(dx, dy, NULL);
-    }
+    wmGenData.worldPosX = x;
+    wmGenData.worldPosY = y;
+}
+
+void wmCarSetCurrentArea(int area)
+{
+    wmGenData.currentCarAreaId = area;
 }
 
 } // namespace fallout

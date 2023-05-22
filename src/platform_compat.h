@@ -35,9 +35,13 @@ int compat_mkdir(const char* path);
 unsigned int compat_timeGetTime();
 FILE* compat_fopen(const char* path, const char* mode);
 gzFile compat_gzopen(const char* path, const char* mode);
+char* compat_fgets(char* buffer, int maxCount, FILE* stream);
+char* compat_gzgets(gzFile stream, char* buffer, int maxCount);
 int compat_remove(const char* path);
 int compat_rename(const char* oldFileName, const char* newFileName);
 void compat_windows_path_to_native(char* path);
+void compat_resolve_path(char* path);
+int compat_access(const char* path, int mode);
 char* compat_strdup(const char* string);
 long getFileSize(FILE* stream);
 
