@@ -2221,7 +2221,6 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
     int v1 = 0;
 
     int rc = 1;
-
     while (rc == 1) {
         sharedFpsLimiter.mark();
 

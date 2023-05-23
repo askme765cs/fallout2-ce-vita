@@ -1347,7 +1347,14 @@ void processControllerAxisMotion()
         controllerLeftoverX = gTouchMouseDeltaX - static_cast<int>(gTouchMouseDeltaX);
         controllerLeftoverY = gTouchMouseDeltaY - static_cast<int>(gTouchMouseDeltaY);
 
-        _mouse_simulate_input(gTouchMouseDeltaX, gTouchMouseDeltaY, 0);
+        int buttonState = 0;
+        if (SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_A)) {
+            buttonState = MOUSE_STATE_LEFT_BUTTON_DOWN;
+        } else if (SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B)) {
+            buttonState = MOUSE_STATE_RIGHT_BUTTON_DOWN;
+        }
+
+        _mouse_simulate_input(gTouchMouseDeltaX, gTouchMouseDeltaY, buttonState);
     }
 }
 
