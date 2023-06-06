@@ -135,6 +135,15 @@ int artInit()
     char string[200];
 
     int cacheSize = settings.system.art_cache_size;
+
+#ifdef __vita__
+    // since RAM is limited on Vita
+    if (cacheSize > 256)
+    {
+        cacheSize = 256;
+    }
+#endif
+
     if (!cacheInit(&gArtCache, artCacheGetFileSizeImpl, artCacheReadDataImpl, artCacheFreeImpl, cacheSize << 20)) {
         debugPrint("cache_init failed in art_init\n");
         return -1;
