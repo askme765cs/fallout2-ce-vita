@@ -289,8 +289,7 @@ void touch_process_gesture()
             }
 
 #ifdef __vita__
-            if ((touches[active[0]].touchId == 0 && frontTouchpadMode == TouchpadMode::kTouchDirect)
-                || (touches[active[0]].touchId == 1 && rearTouchpadMode == TouchpadMode::kTouchDirect))
+            if (touches[active[0]].touchId == 0 && frontTouchpadMode == TouchpadMode::kTouchDirect)
             {
                 SDL_Rect renderRect = getRenderRect();
                 float width = static_cast<float>(screenGetWidth());

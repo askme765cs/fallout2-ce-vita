@@ -1938,7 +1938,6 @@ static int _get_input_str(int win, int cancelKeyCode, char* text, int maxLength,
     bool blink = false;
 
     int rc = 1;
-
     while (rc == 1) {
         sharedFpsLimiter.mark();
 
