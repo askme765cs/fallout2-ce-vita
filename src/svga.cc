@@ -112,6 +112,7 @@ void _zero_vid_mem()
 int _GNW95_init_mode_ex(int width, int height, int bpp)
 {
     bool fullscreen = true;
+    int scale = 1;
 
     Config resolutionConfig;
     if (configInit(&resolutionConfig)) {
@@ -155,6 +156,18 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
             }
 #endif
 
+            int scaleValue;
+            if (configGetInt(&resolutionConfig, "MAIN", "SCALE_2X", &scaleValue)) {
+                scale = scaleValue + 1; // 0 = 1x, 1 = 2x
+                // Only allow scaling if resulting game resolution is >= 640x480
+                if ((width / scale) < 640 || (height / scale) < 480) {
+                    scale = 1;
+                } else {
+                    width /= scale;
+                    height /= scale;
+                }
+            }
+
             configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode);
             configGetInt(&resolutionConfig, "IFACE", "IFACE_BAR_WIDTH", &gInterfaceBarWidth);
             configGetInt(&resolutionConfig, "IFACE", "IFACE_BAR_SIDE_ART", &gInterfaceSidePanelsImageId);
@@ -189,7 +202,7 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
         configFree(&resolutionConfig);
     }
 
-    if (_GNW95_init_window(width, height, fullscreen) == -1) {
+    if (_GNW95_init_window(width, height, fullscreen, scale) == -1) {
         return -1;
     }
 
@@ -217,7 +230,7 @@ int _init_vesa_mode(int width, int height)
 }
 
 // 0x4CAEDC
-int _GNW95_init_window(int width, int height, bool fullscreen)
+int _GNW95_init_window(int width, int height, bool fullscreen, int scale)
 {
 #ifdef __vita__
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -260,7 +273,7 @@ int _GNW95_init_window(int width, int height, bool fullscreen)
             windowFlags |= SDL_WINDOW_FULLSCREEN;
         }
 
-        gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, windowFlags);
+        gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width * scale, height * scale, windowFlags);
         if (gSdlWindow == NULL) {
             return -1;
         }
