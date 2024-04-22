@@ -41,7 +41,7 @@ typedef struct DirectoryFileFindData {
 #else
     DIR* dir;
     struct dirent* entry;
-    char path[COMPAT_MAX_PATH];
+    char pattern[COMPAT_MAX_FNAME];
 #endif
 } DirectoryFileFindData;
 
