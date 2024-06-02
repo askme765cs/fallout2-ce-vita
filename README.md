@@ -5,6 +5,8 @@ Download fallout2-ce.vpk file and install it to your PS Vita.
 
 Copy ```master.dat```, ```critter.dat```, ```patch000.dat```, ```data``` and ```sound``` folders from the installed Fallout 2 game folder into to ```ux0:data/fallout2/```. Copy ```fallout2.cfg``` too, if you're using non-english Fallout 2 version (or make sure that ```language``` setting is properly set in it (```language=german```, ```language=french```, etc)).
 
+[FdFix](https://github.com/TheOfficialFloW/FdFix) plugin is required for proper suspend/resume support.
+
 ## Building
 
 ### Prerequisites
