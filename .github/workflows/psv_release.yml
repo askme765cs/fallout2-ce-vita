@@ -43,7 +43,7 @@ jobs:
     - name: Build
       run: |
         export PATH="$VITASDK/bin:$PATH"
-        cmake -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=Release -B build
+        cmake -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=None -B build
         cmake --build build -- -j4
       env:
         VITASDK: /usr/local/vitasdk
@@ -57,7 +57,6 @@ jobs:
         prerelease: true
         files: |
           build/fallout2-ce.vpk
-          build/fallout2-ce
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -67,6 +66,5 @@ jobs:
       with:
         files: |
           build/fallout2-ce.vpk
-          build/fallout2-ce
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
