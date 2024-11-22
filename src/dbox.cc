@@ -9,6 +9,7 @@
 #include "character_editor.h"
 #include "color.h"
 #include "debug.h"
+#include "delay.h"
 #include "draw.h"
 #include "game.h"
 #include "game_sound.h"
@@ -156,12 +157,12 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
     bool v86 = false;
 
     bool hasTwoButtons = false;
-    if (a8 != NULL) {
+    if (a8 != nullptr) {
         hasTwoButtons = true;
     }
 
     bool hasTitle = false;
-    if (title != NULL) {
+    if (title != nullptr) {
         hasTitle = true;
     }
 
@@ -178,7 +179,7 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
 
     int linesCount = 0;
     for (int index = 0; index < bodyLength; index++) {
-        // NOTE: Calls [fontGetStringWidth] twice because of [max] macro.
+        // NOTE: Originally there is no `max` macro.
         maximumLineWidth = std::max(fontGetStringWidth(body[index]), maximumLineWidth);
         linesCount++;
     }
@@ -206,14 +207,14 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
     }
 
     // Maintain original position in original resolution, otherwise center it.
-    if (screenGetWidth() != 640) x = (screenGetWidth() - backgroundFrmImage.getWidth()) / 2;
-    if (screenGetHeight() != 480) y = (screenGetHeight() - backgroundFrmImage.getHeight()) / 2;
+    x += (screenGetWidth() - 640) / 2;
+    y += (screenGetHeight() - 480) / 2;
     int win = windowCreate(x,
         y,
         backgroundFrmImage.getWidth(),
         backgroundFrmImage.getHeight(),
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+        WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (win == -1) {
         fontSetCurrent(savedFont);
         return -1;
@@ -265,7 +266,7 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
         }
 
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "%s%s", asc_5186C8, "DBOX.MSG");
+        snprintf(path, sizeof(path), "%s%s", asc_5186C8, "DBOX.MSG");
 
         if (!messageListLoad(&messageList, path)) {
             fontSetCurrent(savedFont);
@@ -297,7 +298,7 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
             500,
             buttonNormalFrmImage.getData(),
             buttonPressedFrmImage.getData(),
-            NULL,
+            nullptr,
             BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -338,7 +339,7 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
                 501,
                 buttonNormalFrmImage.getData(),
                 buttonPressedFrmImage.getData(),
-                0,
+                nullptr,
                 BUTTON_FLAG_TRANSPARENT);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -372,7 +373,7 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
             }
 
             char path[COMPAT_MAX_PATH];
-            sprintf(path, "%s%s", asc_5186C8, "DBOX.MSG");
+            snprintf(path, sizeof(path), "%s%s", asc_5186C8, "DBOX.MSG");
 
             if (!messageListLoad(&messageList, path)) {
                 fontSetCurrent(savedFont);
@@ -403,7 +404,7 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
                 501,
                 buttonNormalFrmImage.getData(),
                 buttonPressedFrmImage.getData(),
-                NULL,
+                nullptr,
                 BUTTON_FLAG_TRANSPARENT);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -415,7 +416,8 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
 
     fontSetCurrent(101);
 
-    int v23 = _ytable[dialogType];
+    int nextY = _ytable[dialogType];
+    int maxY = _ytable[dialogType] + _dblines[dialogType] * fontGetLineHeight();
 
     if ((flags & DIALOG_BOX_NO_VERTICAL_CENTERING) == 0) {
         //int v41 = _dblines[dialogType] * fontGetLineHeight() / 2 + v23;
@@ -426,14 +428,14 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
 
     if (hasTitle) {
         if ((flags & DIALOG_BOX_NO_HORIZONTAL_CENTERING) != 0) {
-            fontDrawText(windowBuf + backgroundFrmImage.getWidth() * v23 + _xtable[dialogType],
+            fontDrawText(windowBuf + backgroundFrmImage.getWidth() * nextY + _xtable[dialogType],
                 title,
                 backgroundFrmImage.getWidth(),
                 backgroundFrmImage.getWidth(),
                 titleColor);
         } else {
             int length = fontGetStringWidth(title);
-            fontDrawText(windowBuf + backgroundFrmImage.getWidth() * v23 + (backgroundFrmImage.getWidth() - length) / 2,
+            fontDrawText(windowBuf + backgroundFrmImage.getWidth() * nextY + (backgroundFrmImage.getWidth() - length) / 2,
                 title,
                 backgroundFrmImage.getWidth(),
                 backgroundFrmImage.getWidth(),
@@ -443,19 +445,20 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
         v23 += 10;
     }
 
-    for (int v94 = 0; v94 < bodyLength; v94++) {
-        int len = fontGetStringWidth(body[v94]);
-        if (len <= backgroundFrmImage.getWidth() - 26) {
+    for (int index = 0; index < bodyLength && nextY < maxY; index++) {
+        int width = fontGetStringWidth(body[index]);
+        int maxWidth = backgroundFrmImage.getWidth() - _xtable[dialogType] * 2;
+        if (width <= maxWidth) {
             if ((flags & DIALOG_BOX_NO_HORIZONTAL_CENTERING) != 0) {
-                fontDrawText(windowBuf + backgroundFrmImage.getWidth() * v23 + _xtable[dialogType],
-                    body[v94],
+                fontDrawText(windowBuf + backgroundFrmImage.getWidth() * nextY + _xtable[dialogType],
+                    body[index],
                     backgroundFrmImage.getWidth(),
                     backgroundFrmImage.getWidth(),
                     bodyColor);
             } else {
-                int length = fontGetStringWidth(body[v94]);
-                fontDrawText(windowBuf + backgroundFrmImage.getWidth() * v23 + (backgroundFrmImage.getWidth() - length) / 2,
-                    body[v94],
+                int length = fontGetStringWidth(body[index]);
+                fontDrawText(windowBuf + backgroundFrmImage.getWidth() * nextY + (backgroundFrmImage.getWidth() - length) / 2,
+                    body[index],
                     backgroundFrmImage.getWidth(),
                     backgroundFrmImage.getWidth(),
                     bodyColor);
@@ -465,29 +468,35 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
         } else {
             short beginnings[WORD_WRAP_MAX_COUNT];
             short count;
-            if (wordWrap(body[v94], backgroundFrmImage.getWidth() - 26, beginnings, &count) != 0) {
+            if (wordWrap(body[index], maxWidth, beginnings, &count) != 0) {
                 debugPrint("\nError: dialog_out");
             }
 
-            for (int v48 = 1; v48 < count; v48++) {
-                int v51 = beginnings[v48] - beginnings[v48 - 1];
-                if (v51 >= 260) {
-                    v51 = 259;
+            for (int beginningIndex = 1; beginningIndex < count && nextY < maxY; beginningIndex++) {
+                int subLineLength = beginnings[beginningIndex] - beginnings[beginningIndex - 1];
+                if (subLineLength >= 260) {
+                    subLineLength = 259;
                 }
 
                 char string[260];
-                strncpy(string, body[v94] + beginnings[v48 - 1], v51);
-                string[v51] = '\0';
+                strncpy(string, body[index] + beginnings[beginningIndex - 1], subLineLength);
+                string[subLineLength] = '\0';
+
+                // Remove trailing space as it affects width calculation.
+                if (subLineLength > 0 && string[subLineLength - 1] == ' ') {
+                    string[subLineLength - 1] = '\0';
+                    subLineLength -= 1;
+                }
 
                 if ((flags & DIALOG_BOX_NO_HORIZONTAL_CENTERING) != 0) {
-                    fontDrawText(windowBuf + backgroundFrmImage.getWidth() * v23 + _xtable[dialogType],
+                    fontDrawText(windowBuf + backgroundFrmImage.getWidth() * nextY + _xtable[dialogType],
                         string,
                         backgroundFrmImage.getWidth(),
                         backgroundFrmImage.getWidth(),
                         bodyColor);
                 } else {
                     int length = fontGetStringWidth(string);
-                    fontDrawText(windowBuf + backgroundFrmImage.getWidth() * v23 + (backgroundFrmImage.getWidth() - length) / 2,
+                    fontDrawText(windowBuf + backgroundFrmImage.getWidth() * nextY + (backgroundFrmImage.getWidth() - length) / 2,
                         string,
                         backgroundFrmImage.getWidth(),
                         backgroundFrmImage.getWidth(),
@@ -577,9 +586,9 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
     int backgroundHeight = frmImages[FILE_DIALOG_FRM_BACKGROUND].getHeight();
 
     // Maintain original position in original resolution, otherwise center it.
-    if (screenGetWidth() != 640) x = (screenGetWidth() - backgroundWidth) / 2;
-    if (screenGetHeight() != 480) y = (screenGetHeight() - backgroundHeight) / 2;
-    int win = windowCreate(x, y, backgroundWidth, backgroundHeight, 256, WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+    x += (screenGetWidth() - 640) / 2;
+    y += (screenGetHeight() - 480) / 2;
+    int win = windowCreate(x, y, backgroundWidth, backgroundHeight, 256, WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (win == -1) {
         return -1;
     }
@@ -596,7 +605,7 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "DBOX.MSG");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "DBOX.MSG");
 
     if (!messageListLoad(&messageList, path)) {
         windowDestroy(win);
@@ -624,7 +633,7 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
         500,
         frmImages[FILE_DIALOG_FRM_LITTLE_RED_BUTTON_NORMAL].getData(),
         frmImages[FILE_DIALOG_FRM_LITTLE_RED_BUTTON_PRESSED].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (doneBtn != -1) {
         buttonSetCallbacks(doneBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -641,7 +650,7 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
         501,
         frmImages[FILE_DIALOG_FRM_LITTLE_RED_BUTTON_NORMAL].getData(),
         frmImages[FILE_DIALOG_FRM_LITTLE_RED_BUTTON_PRESSED].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (cancelBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -658,7 +667,7 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
         505,
         frmImages[FILE_DIALOG_FRM_SCROLL_UP_ARROW_NORMAL].getData(),
         frmImages[FILE_DIALOG_FRM_SCROLL_UP_ARROW_PRESSED].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (scrollUpBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -675,7 +684,7 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
         503,
         frmImages[FILE_DIALOG_FRM_SCROLL_DOWN_ARROW_NORMAL].getData(),
         frmImages[FILE_DIALOG_FRM_SCROLL_DOWN_ARROW_PRESSED].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (scrollUpBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -691,12 +700,12 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
         -1,
         -1,
         502,
-        NULL,
-        NULL,
-        NULL,
+        nullptr,
+        nullptr,
+        nullptr,
         0);
 
-    if (title != NULL) {
+    if (title != nullptr) {
         fontDrawText(windowBuffer + backgroundWidth * FILE_DIALOG_TITLE_Y + FILE_DIALOG_TITLE_X, title, backgroundWidth, backgroundWidth, _colorTable[18979]);
     }
 
@@ -866,8 +875,8 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
                 }
 
                 unsigned int delay = (scrollCounter > 14.4) ? 1000 / scrollDelay : 1000 / 24;
-                while (getTicksSince(scrollTick) < delay) {
-                }
+
+                delay_ms(delay - (getTicks() - scrollTick));
 
                 if (_game_user_wants_to_quit != 0) {
                     rc = 1;
@@ -892,8 +901,7 @@ int showLoadFileDialog(char* title, char** fileList, char* dest, int fileListLen
                 doubleClickSelectedFileIndex = -2;
             }
 
-            while (getTicksSince(tick) < (1000 / 24)) {
-            }
+            delay_ms(1000 / 24 - (getTicks() - tick));
         }
 
         if (_game_user_wants_to_quit) {
@@ -947,9 +955,9 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
     int backgroundHeight = frmImages[FILE_DIALOG_FRM_BACKGROUND].getHeight();
 
     // Maintain original position in original resolution, otherwise center it.
-    if (screenGetWidth() != 640) x = (screenGetWidth() - backgroundWidth) / 2;
-    if (screenGetHeight() != 480) y = (screenGetHeight() - backgroundHeight) / 2;
-    int win = windowCreate(x, y, backgroundWidth, backgroundHeight, 256, WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+    x += (screenGetWidth() - 640) / 2;
+    y += (screenGetHeight() - 480) / 2;
+    int win = windowCreate(x, y, backgroundWidth, backgroundHeight, 256, WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (win == -1) {
         return -1;
     }
@@ -966,7 +974,7 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "DBOX.MSG");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "DBOX.MSG");
 
     if (!messageListLoad(&messageList, path)) {
         windowDestroy(win);
@@ -994,7 +1002,7 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
         500,
         frmImages[FILE_DIALOG_FRM_LITTLE_RED_BUTTON_NORMAL].getData(),
         frmImages[FILE_DIALOG_FRM_LITTLE_RED_BUTTON_PRESSED].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (doneBtn != -1) {
         buttonSetCallbacks(doneBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -1011,7 +1019,7 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
         501,
         frmImages[FILE_DIALOG_FRM_LITTLE_RED_BUTTON_NORMAL].getData(),
         frmImages[FILE_DIALOG_FRM_LITTLE_RED_BUTTON_PRESSED].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (cancelBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -1028,7 +1036,7 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
         505,
         frmImages[FILE_DIALOG_FRM_SCROLL_UP_ARROW_NORMAL].getData(),
         frmImages[FILE_DIALOG_FRM_SCROLL_UP_ARROW_PRESSED].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (scrollUpBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -1045,7 +1053,7 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
         503,
         frmImages[FILE_DIALOG_FRM_SCROLL_DOWN_ARROW_NORMAL].getData(),
         frmImages[FILE_DIALOG_FRM_SCROLL_DOWN_ARROW_PRESSED].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (scrollUpBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -1061,12 +1069,12 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
         -1,
         -1,
         502,
-        NULL,
-        NULL,
-        NULL,
+        nullptr,
+        nullptr,
+        nullptr,
         0);
 
-    if (title != NULL) {
+    if (title != nullptr) {
         fontDrawText(windowBuffer + backgroundWidth * FILE_DIALOG_TITLE_Y + FILE_DIALOG_TITLE_X, title, backgroundWidth, backgroundWidth, _colorTable[18979]);
     }
 
@@ -1099,6 +1107,8 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
     fontDrawText(fileNameBufferPtr, fileNameCopy, backgroundWidth, backgroundWidth, _colorTable[992]);
 
     windowRefresh(win);
+
+    beginTextInput();
 
     int blinkingCounter = 3;
     bool blink = false;
@@ -1318,8 +1328,7 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
                 // FIXME: Missing windowRefresh makes blinking useless.
 
                 unsigned int delay = (scrollCounter > 14.4) ? 1000 / scrollDelay : 1000 / 24;
-                while (getTicksSince(scrollTick) < delay) {
-                }
+                delay_ms(delay - (getTicks() - scrollTick));
 
                 if (_game_user_wants_to_quit != 0) {
                     rc = 1;
@@ -1354,8 +1363,7 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
                 doubleClickSelectedFileIndex = -2;
             }
 
-            while (getTicksSince(tick) < (1000 / 24)) {
-            }
+            delay_ms(1000 / 24 - (getTicks() - tick));
         }
 
         if (_game_user_wants_to_quit != 0) {
@@ -1367,6 +1375,8 @@ int showSaveFileDialog(char* title, char** fileList, char* dest, int fileListLen
 #endif
         sharedFpsLimiter.throttle();
     }
+
+    endTextInput();
 
     if (rc == 0) {
         if (fileNameCopyLength != 0) {
@@ -1401,7 +1411,7 @@ static void fileDialogRenderFileList(unsigned char* buffer, char** fileList, int
 
         for (int index = 0; index < fileListLength; index++) {
             int color = index == selectedIndex ? _colorTable[32747] : _colorTable[992];
-            fontDrawText(buffer + pitch * y + FILE_DIALOG_FILE_LIST_X, fileList[pageOffset + index], pitch, pitch, color);
+            fontDrawText(buffer + pitch * y + FILE_DIALOG_FILE_LIST_X, fileList[pageOffset + index], FILE_DIALOG_FILE_LIST_WIDTH, pitch, color);
             y += lineHeight;
         }
     }

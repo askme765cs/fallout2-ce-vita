@@ -31,7 +31,7 @@ extern int leagcyWordWrap(const char* string, int width, short* breakpoints, sho
     int gap = fontGetLetterSpacing();
 
     int accum = 0;
-    const char* prevSpaceOrHyphen = NULL;
+    const char* prevSpaceOrHyphen = nullptr;
     const char* pch = string;
     while (*pch != '\0') {
         accum += gap + fontGetCharacterWidth(*pch & 0xFF);
@@ -45,7 +45,7 @@ extern int leagcyWordWrap(const char* string, int width, short* breakpoints, sho
                 return -1;
             }
 
-            if (prevSpaceOrHyphen != NULL) {
+            if (prevSpaceOrHyphen != nullptr) {
                 // Word wrap.
                 breakpoints[*breakpointsLengthPtr] = prevSpaceOrHyphen - string + 1;
                 *breakpointsLengthPtr += 1;
@@ -59,7 +59,7 @@ extern int leagcyWordWrap(const char* string, int width, short* breakpoints, sho
                 pch--;
             }
 
-            prevSpaceOrHyphen = NULL;
+            prevSpaceOrHyphen = nullptr;
             accum = 0;
         }
         pch++;

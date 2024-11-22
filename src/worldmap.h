@@ -229,6 +229,12 @@ typedef enum Map {
     MAP_IN_GAME_MOVIE1 = 149,
 } Map;
 
+#define ENCOUNTER_FLAG_NO_CAR 0x1
+#define ENCOUNTER_FLAG_LOCK 0x2
+#define ENCOUNTER_FLAG_NO_ICON 0x4
+#define ENCOUNTER_FLAG_ICON_SP 0x8
+#define ENCOUNTER_FLAG_FADEOUT 0x10
+
 extern unsigned char* circleBlendTable;
 
 int wmWorldMap_init();
@@ -237,7 +243,7 @@ int wmWorldMap_reset();
 int wmWorldMap_save(File* stream);
 int wmWorldMap_load(File* stream);
 int wmMapMaxCount();
-int wmMapIdxToName(int mapIdx, char* dest);
+int wmMapIdxToName(int mapIdx, char* dest, size_t size);
 int wmMapMatchNameToIdx(char* name);
 bool wmMapIdxIsSaveable(int mapIdx);
 bool wmMapIsSaveable();
@@ -276,6 +282,10 @@ int wmMapMusicStart();
 int wmSetMapMusic(int mapIdx, const char* name);
 int wmMatchAreaContainingMapIdx(int mapIdx, int* areaIdxPtr);
 int wmTeleportToArea(int areaIdx);
+
+void wmSetPartyWorldPos(int x, int y);
+void wmCarSetCurrentArea(int area);
+void wmForceEncounter(int map, unsigned int flags);
 
 } // namespace fallout
 

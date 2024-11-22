@@ -40,7 +40,7 @@ static void soundEffectsCacheFreeHandles();
 static int soundEffectsCreate(int* handlePtr, int id, void* data, CacheEntry* cacheHandle);
 static bool soundEffectsIsValidHandle(int a1);
 static int soundEffectsCacheFileReadCompressed(int handle, void* buf, unsigned int size);
-static int _sfxc_ad_reader(int handle, void* buf, unsigned int size);
+static int soundEffectsCacheSoundDecoderReadHandler(void* data, void* buf, unsigned int size);
 
 // 0x50DE04
 static const char* off_50DE04 = "";
@@ -54,17 +54,17 @@ static int _sfxc_cmpr = 1;
 
 // sfxc_pcache
 // 0x51C8EC
-static Cache* gSoundEffectsCache = NULL;
+static Cache* gSoundEffectsCache = nullptr;
 
 // sfxc_dlevel
 // 0x51C8DC
 static int gSoundEffectsCacheDebugLevel = INT_MAX;
 
 // 0x51C8E0
-static char* gSoundEffectsCacheEffectsPath = NULL;
+static char* gSoundEffectsCacheEffectsPath = nullptr;
 
 // 0x51C8E4
-static SoundEffect* gSoundEffects = NULL;
+static SoundEffect* gSoundEffects = nullptr;
 
 // 0x51C8E8
 static int _sfxc_files_open = 0;
@@ -79,12 +79,12 @@ int soundEffectsCacheInit(int cacheSize, const char* effectsPath)
         return -1;
     }
 
-    if (effectsPath == NULL) {
+    if (effectsPath == nullptr) {
         effectsPath = off_50DE04;
     }
 
     gSoundEffectsCacheEffectsPath = internal_strdup(effectsPath);
-    if (gSoundEffectsCacheEffectsPath == NULL) {
+    if (gSoundEffectsCacheEffectsPath == nullptr) {
         return -1;
     }
 
@@ -100,7 +100,7 @@ int soundEffectsCacheInit(int cacheSize, const char* effectsPath)
     }
 
     gSoundEffectsCache = (Cache*)internal_malloc(sizeof(*gSoundEffectsCache));
-    if (gSoundEffectsCache == NULL) {
+    if (gSoundEffectsCache == nullptr) {
         soundEffectsCacheFreeHandles();
         soundEffectsListExit();
         internal_free(gSoundEffectsCacheEffectsPath);
@@ -126,7 +126,7 @@ void soundEffectsCacheExit()
     if (gSoundEffectsCacheInitialized) {
         cacheFree(gSoundEffectsCache);
         internal_free(gSoundEffectsCache);
-        gSoundEffectsCache = NULL;
+        gSoundEffectsCache = nullptr;
 
         soundEffectsCacheFreeHandles();
 
@@ -154,14 +154,14 @@ void soundEffectsCacheFlush()
 
 // sfxc_cached_open
 // 0x4A915C
-int soundEffectsCacheFileOpen(const char* fname, int mode, ...)
+int soundEffectsCacheFileOpen(const char* fname, int* sampleRate)
 {
     if (_sfxc_files_open >= SOUND_EFFECTS_MAX_COUNT) {
         return -1;
     }
 
     char* copy = internal_strdup(fname);
-    if (copy == NULL) {
+    if (copy == nullptr) {
         return -1;
     }
 
@@ -377,7 +377,7 @@ static void soundEffectsCacheFreeImpl(void* ptr)
 static int soundEffectsCacheCreateHandles()
 {
     gSoundEffects = (SoundEffect*)internal_malloc(sizeof(*gSoundEffects) * SOUND_EFFECTS_MAX_COUNT);
-    if (gSoundEffects == NULL) {
+    if (gSoundEffects == nullptr) {
         return -1;
     }
 
@@ -473,14 +473,14 @@ static int soundEffectsCacheFileReadCompressed(int handle, void* buf, unsigned i
     SoundEffect* soundEffect = &(gSoundEffects[handle]);
     soundEffect->dataPosition = 0;
 
-    int v1;
-    int v2;
-    int v3;
-    SoundDecoder* soundDecoder = soundDecoderInit(_sfxc_ad_reader, handle, &v1, &v2, &v3);
+    int channels;
+    int sampleRate;
+    int sampleCount;
+    SoundDecoder* soundDecoder = soundDecoderInit(soundEffectsCacheSoundDecoderReadHandler, &handle, &channels, &sampleRate, &sampleCount);
 
     if (soundEffect->position != 0) {
         void* temp = internal_malloc(soundEffect->position);
-        if (temp == NULL) {
+        if (temp == nullptr) {
             soundDecoderFree(soundDecoder);
             return -1;
         }
@@ -505,12 +505,13 @@ static int soundEffectsCacheFileReadCompressed(int handle, void* buf, unsigned i
 }
 
 // 0x4A9774
-static int _sfxc_ad_reader(int handle, void* buf, unsigned int size)
+static int soundEffectsCacheSoundDecoderReadHandler(void* data, void* buf, unsigned int size)
 {
     if (size == 0) {
         return 0;
     }
 
+    int handle = *reinterpret_cast<int*>(data);
     SoundEffect* soundEffect = &(gSoundEffects[handle]);
 
     unsigned int bytesToRead = soundEffect->fileSize - soundEffect->dataPosition;

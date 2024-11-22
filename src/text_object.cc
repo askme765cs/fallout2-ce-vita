@@ -153,7 +153,7 @@ void textObjectsSetLineDelay(double value)
 
 // text_object_create
 // 0x4B036C
-int textObjectAdd(Object* object, char* string, int font, int color, int a5, Rect* rect)
+int textObjectAdd(Object* object, char* string, int font, int color, int outlineColor, Rect* rect)
 {
     if (!gTextObjectsInitialized) {
         return -1;
@@ -164,7 +164,7 @@ int textObjectAdd(Object* object, char* string, int font, int color, int a5, Rec
         return -1;
     }
 
-    if (string == NULL) {
+    if (string == nullptr) {
         return -1;
     }
 
@@ -173,7 +173,7 @@ int textObjectAdd(Object* object, char* string, int font, int color, int a5, Rec
     }
 
     TextObject* textObject = (TextObject*)internal_malloc(sizeof(*textObject));
-    if (textObject == NULL) {
+    if (textObject == nullptr) {
         return -1;
     }
 
@@ -206,25 +206,22 @@ int textObjectAdd(Object* object, char* string, int font, int color, int a5, Rec
         char c = *ending;
         *ending = '\0';
 
-        // NOTE: Calls [fontGetStringWidth] twice, probably result of using min/max macro
-        int width = fontGetStringWidth(beginning);
-        if (width >= textObject->width) {
-            textObject->width = width;
-        }
+        // NOTE: Calls `fontGetStringWidth` twice.
+        textObject->width = std::max(textObject->width, fontGetStringWidth(beginning));
 
         *ending = c;
     }
 
     textObject->height = (fontGetLineHeight() + 1) * textObject->linesCount;
 
-    if (a5 != -1) {
+    if (outlineColor != -1) {
         textObject->width += 2;
         textObject->height += 2;
     }
 
     int size = textObject->width * textObject->height;
     textObject->data = (unsigned char*)internal_malloc(size);
-    if (textObject->data == NULL) {
+    if (textObject->data == nullptr) {
         fontSetCurrent(oldFont);
         return -1;
     }
@@ -234,7 +231,7 @@ int textObjectAdd(Object* object, char* string, int font, int color, int a5, Rec
     unsigned char* dest = textObject->data;
     int skip = textObject->width * (fontGetLineHeight() + 1);
 
-    if (a5 != -1) {
+    if (outlineColor != -1) {
         dest += textObject->width;
     }
 
@@ -256,11 +253,11 @@ int textObjectAdd(Object* object, char* string, int font, int color, int a5, Rec
         dest += skip;
     }
 
-    if (a5 != -1) {
-        bufferOutline(textObject->data, textObject->width, textObject->height, textObject->width, a5);
+    if (outlineColor != -1) {
+        bufferOutline(textObject->data, textObject->width, textObject->height, textObject->width, outlineColor);
     }
 
-    if (object != NULL) {
+    if (object != nullptr) {
         textObject->tile = object->tile;
     } else {
         textObject->flags |= TEXT_OBJECT_UNBOUNDED;
@@ -269,7 +266,7 @@ int textObjectAdd(Object* object, char* string, int font, int color, int a5, Rec
 
     textObjectFindPlacement(textObject);
 
-    if (rect != NULL) {
+    if (rect != nullptr) {
         rect->left = textObject->x;
         rect->top = textObject->y;
         rect->right = textObject->x + textObject->width - 1;

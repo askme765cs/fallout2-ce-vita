@@ -25,27 +25,27 @@ namespace fallout {
 
 #define MAX_WINDOW_COUNT (50)
 
-// The maximum number of radio groups.
-#define RADIO_GROUP_LIST_CAPACITY (64)
+// The maximum number of button groups.
+#define BUTTON_GROUP_LIST_CAPACITY (64)
 
 static void windowFree(int win);
 static void _win_buffering(bool a1);
 static void _win_move(int win_index, int x, int y);
 static void _win_clip(Window* window, RectListNode** rect, unsigned char* a3);
-static void _win_drag(int win);
+static void win_drag(int win);
 static void _refresh_all(Rect* rect, unsigned char* a2);
 static Button* buttonGetButton(int btn, Window** out_win);
 static int paletteOpenFileImpl(const char* path, int flags);
 static int paletteReadFileImpl(int fd, void* buf, size_t count);
 static int paletteCloseFileImpl(int fd);
 static Button* buttonCreateInternal(int win, int x, int y, int width, int height, int mouseEnterEventCode, int mouseExitEventCode, int mouseDownEventCode, int mouseUpEventCode, int flags, unsigned char* up, unsigned char* dn, unsigned char* hover);
-static int _GNW_check_buttons(Window* window, int* out_a2);
+static int _GNW_check_buttons(Window* window, int* keyCodePtr);
 static bool _button_under_mouse(Button* button, Rect* rect);
 static void buttonFree(Button* ptr);
 static int button_new_id();
-static int _win_group_check_buttons(int a1, int* a2, int a3, void (*a4)(int));
+static int _win_group_check_buttons(int buttonCount, int* btns, int maxChecked, RadioButtonCallback* func);
 static int _button_check_group(Button* button);
-static void _button_draw(Button* button, Window* window, unsigned char* data, int a4, Rect* a5, int a6);
+static void _button_draw(Button* button, Window* window, unsigned char* data, bool draw, Rect* bound, bool sound);
 static void _GNW_button_refresh(Window* window, Rect* rect);
 
 // 0x50FA30
@@ -73,7 +73,7 @@ int _GNW_wcolor[6] = {
 };
 
 // 0x51E3FC
-static unsigned char* _screen_buffer = NULL;
+static unsigned char* _screen_buffer = nullptr;
 
 // 0x51E400
 static bool _insideWinExit = false;
@@ -82,7 +82,7 @@ static bool _insideWinExit = false;
 static int _last_button_winID = -1;
 
 // 0x6ADD90
-static int gOrderedWindowIds[MAX_WINDOW_COUNT];
+static int gWindowIndexes[MAX_WINDOW_COUNT];
 
 // 0x6ADE58
 static Window* gWindows[MAX_WINDOW_COUNT];
@@ -112,7 +112,7 @@ static int _doing_refresh_all;
 static void* _GNW_texture;
 
 // 0x6ADF40
-static RadioGroup gRadioGroups[RADIO_GROUP_LIST_CAPACITY];
+static ButtonGroup gButtonGroups[BUTTON_GROUP_LIST_CAPACITY];
 
 // 0x4D5C30
 int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitProc* videoSystemExitProc, int a3)
@@ -137,11 +137,11 @@ int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitP
     }
 
     for (int index = 0; index < MAX_WINDOW_COUNT; index++) {
-        gOrderedWindowIds[index] = -1;
+        gWindowIndexes[index] = -1;
     }
 
-    if (_db_total() == 0) {
-        if (dbOpen(NULL, 0, _path_patches, 1) == -1) {
+    if (db_total() == 0) {
+        if (dbOpen(nullptr, 0, _path_patches, 1) == -1) {
             return WINDOW_MANAGER_ERR_INITIALIZING_DEFAULT_DATABASE;
         }
     }
@@ -157,7 +157,7 @@ int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitP
 
     int rc = videoSystemInitProc();
     if (rc == -1) {
-        if (gVideoSystemExitProc != NULL) {
+        if (gVideoSystemExitProc != nullptr) {
             gVideoSystemExitProc();
         }
 
@@ -170,8 +170,8 @@ int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitP
 
     if (a3 & 1) {
         _screen_buffer = (unsigned char*)internal_malloc((_scr_size.bottom - _scr_size.top + 1) * (_scr_size.right - _scr_size.left + 1));
-        if (_screen_buffer == NULL) {
-            if (gVideoSystemExitProc != NULL) {
+        if (_screen_buffer == nullptr) {
+            if (gVideoSystemExitProc != nullptr) {
                 gVideoSystemExitProc();
             } else {
                 directDrawFree();
@@ -189,14 +189,14 @@ int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitP
 
     if (!_initColors()) {
         unsigned char* palette = (unsigned char*)internal_malloc(768);
-        if (palette == NULL) {
-            if (gVideoSystemExitProc != NULL) {
+        if (palette == nullptr) {
+            if (gVideoSystemExitProc != nullptr) {
                 gVideoSystemExitProc();
             } else {
                 directDrawFree();
             }
 
-            if (_screen_buffer != NULL) {
+            if (_screen_buffer != nullptr) {
                 internal_free(_screen_buffer);
             }
 
@@ -220,14 +220,14 @@ int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitP
     _GNW_intr_init();
 
     Window* window = gWindows[0] = (Window*)internal_malloc(sizeof(*window));
-    if (window == NULL) {
-        if (gVideoSystemExitProc != NULL) {
+    if (window == nullptr) {
+        if (gVideoSystemExitProc != nullptr) {
             gVideoSystemExitProc();
         } else {
             directDrawFree();
         }
 
-        if (_screen_buffer != NULL) {
+        if (_screen_buffer != nullptr) {
             internal_free(_screen_buffer);
         }
 
@@ -242,21 +242,21 @@ int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitP
     window->rect.bottom = _scr_size.bottom;
     window->width = _scr_size.right - _scr_size.left + 1;
     window->height = _scr_size.bottom - _scr_size.top + 1;
-    window->field_24 = 0;
-    window->field_28 = 0;
-    window->buffer = NULL;
-    window->buttonListHead = NULL;
-    window->field_34 = NULL;
-    window->field_38 = 0;
-    window->menuBar = NULL;
+    window->tx = 0;
+    window->ty = 0;
+    window->buffer = nullptr;
+    window->buttonListHead = nullptr;
+    window->hoveredButton = nullptr;
+    window->clickedButton = nullptr;
+    window->menuBar = nullptr;
 
     gWindowsLength = 1;
     gWindowSystemInitialized = 1;
     _GNW_wcolor[3] = 21140;
     _GNW_wcolor[4] = 32747;
     _GNW_wcolor[5] = 31744;
-    gOrderedWindowIds[0] = 0;
-    _GNW_texture = NULL;
+    gWindowIndexes[0] = 0;
+    _GNW_texture = nullptr;
     _bk_color = 0;
     _GNW_wcolor[0] = 10570;
     _window_flags = a3;
@@ -280,15 +280,15 @@ void windowManagerExit(void)
                 windowFree(gWindows[index]->id);
             }
 
-            if (_GNW_texture != NULL) {
+            if (_GNW_texture != nullptr) {
                 internal_free(_GNW_texture);
             }
 
-            if (_screen_buffer != NULL) {
+            if (_screen_buffer != nullptr) {
                 internal_free(_screen_buffer);
             }
 
-            if (gVideoSystemExitProc != NULL) {
+            if (gVideoSystemExitProc != nullptr) {
                 gVideoSystemExitProc();
             }
 
@@ -312,7 +312,7 @@ void windowManagerExit(void)
 
 // win_add
 // 0x4D6238
-int windowCreate(int x, int y, int width, int height, int a4, int flags)
+int windowCreate(int x, int y, int width, int height, int color, int flags)
 {
     int v23;
     int v25, v26;
@@ -335,61 +335,61 @@ int windowCreate(int x, int y, int width, int height, int a4, int flags)
     }
 
     Window* window = gWindows[gWindowsLength] = (Window*)internal_malloc(sizeof(*window));
-    if (window == NULL) {
+    if (window == nullptr) {
         return -1;
     }
 
     window->buffer = (unsigned char*)internal_malloc(width * height);
-    if (window->buffer == NULL) {
+    if (window->buffer == nullptr) {
         internal_free(window);
         return -1;
     }
 
-    int index = 1;
-    while (windowGetWindow(index) != NULL) {
-        index++;
+    int id = 1;
+    while (windowGetWindow(id) != nullptr) {
+        id++;
     }
 
-    window->id = index;
+    window->id = id;
 
-    if ((flags & WINDOW_FLAG_0x01) != 0) {
+    if ((flags & WINDOW_USE_DEFAULTS) != 0) {
         flags |= _window_flags;
     }
 
     window->width = width;
     window->height = height;
     window->flags = flags;
-    window->field_24 = rand() & 0xFFFE;
-    window->field_28 = rand() & 0xFFFE;
+    window->tx = rand() & 0xFFFE;
+    window->ty = rand() & 0xFFFE;
 
-    if (a4 == 256) {
-        if (_GNW_texture == NULL) {
-            a4 = _colorTable[_GNW_wcolor[0]];
+    if (color == 256) {
+        if (_GNW_texture == nullptr) {
+            color = _colorTable[_GNW_wcolor[0]];
         }
-    } else if ((a4 & 0xFF00) != 0) {
-        int colorIndex = (a4 & 0xFF) - 1;
-        a4 = (a4 & ~0xFFFF) | _colorTable[_GNW_wcolor[colorIndex]];
+    } else if ((color & 0xFF00) != 0) {
+        int colorIndex = (color & 0xFF) - 1;
+        color = (color & ~0xFFFF) | _colorTable[_GNW_wcolor[colorIndex]];
     }
 
-    window->buttonListHead = 0;
-    window->field_34 = 0;
-    window->field_38 = 0;
-    window->menuBar = NULL;
+    window->buttonListHead = nullptr;
+    window->hoveredButton = nullptr;
+    window->clickedButton = nullptr;
+    window->menuBar = nullptr;
     window->blitProc = blitBufferToBufferTrans;
-    window->field_20 = a4;
-    gOrderedWindowIds[index] = gWindowsLength;
+    window->color = color;
+    gWindowIndexes[id] = gWindowsLength;
     gWindowsLength++;
 
-    windowFill(index, 0, 0, width, height, a4);
+    windowFill(id, 0, 0, width, height, color);
 
     window->flags |= WINDOW_HIDDEN;
-    _win_move(index, x, y);
+    _win_move(id, x, y);
     window->flags = flags;
 
-    if ((flags & WINDOW_FLAG_0x04) == 0) {
+    if ((flags & WINDOW_MOVE_ON_TOP) == 0) {
         v23 = gWindowsLength - 2;
         while (v23 > 0) {
-            if (!(gWindows[v23]->flags & WINDOW_FLAG_0x04)) {
+            if (!(gWindows[v23]->flags & WINDOW_MOVE_ON_TOP)) {
                 break;
             }
             v23--;
@@ -401,16 +401,16 @@ int windowCreate(int x, int y, int width, int height, int a4, int flags)
             while (v26 > v25) {
                 tmp = gWindows[v26 - 1];
                 gWindows[v26] = tmp;
-                gOrderedWindowIds[tmp->id] = v26;
+                gWindowIndexes[tmp->id] = v26;
                 v26--;
             }
 
             gWindows[v25] = window;
-            gOrderedWindowIds[index] = v25;
+            gWindowIndexes[id] = v25;
         }
     }
 
-    return index;
+    return id;
 }
 
 // win_remove
@@ -423,21 +423,21 @@ void windowDestroy(int win)
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
     Rect rect;
     rectCopy(&rect, &(window->rect));
 
-    int v1 = gOrderedWindowIds[window->id];
+    int v1 = gWindowIndexes[window->id];
     windowFree(win);
 
-    gOrderedWindowIds[win] = -1;
+    gWindowIndexes[win] = -1;
 
     for (int index = v1; index < gWindowsLength - 1; index++) {
         gWindows[index] = gWindows[index + 1];
-        gOrderedWindowIds[gWindows[index]->id] = index;
+        gWindowIndexes[gWindows[index]->id] = index;
     }
 
     gWindowsLength--;
@@ -450,20 +450,20 @@ void windowDestroy(int win)
 void windowFree(int win)
 {
     Window* window = windowGetWindow(win);
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
-    if (window->buffer != NULL) {
+    if (window->buffer != nullptr) {
         internal_free(window->buffer);
     }
 
-    if (window->menuBar != NULL) {
+    if (window->menuBar != nullptr) {
         internal_free(window->menuBar);
     }
 
     Button* curr = window->buttonListHead;
-    while (curr != NULL) {
+    while (curr != nullptr) {
         Button* next = curr->next;
         buttonFree(curr);
         curr = next;
@@ -475,7 +475,7 @@ void windowFree(int win)
 // 0x4D6558
 void _win_buffering(bool a1)
 {
-    if (_screen_buffer != NULL) {
+    if (_screen_buffer != nullptr) {
         _buffering = a1;
     }
 }
@@ -488,7 +488,7 @@ void windowDrawBorder(int win)
     }
 
     Window* window = windowGetWindow(win);
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
@@ -504,72 +504,68 @@ void windowDrawBorder(int win)
 }
 
 // 0x4D684C
-void windowDrawText(int win, const char* str, int a3, int x, int y, int a6)
+void windowDrawText(int win, const char* str, int width, int x, int y, int color)
 {
-    int v7;
-    int v14;
     unsigned char* buf;
-    int v27;
+    int textColor;
 
     Window* window = windowGetWindow(win);
-    v7 = a3;
 
     if (!gWindowSystemInitialized) {
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
-    if (a3 == 0) {
-        if (a6 & 0x040000) {
-            v7 = fontGetMonospacedStringWidth(str);
+    if (width == 0) {
+        if (color & 0x040000) {
+            width = fontGetMonospacedStringWidth(str);
         } else {
-            v7 = fontGetStringWidth(str);
+            width = fontGetStringWidth(str);
         }
     }
 
-    if (v7 + x > window->width) {
-        if (!(a6 & 0x04000000)) {
+    if (width + x > window->width) {
+        if (!(color & 0x04000000)) {
             return;
         }
 
-        v7 = window->width - x;
+        width = window->width - x;
     }
 
     buf = window->buffer + x + y * window->width;
 
-    v14 = fontGetLineHeight();
-    if (v14 + y > window->height) {
+    if (fontGetLineHeight() + y > window->height) {
         return;
     }
 
-    if (!(a6 & 0x02000000)) {
-        if (window->field_20 == 256 && _GNW_texture != NULL) {
-            _buf_texture(buf, v7, fontGetLineHeight(), window->width, _GNW_texture, window->field_24 + x, window->field_28 + y);
+    if (!(color & 0x02000000)) {
+        if (window->color == 256 && _GNW_texture != nullptr) {
+            _buf_texture(buf, width, fontGetLineHeight(), window->width, _GNW_texture, window->tx + x, window->ty + y);
         } else {
-            bufferFill(buf, v7, fontGetLineHeight(), window->width, window->field_20);
+            bufferFill(buf, width, fontGetLineHeight(), window->width, window->color);
         }
     }
 
-    if (a6 & 0xFF00) {
-        int t = (a6 & 0xFF00) >> 8;
-        v27 = (a6 & ~0xFFFF) | _colorTable[_GNW_wcolor[t]];
+    if ((color & 0xFF00) != 0) {
+        int colorIndex = (color & 0xFF) - 1;
+        textColor = (color & ~0xFFFF) | _colorTable[_GNW_wcolor[colorIndex]];
     } else {
-        v27 = a6;
+        textColor = color;
     }
 
-    fontDrawText(buf, str, v7, window->width, v27);
+    fontDrawText(buf, str, width, window->width, textColor);
 
-    if (a6 & 0x01000000) {
+    if (color & 0x01000000) {
         // TODO: Check.
         Rect rect;
         rect.left = window->rect.left + x;
         rect.top = window->rect.top + y;
-        rect.right = rect.left + v7;
+        rect.right = rect.left + width;
         rect.bottom = rect.top + fontGetLineHeight();
-        _GNW_win_refresh(window, &rect, NULL);
+        _GNW_win_refresh(window, &rect, nullptr);
     }
 }
 
@@ -582,13 +578,13 @@ void windowDrawLine(int win, int left, int top, int right, int bottom, int color
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
-    if (color & 0xFF00) {
-        int t = (color & 0xFF00) >> 8;
-        color = (color & ~0xFFFF) | _colorTable[_GNW_wcolor[t]];
+    if ((color & 0xFF00) != 0) {
+        int colorIndex = (color & 0xFF) - 1;
+        color = (color & ~0xFFFF) | _colorTable[_GNW_wcolor[colorIndex]];
     }
 
     bufferDrawLine(window->buffer, window->width, left, top, right, bottom, color);
@@ -603,13 +599,13 @@ void windowDrawRect(int win, int left, int top, int right, int bottom, int color
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
     if ((color & 0xFF00) != 0) {
-        int v1 = (color & 0xFF00) >> 8;
-        color = (color & ~0xFFFF) | _colorTable[_GNW_wcolor[v1]];
+        int colorIndex = (color & 0xFF) - 1;
+        color = (color & ~0xFFFF) | _colorTable[_GNW_wcolor[colorIndex]];
     }
 
     if (right < left) {
@@ -628,7 +624,7 @@ void windowDrawRect(int win, int left, int top, int right, int bottom, int color
 }
 
 // 0x4D6CC8
-void windowFill(int win, int x, int y, int width, int height, int a6)
+void windowFill(int win, int x, int y, int width, int height, int color)
 {
     Window* window = windowGetWindow(win);
 
@@ -636,62 +632,63 @@ void windowFill(int win, int x, int y, int width, int height, int a6)
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
-    if (a6 == 256) {
-        if (_GNW_texture != NULL) {
-            _buf_texture(window->buffer + window->width * y + x, width, height, window->width, _GNW_texture, x + window->field_24, y + window->field_28);
+    if (color == 256) {
+        if (_GNW_texture != nullptr) {
+            _buf_texture(window->buffer + window->width * y + x, width, height, window->width, _GNW_texture, x + window->tx, y + window->ty);
         } else {
-            a6 = _colorTable[_GNW_wcolor[0]] & 0xFF;
+            color = _colorTable[_GNW_wcolor[0]] & 0xFF;
         }
-    } else if ((a6 & 0xFF00) != 0) {
-        int v1 = (a6 & 0xFF00) >> 8;
-        a6 = (a6 & ~0xFFFF) | _colorTable[_GNW_wcolor[v1]];
+    } else if ((color & 0xFF00) != 0) {
+        int colorIndex = (color & 0xFF) - 1;
+        color = (color & ~0xFFFF) | _colorTable[_GNW_wcolor[colorIndex]];
     }
 
-    if (a6 < 256) {
-        bufferFill(window->buffer + window->width * y + x, width, height, window->width, a6);
+    if (color < 256) {
+        bufferFill(window->buffer + window->width * y + x, width, height, window->width, color);
     }
 }
 
 // 0x4D6DAC
-void windowUnhide(int win)
+void windowShow(int win)
 {
-    Window* window;
-    int v3;
-    int v5;
-    int v7;
-    Window* v6;
-
-    window = windowGetWindow(win);
-    v3 = gOrderedWindowIds[window->id];
+    Window* window = windowGetWindow(win);
+    int index = gWindowIndexes[window->id];
 
     if (!gWindowSystemInitialized) {
         return;
     }
 
-    if (window->flags & WINDOW_HIDDEN) {
+    if ((window->flags & WINDOW_HIDDEN) != 0) {
         window->flags &= ~WINDOW_HIDDEN;
-        if (v3 == gWindowsLength - 1) {
-            _GNW_win_refresh(window, &(window->rect), NULL);
+        if (index == gWindowsLength - 1) {
+            _GNW_win_refresh(window, &(window->rect), nullptr);
         }
     }
 
-    v5 = gWindowsLength - 1;
-    if (v3 < v5 && !(window->flags & WINDOW_FLAG_0x02)) {
-        v7 = v3;
-        while (v3 < v5 && ((window->flags & WINDOW_FLAG_0x04) || !(gWindows[v7 + 1]->flags & WINDOW_FLAG_0x04))) {
-            v6 = gWindows[v7 + 1];
-            gWindows[v7] = v6;
-            v7++;
-            gOrderedWindowIds[v6->id] = v3++;
+    if (index < gWindowsLength - 1 && (window->flags & WINDOW_DONT_MOVE_TOP) == 0) {
+        while (index < gWindowsLength - 1) {
+            Window* nextWindow = gWindows[index + 1];
+            if ((window->flags & WINDOW_MOVE_ON_TOP) == 0 && (nextWindow->flags & WINDOW_MOVE_ON_TOP) != 0) {
+                break;
+            }
+
+            gWindows[index] = nextWindow;
+            gWindowIndexes[nextWindow->id] = index;
+            index++;
         }
 
-        gWindows[v3] = window;
-        gOrderedWindowIds[window->id] = v3;
-        _GNW_win_refresh(window, &(window->rect), NULL);
+        gWindows[index] = window;
+        gWindowIndexes[window->id] = index;
+        _GNW_win_refresh(window, &(window->rect), nullptr);
+    } else {
+        // SFALL: Fix for the window with the "DontMoveTop" flag not being
+        // redrawn after the show function call if it is not the topmost
+        // one.
+        _GNW_win_refresh(window, &(window->rect), nullptr);
     }
 }
 
@@ -703,13 +700,13 @@ void windowHide(int win)
     }
 
     Window* window = windowGetWindow(win);
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
     if ((window->flags & WINDOW_HIDDEN) == 0) {
         window->flags |= WINDOW_HIDDEN;
-        _refresh_all(&(window->rect), NULL);
+        _refresh_all(&(window->rect), nullptr);
     }
 }
 
@@ -722,7 +719,7 @@ void _win_move(int win, int x, int y)
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
@@ -737,7 +734,7 @@ void _win_move(int win, int x, int y)
         y = 0;
     }
 
-    if ((window->flags & WINDOW_FLAG_0x0100) != 0) {
+    if ((window->flags & WINDOW_MANAGED) != 0) {
         x += 2;
     }
 
@@ -749,7 +746,7 @@ void _win_move(int win, int x, int y)
         y = _scr_size.bottom - window->height + 1;
     }
 
-    if ((window->flags & WINDOW_FLAG_0x0100) != 0) {
+    if ((window->flags & WINDOW_MANAGED) != 0) {
         // TODO: Not sure what this means.
         x &= ~0x03;
     }
@@ -760,10 +757,10 @@ void _win_move(int win, int x, int y)
     window->rect.bottom = window->height + y - 1;
 
     if ((window->flags & WINDOW_HIDDEN) == 0) {
-        _GNW_win_refresh(window, &(window->rect), NULL);
+        _GNW_win_refresh(window, &(window->rect), nullptr);
 
         if (gWindowSystemInitialized) {
-            _refresh_all(&rect, NULL);
+            _refresh_all(&rect, nullptr);
         }
     }
 }
@@ -777,11 +774,11 @@ void windowRefresh(int win)
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
-    _GNW_win_refresh(window, &(window->rect), NULL);
+    _GNW_win_refresh(window, &(window->rect), nullptr);
 }
 
 // 0x4D6F80
@@ -793,7 +790,7 @@ void windowRefreshRect(int win, const Rect* rect)
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
@@ -801,7 +798,7 @@ void windowRefreshRect(int win, const Rect* rect)
     rectCopy(&newRect, rect);
     rectOffset(&newRect, window->rect.left, window->rect.top);
 
-    _GNW_win_refresh(window, &newRect, NULL);
+    _GNW_win_refresh(window, &newRect, nullptr);
 }
 
 // 0x4D6FD8
@@ -817,15 +814,15 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* a3)
         return;
     }
 
-    if ((window->flags & WINDOW_FLAG_0x20) && _buffering && !_doing_refresh_all) {
+    if ((window->flags & WINDOW_TRANSPARENT) && _buffering && !_doing_refresh_all) {
         // TODO: Incomplete.
     } else {
         v26 = _rect_malloc();
-        if (v26 == NULL) {
+        if (v26 == nullptr) {
             return;
         }
 
-        v26->next = NULL;
+        v26->next = nullptr;
 
         v26->rect.left = std::max(window->rect.left, rect->left);
         v26->rect.top = std::max(window->rect.top, rect->top);
@@ -845,7 +842,7 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* a3)
                     _GNW_button_refresh(window, &(v20->rect));
 
                     if (a3) {
-                        if (_buffering && (window->flags & WINDOW_FLAG_0x20)) {
+                        if (_buffering && (window->flags & WINDOW_TRANSPARENT)) {
                             window->blitProc(window->buffer + v20->rect.left - window->rect.left + (v20->rect.top - window->rect.top) * window->width,
                                 v20->rect.right - v20->rect.left + 1,
                                 v20->rect.bottom - v20->rect.top + 1,
@@ -863,7 +860,7 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* a3)
                         }
                     } else {
                         if (_buffering) {
-                            if (window->flags & WINDOW_FLAG_0x20) {
+                            if (window->flags & WINDOW_TRANSPARENT) {
                                 window->blitProc(
                                     window->buffer + v20->rect.left - window->rect.left + (v20->rect.top - window->rect.top) * window->width,
                                     v20->rect.right - v20->rect.left + 1,
@@ -898,11 +895,11 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* a3)
                 }
             } else {
                 RectListNode* v16 = v26;
-                while (v16 != NULL) {
+                while (v16 != nullptr) {
                     int width = v16->rect.right - v16->rect.left + 1;
                     int height = v16->rect.bottom - v16->rect.top + 1;
                     unsigned char* buf = (unsigned char*)internal_malloc(width * height);
-                    if (buf != NULL) {
+                    if (buf != nullptr) {
                         bufferFill(buf, width, height, width, _bk_color);
                         if (dest_pitch != 0) {
                             blitBufferToBuffer(
@@ -953,7 +950,7 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* a3)
                 v23 = v24;
             }
 
-            if (!_doing_refresh_all && a3 == NULL && cursorIsHidden() == 0) {
+            if (!_doing_refresh_all && a3 == nullptr && cursorIsHidden() == 0) {
                 if (_mouse_in(rect->left, rect->top, rect->right, rect->bottom)) {
                     mouseShowCursor();
                 }
@@ -968,34 +965,32 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* a3)
 void windowRefreshAll(Rect* rect)
 {
     if (gWindowSystemInitialized) {
-        _refresh_all(rect, NULL);
+        _refresh_all(rect, nullptr);
     }
 }
 
 // 0x4D75B0
 void _win_clip(Window* window, RectListNode** rectListNodePtr, unsigned char* a3)
 {
-    int win;
-
-    for (win = gOrderedWindowIds[window->id] + 1; win < gWindowsLength; win++) {
-        if (*rectListNodePtr == NULL) {
+    for (int index = gWindowIndexes[window->id] + 1; index < gWindowsLength; index++) {
+        if (*rectListNodePtr == nullptr) {
             break;
         }
 
-        Window* window = gWindows[win];
+        Window* window = gWindows[index];
         if (!(window->flags & WINDOW_HIDDEN)) {
-            if (!_buffering || !(window->flags & WINDOW_FLAG_0x20)) {
+            if (!_buffering || !(window->flags & WINDOW_TRANSPARENT)) {
                 _rect_clip_list(rectListNodePtr, &(window->rect));
             } else {
                 if (!_doing_refresh_all) {
-                    _GNW_win_refresh(window, &(window->rect), NULL);
+                    _GNW_win_refresh(window, &(window->rect), nullptr);
                     _rect_clip_list(rectListNodePtr, &(window->rect));
                 }
             }
         }
     }
 
-    if (a3 == _screen_buffer || a3 == NULL) {
+    if (a3 == _screen_buffer || a3 == nullptr) {
         if (cursorIsHidden() == 0) {
             Rect rect;
             mouseGetRect(&rect);
@@ -1005,23 +1000,25 @@ void _win_clip(Window* window, RectListNode** rectListNodePtr, unsigned char* a3
 }
 
 // 0x4D765C
-void _win_drag(int win)
+void win_drag(int win)
 {
-    // TODO: Probably somehow related to self-run functionality, skip for now.
     Window* window = windowGetWindow(win);
+    int dx = 0;
+    int dy = 0;
+    int mx;
+    int my;
 
     if (!gWindowSystemInitialized) {
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
-    windowUnhide(win);
+    windowShow(win);
 
-    Rect rect;
-    rectCopy(&rect, &(window->rect));
+    Rect rect = window->rect;
 
     tickersExecute();
 
@@ -1029,7 +1026,65 @@ void _win_drag(int win)
         _mouse_info();
     }
 
-    if ((window->flags & WINDOW_FLAG_0x0100) && (window->rect.left & 3)) {
+    while ((mouseGetEvent() & MOUSE_EVENT_ANY_BUTTON_UP) == 0) {
+        sharedFpsLimiter.mark();
+
+        if (dx != 0 || dy != 0) {
+            window->rect.left += dx;
+            window->rect.top += dy;
+            window->rect.right += dx;
+            window->rect.bottom += dy;
+            _GNW_win_refresh(window, &(window->rect), nullptr);
+
+            RectListNode* rectListNode = rect_clip(&rect, &(window->rect));
+            while (rectListNode != nullptr) {
+                RectListNode* next = rectListNode->next;
+
+                // NOTE: Uninline.
+                windowRefreshAll(&(rectListNode->rect));
+
+                _rect_free(rectListNode);
+                rectListNode = next;
+            }
+
+            rect = window->rect;
+        }
+
+        mouseGetPosition(&mx, &my);
+        tickersExecute();
+
+        if (vcrUpdate() != 3) {
+            _mouse_info();
+        }
+
+        dx = mx;
+        dy = my;
+        mouseGetPosition(&mx, &my);
+
+        dx = mx - dx;
+        dy = my - dy;
+
+        if (dx + window->rect.left < _scr_size.left) {
+            dx = _scr_size.left - window->rect.left;
+        }
+
+        if (dx + window->rect.right > _scr_size.right) {
+            dx = _scr_size.right - window->rect.right;
+        }
+
+        if (dy + window->rect.top < _scr_size.top) {
+            dy = _scr_size.top - window->rect.top;
+        }
+
+        if (dy + window->rect.bottom > _scr_size.bottom) {
+            dy = _scr_size.bottom - window->rect.bottom;
+        }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
+    }
+
+    if ((window->flags & WINDOW_MANAGED) != 0 && (window->rect.left & 3) != 0) {
         _win_move(window->id, window->rect.left, window->rect.top);
     }
 }
@@ -1053,7 +1108,7 @@ void _refresh_all(Rect* rect, unsigned char* a2)
 
     _doing_refresh_all = 0;
 
-    if (a2 == NULL) {
+    if (a2 == nullptr) {
         if (!cursorIsHidden()) {
             if (_mouse_in(rect->left, rect->top, rect->right, rect->bottom)) {
                 mouseShowCursor();
@@ -1065,18 +1120,16 @@ void _refresh_all(Rect* rect, unsigned char* a2)
 // 0x4D7888
 Window* windowGetWindow(int win)
 {
-    int v0;
-
     if (win == -1) {
-        return NULL;
+        return nullptr;
     }
 
-    v0 = gOrderedWindowIds[win];
-    if (v0 == -1) {
-        return NULL;
+    int index = gWindowIndexes[win];
+    if (index == -1) {
+        return nullptr;
     }
 
-    return gWindows[v0];
+    return gWindows[index];
 }
 
 // win_get_buf
@@ -1086,11 +1139,11 @@ unsigned char* windowGetBuffer(int win)
     Window* window = windowGetWindow(win);
 
     if (!gWindowSystemInitialized) {
-        return NULL;
+        return nullptr;
     }
 
-    if (window == NULL) {
-        return NULL;
+    if (window == nullptr) {
+        return nullptr;
     }
 
     return window->buffer;
@@ -1119,7 +1172,7 @@ int windowGetWidth(int win)
         return -1;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return -1;
     }
 
@@ -1135,7 +1188,7 @@ int windowGetHeight(int win)
         return -1;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return -1;
     }
 
@@ -1152,7 +1205,7 @@ int windowGetRect(int win, Rect* rect)
         return -1;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return -1;
     }
 
@@ -1174,7 +1227,7 @@ int _win_check_all_buttons()
             break;
         }
 
-        if ((gWindows[index]->flags & WINDOW_FLAG_0x10) != 0) {
+        if ((gWindows[index]->flags & WINDOW_MODAL) != 0) {
             break;
         }
     }
@@ -1188,9 +1241,9 @@ Button* buttonGetButton(int btn, Window** windowPtr)
     for (int index = 0; index < gWindowsLength; index++) {
         Window* window = gWindows[index];
         Button* button = window->buttonListHead;
-        while (button != NULL) {
+        while (button != nullptr) {
             if (button->id == btn) {
-                if (windowPtr != NULL) {
+                if (windowPtr != nullptr) {
                     *windowPtr = window;
                 }
 
@@ -1200,34 +1253,33 @@ Button* buttonGetButton(int btn, Window** windowPtr)
         }
     }
 
-    return NULL;
+    return nullptr;
 }
 
 // 0x4D7A34
-int _GNW_check_menu_bars(int a1)
+int _GNW_check_menu_bars(int input)
 {
     if (!gWindowSystemInitialized) {
         return -1;
     }
 
-    int v1 = a1;
     for (int index = gWindowsLength - 1; index >= 1; index--) {
         Window* window = gWindows[index];
-        if (window->menuBar != NULL) {
+        if (window->menuBar != nullptr) {
             for (int pulldownIndex = 0; pulldownIndex < window->menuBar->pulldownsLength; pulldownIndex++) {
-                if (v1 == window->menuBar->pulldowns[pulldownIndex].keyCode) {
-                    v1 = _GNW_process_menu(window->menuBar, pulldownIndex);
+                if (input == window->menuBar->pulldowns[pulldownIndex].keyCode) {
+                    input = _GNW_process_menu(window->menuBar, pulldownIndex);
                     break;
                 }
             }
         }
 
-        if ((window->flags & 0x10) != 0) {
+        if ((window->flags & WINDOW_MODAL) != 0) {
             break;
         }
     }
 
-    return v1;
+    return input;
 }
 
 // 0x4D69DC
@@ -1239,7 +1291,7 @@ void _win_text(int win, char** fileNameList, int fileNameListLength, int maxWidt
         return;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return;
     }
 
@@ -1271,13 +1323,13 @@ void _win_text(int win, char** fileNameList, int fileNameListLength, int maxWidt
 // 0x4D80D8
 void programWindowSetTitle(const char* title)
 {
-    if (title == NULL) {
+    if (title == nullptr) {
         return;
     }
 
 #ifdef _WIN32
     if (_GNW95_title_mutex == INVALID_HANDLE_VALUE) {
-        _GNW95_title_mutex = CreateMutexA(NULL, TRUE, title);
+        _GNW95_title_mutex = CreateMutexA(nullptr, TRUE, title);
         if (GetLastError() != ERROR_SUCCESS) {
             _GNW95_already_running = true;
             return;
@@ -1316,7 +1368,7 @@ int paletteOpenFileImpl(const char* path, int flags)
     }
 
     File* stream = fileOpen(path, mode);
-    if (stream != NULL) {
+    if (stream != nullptr) {
         return ptrToInt(stream);
     }
 
@@ -1346,7 +1398,7 @@ bool showMesageBox(const char* text)
     SDL_Cursor* cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
     SDL_SetCursor(cursor);
     SDL_ShowCursor(SDL_ENABLE);
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, NULL, text, NULL);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, nullptr, text, nullptr);
     SDL_ShowCursor(SDL_DISABLE);
     SDL_SetCursor(prev);
     SDL_FreeCursor(cursor);
@@ -1362,20 +1414,20 @@ int buttonCreate(int win, int x, int y, int width, int height, int mouseEnterEve
         return -1;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return -1;
     }
 
-    if (up == NULL && (dn != NULL || hover != NULL)) {
+    if (up == nullptr && (dn != nullptr || hover != nullptr)) {
         return -1;
     }
 
-    Button* button = buttonCreateInternal(win, x, y, width, height, mouseEnterEventCode, mouseExitEventCode, mouseDownEventCode, mouseUpEventCode, flags | BUTTON_FLAG_0x010000, up, dn, hover);
-    if (button == NULL) {
+    Button* button = buttonCreateInternal(win, x, y, width, height, mouseEnterEventCode, mouseExitEventCode, mouseDownEventCode, mouseUpEventCode, flags | BUTTON_FLAG_GRAPHIC, up, dn, hover);
+    if (button == nullptr) {
         return -1;
     }
 
-    _button_draw(button, window, button->mouseUpImage, 0, NULL, 0);
+    _button_draw(button, window, button->normalImage, false, nullptr, false);
 
     return button->id;
 }
@@ -1389,28 +1441,28 @@ int _win_register_text_button(int win, int x, int y, int mouseEnterEventCode, in
         return -1;
     }
 
-    if (window == NULL) {
+    if (window == nullptr) {
         return -1;
     }
 
     int buttonWidth = fontGetStringWidth(title) + 16;
     int buttonHeight = fontGetLineHeight() + 7;
     unsigned char* normal = (unsigned char*)internal_malloc(buttonWidth * buttonHeight);
-    if (normal == NULL) {
+    if (normal == nullptr) {
         return -1;
     }
 
     unsigned char* pressed = (unsigned char*)internal_malloc(buttonWidth * buttonHeight);
-    if (pressed == NULL) {
+    if (pressed == nullptr) {
         internal_free(normal);
         return -1;
     }
 
-    if (window->field_20 == 256 && _GNW_texture != NULL) {
+    if (window->color == 256 && _GNW_texture != nullptr) {
         // TODO: Incomplete.
     } else {
-        bufferFill(normal, buttonWidth, buttonHeight, buttonWidth, window->field_20);
-        bufferFill(pressed, buttonWidth, buttonHeight, buttonWidth, window->field_20);
+        bufferFill(normal, buttonWidth, buttonHeight, buttonWidth, window->color);
+        bufferFill(pressed, buttonWidth, buttonHeight, buttonWidth, window->color);
     }
 
     _lighten_buf(normal, buttonWidth, buttonHeight, buttonWidth);
@@ -1465,14 +1517,14 @@ int _win_register_text_button(int win, int x, int y, int mouseEnterEventCode, in
         flags,
         normal,
         pressed,
-        NULL);
-    if (button == NULL) {
+        nullptr);
+    if (button == nullptr) {
         internal_free(normal);
         internal_free(pressed);
         return -1;
     }
 
-    _button_draw(button, window, button->mouseUpImage, 0, NULL, 0);
+    _button_draw(button, window, button->normalImage, false, nullptr, false);
 
     return button->id;
 }
@@ -1484,53 +1536,53 @@ int _win_register_button_disable(int btn, unsigned char* up, unsigned char* down
         return -1;
     }
 
-    Button* button = buttonGetButton(btn, NULL);
-    if (button == NULL) {
+    Button* button = buttonGetButton(btn, nullptr);
+    if (button == nullptr) {
         return -1;
     }
 
-    button->field_3C = up;
-    button->field_40 = down;
-    button->field_44 = hover;
+    button->disabledNormalImage = up;
+    button->disabledPressedImage = down;
+    button->disabledHoverImage = hover;
 
     return 0;
 }
 
 // 0x4D86A8
-int _win_register_button_image(int btn, unsigned char* up, unsigned char* down, unsigned char* hover, int a5)
+int _win_register_button_image(int btn, unsigned char* up, unsigned char* down, unsigned char* hover, bool draw)
 {
     if (!gWindowSystemInitialized) {
         return -1;
     }
 
-    if (up == NULL && (down != NULL || hover != NULL)) {
+    if (up == nullptr && (down != nullptr || hover != nullptr)) {
         return -1;
     }
 
     Window* window;
     Button* button = buttonGetButton(btn, &window);
-    if (button == NULL) {
+    if (button == nullptr) {
         return -1;
     }
 
-    if (!(button->flags & BUTTON_FLAG_0x010000)) {
+    if (!(button->flags & BUTTON_FLAG_GRAPHIC)) {
         return -1;
     }
 
     unsigned char* data = button->currentImage;
-    if (data == button->mouseUpImage) {
+    if (data == button->normalImage) {
         button->currentImage = up;
-    } else if (data == button->mouseDownImage) {
+    } else if (data == button->pressedImage) {
         button->currentImage = down;
-    } else if (data == button->mouseHoverImage) {
+    } else if (data == button->hoverImage) {
         button->currentImage = hover;
     }
 
-    button->mouseUpImage = up;
-    button->mouseDownImage = down;
-    button->mouseHoverImage = hover;
+    button->normalImage = up;
+    button->pressedImage = down;
+    button->hoverImage = hover;
 
-    _button_draw(button, window, button->currentImage, a5, NULL, 0);
+    _button_draw(button, window, button->currentImage, draw, nullptr, false);
 
     return 0;
 }
@@ -1544,8 +1596,8 @@ int buttonSetMouseCallbacks(int btn, ButtonCallback* mouseEnterProc, ButtonCallb
         return -1;
     }
 
-    Button* button = buttonGetButton(btn, NULL);
-    if (button == NULL) {
+    Button* button = buttonGetButton(btn, nullptr);
+    if (button == nullptr) {
         return -1;
     }
 
@@ -1564,8 +1616,8 @@ int buttonSetRightMouseCallbacks(int btn, int rightMouseDownEventCode, int right
         return -1;
     }
 
-    Button* button = buttonGetButton(btn, NULL);
-    if (button == NULL) {
+    Button* button = buttonGetButton(btn, nullptr);
+    if (button == nullptr) {
         return -1;
     }
 
@@ -1574,7 +1626,7 @@ int buttonSetRightMouseCallbacks(int btn, int rightMouseDownEventCode, int right
     button->rightMouseDownProc = rightMouseDownProc;
     button->rightMouseUpProc = rightMouseUpProc;
 
-    if (rightMouseDownEventCode != -1 || rightMouseUpEventCode != -1 || rightMouseDownProc != NULL || rightMouseUpProc != NULL) {
+    if (rightMouseDownEventCode != -1 || rightMouseUpEventCode != -1 || rightMouseDownProc != nullptr || rightMouseUpProc != nullptr) {
         button->flags |= BUTTON_FLAG_RIGHT_MOUSE_BUTTON_CONFIGURED;
     } else {
         button->flags &= ~BUTTON_FLAG_RIGHT_MOUSE_BUTTON_CONFIGURED;
@@ -1593,19 +1645,19 @@ int buttonSetRightMouseCallbacks(int btn, int rightMouseDownEventCode, int right
 // These callbacks can be triggered several times during tracking if mouse leaves button's rectangle without releasing mouse buttons.
 //
 // 0x4D87F8
-int buttonSetCallbacks(int btn, ButtonCallback* onPressed, ButtonCallback* onUnpressed)
+int buttonSetCallbacks(int btn, ButtonCallback* pressSoundFunc, ButtonCallback* releaseSoundFunc)
 {
     if (!gWindowSystemInitialized) {
         return -1;
     }
 
-    Button* button = buttonGetButton(btn, NULL);
-    if (button == NULL) {
+    Button* button = buttonGetButton(btn, nullptr);
+    if (button == nullptr) {
         return -1;
     }
 
-    button->onPressed = onPressed;
-    button->onUnpressed = onUnpressed;
+    button->pressSoundFunc = pressSoundFunc;
+    button->releaseSoundFunc = releaseSoundFunc;
 
     return 0;
 }
@@ -1617,8 +1669,8 @@ int buttonSetMask(int btn, unsigned char* mask)
         return -1;
     }
 
-    Button* button = buttonGetButton(btn, NULL);
-    if (button == NULL) {
+    Button* button = buttonGetButton(btn, nullptr);
+    if (button == nullptr) {
         return -1;
     }
 
@@ -1631,13 +1683,13 @@ int buttonSetMask(int btn, unsigned char* mask)
 Button* buttonCreateInternal(int win, int x, int y, int width, int height, int mouseEnterEventCode, int mouseExitEventCode, int mouseDownEventCode, int mouseUpEventCode, int flags, unsigned char* up, unsigned char* dn, unsigned char* hover)
 {
     Window* window = windowGetWindow(win);
-    if (window == NULL) {
-        return NULL;
+    if (window == nullptr) {
+        return nullptr;
     }
 
     Button* button = (Button*)internal_malloc(sizeof(*button));
-    if (button == NULL) {
-        return NULL;
+    if (button == nullptr) {
+        return nullptr;
     }
 
     if ((flags & BUTTON_FLAG_0x01) == 0) {
@@ -1665,27 +1717,27 @@ Button* buttonCreateInternal(int win, int x, int y, int width, int height, int m
     button->leftMouseUpEventCode = mouseUpEventCode;
     button->rightMouseDownEventCode = -1;
     button->rightMouseUpEventCode = -1;
-    button->mouseUpImage = up;
-    button->mouseDownImage = dn;
-    button->mouseHoverImage = hover;
-    button->field_3C = NULL;
-    button->field_40 = NULL;
-    button->field_44 = NULL;
-    button->currentImage = NULL;
-    button->mask = NULL;
-    button->mouseEnterProc = NULL;
-    button->mouseExitProc = NULL;
-    button->leftMouseDownProc = NULL;
-    button->leftMouseUpProc = NULL;
-    button->rightMouseDownProc = NULL;
-    button->rightMouseUpProc = NULL;
-    button->onPressed = NULL;
-    button->onUnpressed = NULL;
-    button->radioGroup = NULL;
-    button->prev = NULL;
+    button->normalImage = up;
+    button->pressedImage = dn;
+    button->hoverImage = hover;
+    button->disabledNormalImage = nullptr;
+    button->disabledPressedImage = nullptr;
+    button->disabledHoverImage = nullptr;
+    button->currentImage = nullptr;
+    button->mask = nullptr;
+    button->mouseEnterProc = nullptr;
+    button->mouseExitProc = nullptr;
+    button->leftMouseDownProc = nullptr;
+    button->leftMouseUpProc = nullptr;
+    button->rightMouseDownProc = nullptr;
+    button->rightMouseUpProc = nullptr;
+    button->pressSoundFunc = nullptr;
+    button->releaseSoundFunc = nullptr;
+    button->buttonGroup = nullptr;
+    button->prev = nullptr;
 
     button->next = window->buttonListHead;
-    if (button->next != NULL) {
+    if (button->next != nullptr) {
         button->next->prev = button;
     }
     window->buttonListHead = button;
@@ -1700,12 +1752,12 @@ bool _win_button_down(int btn)
         return false;
     }
 
-    Button* button = buttonGetButton(btn, NULL);
-    if (button == NULL) {
+    Button* button = buttonGetButton(btn, nullptr);
+    if (button == nullptr) {
         return false;
     }
 
-    if ((button->flags & BUTTON_FLAG_0x01) != 0 && (button->flags & BUTTON_FLAG_0x020000) != 0) {
+    if ((button->flags & BUTTON_FLAG_0x01) != 0 && (button->flags & BUTTON_FLAG_CHECKED) != 0) {
         return true;
     }
 
@@ -1716,8 +1768,8 @@ bool _win_button_down(int btn)
 int _GNW_check_buttons(Window* window, int* keyCodePtr)
 {
     Rect v58;
-    Button* field_34;
-    Button* field_38;
+    Button* prevHoveredButton;
+    Button* prevClickedButton;
     Button* button;
 
     if ((window->flags & WINDOW_HIDDEN) != 0) {
@@ -1725,14 +1777,14 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
     }
 
     button = window->buttonListHead;
-    field_34 = window->field_34;
-    field_38 = window->field_38;
+    prevHoveredButton = window->hoveredButton;
+    prevClickedButton = window->clickedButton;
 
-    if (field_34 != NULL) {
-        rectCopy(&v58, &(field_34->rect));
+    if (prevHoveredButton != nullptr) {
+        rectCopy(&v58, &(prevHoveredButton->rect));
         rectOffset(&v58, window->rect.left, window->rect.top);
-    } else if (field_38 != NULL) {
-        rectCopy(&v58, &(field_38->rect));
+    } else if (prevClickedButton != nullptr) {
+        rectCopy(&v58, &(prevClickedButton->rect));
         rectOffset(&v58, window->rect.left, window->rect.top);
     }
 
@@ -1742,59 +1794,59 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
         int mouseEvent = mouseGetEvent();
         if ((window->flags & WINDOW_FLAG_0x40) || (mouseEvent & MOUSE_EVENT_LEFT_BUTTON_DOWN) == 0) {
             if (mouseEvent == 0) {
-                window->field_38 = NULL;
+                window->clickedButton = nullptr;
             }
         } else {
-            windowUnhide(window->id);
+            windowShow(window->id);
         }
 
-        if (field_34 != NULL) {
-            if (!_button_under_mouse(field_34, &v58)) {
-                if (!(field_34->flags & BUTTON_FLAG_DISABLED)) {
-                    *keyCodePtr = field_34->mouseExitEventCode;
+        if (prevHoveredButton != nullptr) {
+            if (!_button_under_mouse(prevHoveredButton, &v58)) {
+                if (!(prevHoveredButton->flags & BUTTON_FLAG_DISABLED)) {
+                    *keyCodePtr = prevHoveredButton->mouseExitEventCode;
                 }
 
-                if ((field_34->flags & BUTTON_FLAG_0x01) && (field_34->flags & BUTTON_FLAG_0x020000)) {
-                    _button_draw(field_34, window, field_34->mouseDownImage, 1, NULL, 1);
+                if ((prevHoveredButton->flags & BUTTON_FLAG_0x01) && (prevHoveredButton->flags & BUTTON_FLAG_CHECKED)) {
+                    _button_draw(prevHoveredButton, window, prevHoveredButton->pressedImage, true, nullptr, true);
                 } else {
-                    _button_draw(field_34, window, field_34->mouseUpImage, 1, NULL, 1);
+                    _button_draw(prevHoveredButton, window, prevHoveredButton->normalImage, true, nullptr, true);
                 }
 
-                window->field_34 = NULL;
+                window->hoveredButton = nullptr;
 
                 _last_button_winID = window->id;
 
-                if (!(field_34->flags & BUTTON_FLAG_DISABLED)) {
-                    if (field_34->mouseExitProc != NULL) {
-                        field_34->mouseExitProc(field_34->id, *keyCodePtr);
-                        if (!(field_34->flags & BUTTON_FLAG_0x40)) {
+                if (!(prevHoveredButton->flags & BUTTON_FLAG_DISABLED)) {
+                    if (prevHoveredButton->mouseExitProc != nullptr) {
+                        prevHoveredButton->mouseExitProc(prevHoveredButton->id, *keyCodePtr);
+                        if (!(prevHoveredButton->flags & BUTTON_FLAG_0x40)) {
                             *keyCodePtr = -1;
                         }
                     }
                 }
                 return 0;
             }
-            button = field_34;
-        } else if (field_38 != NULL) {
-            if (_button_under_mouse(field_38, &v58)) {
-                if (!(field_38->flags & BUTTON_FLAG_DISABLED)) {
-                    *keyCodePtr = field_38->mouseEnterEventCode;
+            button = prevHoveredButton;
+        } else if (prevClickedButton != nullptr) {
+            if (_button_under_mouse(prevClickedButton, &v58)) {
+                if (!(prevClickedButton->flags & BUTTON_FLAG_DISABLED)) {
+                    *keyCodePtr = prevClickedButton->mouseEnterEventCode;
                 }
 
-                if ((field_38->flags & BUTTON_FLAG_0x01) && (field_38->flags & BUTTON_FLAG_0x020000)) {
-                    _button_draw(field_38, window, field_38->mouseDownImage, 1, NULL, 1);
+                if ((prevClickedButton->flags & BUTTON_FLAG_0x01) && (prevClickedButton->flags & BUTTON_FLAG_CHECKED)) {
+                    _button_draw(prevClickedButton, window, prevClickedButton->pressedImage, true, nullptr, true);
                 } else {
-                    _button_draw(field_38, window, field_38->mouseUpImage, 1, NULL, 1);
+                    _button_draw(prevClickedButton, window, prevClickedButton->normalImage, true, nullptr, true);
                 }
 
-                window->field_34 = field_38;
+                window->hoveredButton = prevClickedButton;
 
                 _last_button_winID = window->id;
 
-                if (!(field_38->flags & BUTTON_FLAG_DISABLED)) {
-                    if (field_38->mouseEnterProc != NULL) {
-                        field_38->mouseEnterProc(field_38->id, *keyCodePtr);
-                        if (!(field_38->flags & BUTTON_FLAG_0x40)) {
+                if (!(prevClickedButton->flags & BUTTON_FLAG_DISABLED)) {
+                    if (prevClickedButton->mouseEnterProc != nullptr) {
+                        prevClickedButton->mouseEnterProc(prevClickedButton->id, *keyCodePtr);
+                        if (!(prevClickedButton->flags & BUTTON_FLAG_0x40)) {
                             *keyCodePtr = -1;
                         }
                     }
@@ -1806,26 +1858,26 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
         int v25 = _last_button_winID;
         if (_last_button_winID != -1 && _last_button_winID != window->id) {
             Window* v26 = windowGetWindow(_last_button_winID);
-            if (v26 != NULL) {
+            if (v26 != nullptr) {
                 _last_button_winID = -1;
 
-                Button* v28 = v26->field_34;
-                if (v28 != NULL) {
+                Button* v28 = v26->hoveredButton;
+                if (v28 != nullptr) {
                     if (!(v28->flags & BUTTON_FLAG_DISABLED)) {
                         *keyCodePtr = v28->mouseExitEventCode;
                     }
 
-                    if ((v28->flags & BUTTON_FLAG_0x01) && (v28->flags & BUTTON_FLAG_0x020000)) {
-                        _button_draw(v28, v26, v28->mouseDownImage, 1, NULL, 1);
+                    if ((v28->flags & BUTTON_FLAG_0x01) && (v28->flags & BUTTON_FLAG_CHECKED)) {
+                        _button_draw(v28, v26, v28->pressedImage, true, nullptr, true);
                     } else {
-                        _button_draw(v28, v26, v28->mouseUpImage, 1, NULL, 1);
+                        _button_draw(v28, v26, v28->normalImage, true, nullptr, true);
                     }
 
-                    v26->field_38 = NULL;
-                    v26->field_34 = NULL;
+                    v26->clickedButton = nullptr;
+                    v26->hoveredButton = nullptr;
 
                     if (!(v28->flags & BUTTON_FLAG_DISABLED)) {
-                        if (v28->mouseExitProc != NULL) {
+                        if (v28->mouseExitProc != nullptr) {
                             v28->mouseExitProc(v28->id, *keyCodePtr);
                             if (!(v28->flags & BUTTON_FLAG_0x40)) {
                                 *keyCodePtr = -1;
@@ -1837,9 +1889,9 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
             }
         }
 
-        ButtonCallback* cb = NULL;
+        ButtonCallback* cb = nullptr;
 
-        while (button != NULL) {
+        while (button != nullptr) {
             if (!(button->flags & BUTTON_FLAG_DISABLED)) {
                 rectCopy(&v58, &(button->rect));
                 rectOffset(&v58, window->rect.left, window->rect.top);
@@ -1847,23 +1899,23 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
                     if (!(button->flags & BUTTON_FLAG_DISABLED)) {
                         if ((mouseEvent & MOUSE_EVENT_ANY_BUTTON_DOWN) != 0) {
                             if ((mouseEvent & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0 && (button->flags & BUTTON_FLAG_RIGHT_MOUSE_BUTTON_CONFIGURED) == 0) {
-                                button = NULL;
+                                button = nullptr;
                                 break;
                             }
 
-                            if (button != window->field_34 && button != window->field_38) {
+                            if (button != window->hoveredButton && button != window->clickedButton) {
                                 break;
                             }
 
-                            window->field_38 = button;
-                            window->field_34 = button;
+                            window->clickedButton = button;
+                            window->hoveredButton = button;
 
                             if ((button->flags & BUTTON_FLAG_0x01) != 0) {
                                 if ((button->flags & BUTTON_FLAG_0x02) != 0) {
-                                    if ((button->flags & BUTTON_FLAG_0x020000) != 0) {
+                                    if ((button->flags & BUTTON_FLAG_CHECKED) != 0) {
                                         if (!(button->flags & BUTTON_FLAG_0x04)) {
-                                            if (button->radioGroup != NULL) {
-                                                button->radioGroup->field_4--;
+                                            if (button->buttonGroup != nullptr) {
+                                                button->buttonGroup->currChecked--;
                                             }
 
                                             if ((mouseEvent & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0) {
@@ -1874,11 +1926,11 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
                                                 cb = button->rightMouseUpProc;
                                             }
 
-                                            button->flags &= ~BUTTON_FLAG_0x020000;
+                                            button->flags &= ~BUTTON_FLAG_CHECKED;
                                         }
                                     } else {
                                         if (_button_check_group(button) == -1) {
-                                            button = NULL;
+                                            button = nullptr;
                                             break;
                                         }
 
@@ -1890,12 +1942,12 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
                                             cb = button->rightMouseDownProc;
                                         }
 
-                                        button->flags |= BUTTON_FLAG_0x020000;
+                                        button->flags |= BUTTON_FLAG_CHECKED;
                                     }
                                 }
                             } else {
                                 if (_button_check_group(button) == -1) {
-                                    button = NULL;
+                                    button = nullptr;
                                     break;
                                 }
 
@@ -1908,21 +1960,21 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
                                 }
                             }
 
-                            _button_draw(button, window, button->mouseDownImage, 1, NULL, 1);
+                            _button_draw(button, window, button->pressedImage, true, nullptr, true);
                             break;
                         }
 
-                        Button* v49 = window->field_38;
+                        Button* v49 = window->clickedButton;
                         if (button == v49 && (mouseEvent & MOUSE_EVENT_ANY_BUTTON_UP) != 0) {
-                            window->field_38 = NULL;
-                            window->field_34 = v49;
+                            window->clickedButton = nullptr;
+                            window->hoveredButton = v49;
 
                             if (v49->flags & BUTTON_FLAG_0x01) {
                                 if (!(v49->flags & BUTTON_FLAG_0x02)) {
-                                    if (v49->flags & BUTTON_FLAG_0x020000) {
+                                    if (v49->flags & BUTTON_FLAG_CHECKED) {
                                         if (!(v49->flags & BUTTON_FLAG_0x04)) {
-                                            if (v49->radioGroup != NULL) {
-                                                v49->radioGroup->field_4--;
+                                            if (v49->buttonGroup != nullptr) {
+                                                v49->buttonGroup->currChecked--;
                                             }
 
                                             if ((mouseEvent & MOUSE_EVENT_LEFT_BUTTON_UP) != 0) {
@@ -1933,12 +1985,12 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
                                                 cb = button->rightMouseUpProc;
                                             }
 
-                                            button->flags &= ~BUTTON_FLAG_0x020000;
+                                            button->flags &= ~BUTTON_FLAG_CHECKED;
                                         }
                                     } else {
                                         if (_button_check_group(v49) == -1) {
-                                            button = NULL;
-                                            _button_draw(v49, window, v49->mouseUpImage, 1, NULL, 1);
+                                            button = nullptr;
+                                            _button_draw(v49, window, v49->normalImage, true, nullptr, true);
                                             break;
                                         }
 
@@ -1950,13 +2002,13 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
                                             cb = v49->rightMouseDownProc;
                                         }
 
-                                        v49->flags |= BUTTON_FLAG_0x020000;
+                                        v49->flags |= BUTTON_FLAG_CHECKED;
                                     }
                                 }
                             } else {
-                                if (v49->flags & BUTTON_FLAG_0x020000) {
-                                    if (v49->radioGroup != NULL) {
-                                        v49->radioGroup->field_4--;
+                                if (v49->flags & BUTTON_FLAG_CHECKED) {
+                                    if (v49->buttonGroup != nullptr) {
+                                        v49->buttonGroup->currChecked--;
                                     }
                                 }
 
@@ -1969,23 +2021,23 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
                                 }
                             }
 
-                            if (button->mouseHoverImage != NULL) {
-                                _button_draw(button, window, button->mouseHoverImage, 1, NULL, 1);
+                            if (button->hoverImage != nullptr) {
+                                _button_draw(button, window, button->hoverImage, true, nullptr, true);
                             } else {
-                                _button_draw(button, window, button->mouseUpImage, 1, NULL, 1);
+                                _button_draw(button, window, button->normalImage, true, nullptr, true);
                             }
                             break;
                         }
                     }
 
-                    if (window->field_34 == NULL && mouseEvent == 0) {
-                        window->field_34 = button;
+                    if (window->hoveredButton == nullptr && mouseEvent == 0) {
+                        window->hoveredButton = button;
                         if (!(button->flags & BUTTON_FLAG_DISABLED)) {
                             *keyCodePtr = button->mouseEnterEventCode;
                             cb = button->mouseEnterProc;
                         }
 
-                        _button_draw(button, window, button->mouseHoverImage, 1, NULL, 1);
+                        _button_draw(button, window, button->hoverImage, true, nullptr, true);
                     }
                     break;
                 }
@@ -1993,25 +2045,25 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
             button = button->next;
         }
 
-        if (button != NULL) {
-            if ((button->flags & BUTTON_FLAG_0x10) != 0
+        if (button != nullptr) {
+            if ((button->flags & BUTTON_DRAG_HANDLE) != 0
                 && (mouseEvent & MOUSE_EVENT_ANY_BUTTON_DOWN) != 0
                 && (mouseEvent & MOUSE_EVENT_ANY_BUTTON_REPEAT) == 0) {
-                _win_drag(window->id);
-                _button_draw(button, window, button->mouseUpImage, 1, NULL, 1);
+                win_drag(window->id);
+                _button_draw(button, window, button->normalImage, true, nullptr, true);
             }
-        } else if ((window->flags & WINDOW_FLAG_0x80) != 0) {
+        } else if ((window->flags & WINDOW_DRAGGABLE_BY_BACKGROUND) != 0) {
             v25 |= mouseEvent << 8;
             if ((mouseEvent & MOUSE_EVENT_ANY_BUTTON_DOWN) != 0
                 && (mouseEvent & MOUSE_EVENT_ANY_BUTTON_REPEAT) == 0) {
-                _win_drag(window->id);
+                win_drag(window->id);
             }
         }
 
         _last_button_winID = window->id;
 
-        if (button != NULL) {
-            if (cb != NULL) {
+        if (button != nullptr) {
+            if (cb != nullptr) {
                 cb(button->id, *keyCodePtr);
                 if (!(button->flags & BUTTON_FLAG_0x40)) {
                     *keyCodePtr = -1;
@@ -2022,28 +2074,28 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
         return 0;
     }
 
-    if (field_34 != NULL) {
-        *keyCodePtr = field_34->mouseExitEventCode;
+    if (prevHoveredButton != nullptr) {
+        *keyCodePtr = prevHoveredButton->mouseExitEventCode;
 
         unsigned char* data;
-        if ((field_34->flags & BUTTON_FLAG_0x01) && (field_34->flags & BUTTON_FLAG_0x020000)) {
-            data = field_34->mouseDownImage;
+        if ((prevHoveredButton->flags & BUTTON_FLAG_0x01) && (prevHoveredButton->flags & BUTTON_FLAG_CHECKED)) {
+            data = prevHoveredButton->pressedImage;
         } else {
-            data = field_34->mouseUpImage;
+            data = prevHoveredButton->normalImage;
         }
 
-        _button_draw(field_34, window, data, 1, NULL, 1);
+        _button_draw(prevHoveredButton, window, data, true, nullptr, true);
 
-        window->field_34 = NULL;
+        window->hoveredButton = nullptr;
     }
 
     if (*keyCodePtr != -1) {
         _last_button_winID = window->id;
 
-        if ((field_34->flags & BUTTON_FLAG_DISABLED) == 0) {
-            if (field_34->mouseExitProc != NULL) {
-                field_34->mouseExitProc(field_34->id, *keyCodePtr);
-                if (!(field_34->flags & BUTTON_FLAG_0x40)) {
+        if ((prevHoveredButton->flags & BUTTON_FLAG_DISABLED) == 0) {
+            if (prevHoveredButton->mouseExitProc != nullptr) {
+                prevHoveredButton->mouseExitProc(prevHoveredButton->id, *keyCodePtr);
+                if (!(prevHoveredButton->flags & BUTTON_FLAG_0x40)) {
                     *keyCodePtr = -1;
                 }
             }
@@ -2051,10 +2103,10 @@ int _GNW_check_buttons(Window* window, int* keyCodePtr)
         return 0;
     }
 
-    if (field_34 != NULL) {
-        if ((field_34->flags & BUTTON_FLAG_DISABLED) == 0) {
-            if (field_34->mouseExitProc != NULL) {
-                field_34->mouseExitProc(field_34->id, *keyCodePtr);
+    if (prevHoveredButton != nullptr) {
+        if ((prevHoveredButton->flags & BUTTON_FLAG_DISABLED) == 0) {
+            if (prevHoveredButton->mouseExitProc != nullptr) {
+                prevHoveredButton->mouseExitProc(prevHoveredButton->id, *keyCodePtr);
             }
         }
     }
@@ -2069,7 +2121,7 @@ bool _button_under_mouse(Button* button, Rect* rect)
         return false;
     }
 
-    if (button->mask == NULL) {
+    if (button->mask == nullptr) {
         return true;
     }
 
@@ -2091,7 +2143,7 @@ int buttonGetWindowId(int btn)
     }
 
     Window* window;
-    if (buttonGetButton(btn, &window) == NULL) {
+    if (buttonGetButton(btn, &window) == nullptr) {
         return -1;
     }
 
@@ -2113,28 +2165,28 @@ int buttonDestroy(int btn)
 
     Window* window;
     Button* button = buttonGetButton(btn, &window);
-    if (button == NULL) {
+    if (button == nullptr) {
         return -1;
     }
 
-    if (button->prev != NULL) {
+    if (button->prev != nullptr) {
         button->prev->next = button->next;
     } else {
         window->buttonListHead = button->next;
     }
 
-    if (button->next != NULL) {
+    if (button->next != nullptr) {
         button->next->prev = button->prev;
     }
 
-    windowFill(window->id, button->rect.left, button->rect.top, button->rect.right - button->rect.left + 1, button->rect.bottom - button->rect.top + 1, window->field_20);
+    windowFill(window->id, button->rect.left, button->rect.top, button->rect.right - button->rect.left + 1, button->rect.bottom - button->rect.top + 1, window->color);
 
-    if (button == window->field_34) {
-        window->field_34 = NULL;
+    if (button == window->hoveredButton) {
+        window->hoveredButton = nullptr;
     }
 
-    if (button == window->field_38) {
-        window->field_38 = NULL;
+    if (button == window->clickedButton) {
+        window->clickedButton = nullptr;
     }
 
     buttonFree(button);
@@ -2145,41 +2197,41 @@ int buttonDestroy(int btn)
 // 0x4D9374
 void buttonFree(Button* button)
 {
-    if ((button->flags & BUTTON_FLAG_0x010000) == 0) {
-        if (button->mouseUpImage != NULL) {
-            internal_free(button->mouseUpImage);
+    if ((button->flags & BUTTON_FLAG_GRAPHIC) == 0) {
+        if (button->normalImage != nullptr) {
+            internal_free(button->normalImage);
         }
 
-        if (button->mouseDownImage != NULL) {
-            internal_free(button->mouseDownImage);
+        if (button->pressedImage != nullptr) {
+            internal_free(button->pressedImage);
         }
 
-        if (button->mouseHoverImage != NULL) {
-            internal_free(button->mouseHoverImage);
+        if (button->hoverImage != nullptr) {
+            internal_free(button->hoverImage);
         }
 
-        if (button->field_3C != NULL) {
-            internal_free(button->field_3C);
+        if (button->disabledNormalImage != nullptr) {
+            internal_free(button->disabledNormalImage);
         }
 
-        if (button->field_40 != NULL) {
-            internal_free(button->field_40);
+        if (button->disabledPressedImage != nullptr) {
+            internal_free(button->disabledPressedImage);
         }
 
-        if (button->field_44 != NULL) {
-            internal_free(button->field_44);
+        if (button->disabledHoverImage != nullptr) {
+            internal_free(button->disabledHoverImage);
         }
     }
 
-    RadioGroup* radioGroup = button->radioGroup;
-    if (radioGroup != NULL) {
-        for (int index = 0; index < radioGroup->buttonsLength; index++) {
-            if (button == radioGroup->buttons[index]) {
-                for (; index < radioGroup->buttonsLength - 1; index++) {
-                    radioGroup->buttons[index] = radioGroup->buttons[index + 1];
+    ButtonGroup* buttonGroup = button->buttonGroup;
+    if (buttonGroup != nullptr) {
+        for (int index = 0; index < buttonGroup->buttonsLength; index++) {
+            if (button == buttonGroup->buttons[index]) {
+                for (; index < buttonGroup->buttonsLength - 1; index++) {
+                    buttonGroup->buttons[index] = buttonGroup->buttons[index + 1];
                 }
 
-                radioGroup->buttonsLength--;
+                buttonGroup->buttonsLength--;
 
                 break;
             }
@@ -2197,7 +2249,7 @@ static int button_new_id()
     int btn;
 
     btn = 1;
-    while (buttonGetButton(btn, NULL) != NULL) {
+    while (buttonGetButton(btn, nullptr) != nullptr) {
         btn++;
     }
 
@@ -2213,13 +2265,13 @@ int buttonEnable(int btn)
 
     Window* window;
     Button* button = buttonGetButton(btn, &window);
-    if (button == NULL) {
+    if (button == nullptr) {
         return -1;
     }
 
     if ((button->flags & BUTTON_FLAG_DISABLED) != 0) {
         button->flags &= ~BUTTON_FLAG_DISABLED;
-        _button_draw(button, window, button->currentImage, 1, NULL, 0);
+        _button_draw(button, window, button->currentImage, true, nullptr, false);
     }
 
     return 0;
@@ -2234,19 +2286,19 @@ int buttonDisable(int btn)
 
     Window* window;
     Button* button = buttonGetButton(btn, &window);
-    if (button == NULL) {
+    if (button == nullptr) {
         return -1;
     }
 
     if ((button->flags & BUTTON_FLAG_DISABLED) == 0) {
         button->flags |= BUTTON_FLAG_DISABLED;
 
-        _button_draw(button, window, button->currentImage, 1, NULL, 0);
+        _button_draw(button, window, button->currentImage, true, nullptr, false);
 
-        if (button == window->field_34) {
-            if (window->field_34->mouseExitEventCode != -1) {
-                enqueueInputEvent(window->field_34->mouseExitEventCode);
-                window->field_34 = NULL;
+        if (button == window->hoveredButton) {
+            if (window->hoveredButton->mouseExitEventCode != -1) {
+                enqueueInputEvent(window->hoveredButton->mouseExitEventCode);
+                window->hoveredButton = nullptr;
             }
         }
     }
@@ -2255,7 +2307,7 @@ int buttonDisable(int btn)
 }
 
 // 0x4D9554
-int _win_set_button_rest_state(int btn, bool a2, int a3)
+int _win_set_button_rest_state(int btn, bool checked, int flags)
 {
     if (!gWindowSystemInitialized) {
         return -1;
@@ -2263,37 +2315,37 @@ int _win_set_button_rest_state(int btn, bool a2, int a3)
 
     Window* window;
     Button* button = buttonGetButton(btn, &window);
-    if (button == NULL) {
+    if (button == nullptr) {
         return -1;
     }
 
     if ((button->flags & BUTTON_FLAG_0x01) != 0) {
         int keyCode = -1;
 
-        if ((button->flags & BUTTON_FLAG_0x020000) != 0) {
-            if (!a2) {
-                button->flags &= ~BUTTON_FLAG_0x020000;
+        if ((button->flags & BUTTON_FLAG_CHECKED) != 0) {
+            if (!checked) {
+                button->flags &= ~BUTTON_FLAG_CHECKED;
 
-                if ((a3 & 0x02) == 0) {
-                    _button_draw(button, window, button->mouseUpImage, 1, NULL, 0);
+                if ((flags & 0x02) == 0) {
+                    _button_draw(button, window, button->normalImage, true, nullptr, false);
                 }
 
-                if (button->radioGroup != NULL) {
-                    button->radioGroup->field_4--;
+                if (button->buttonGroup != nullptr) {
+                    button->buttonGroup->currChecked--;
                 }
 
                 keyCode = button->leftMouseUpEventCode;
             }
         } else {
-            if (a2) {
-                button->flags |= BUTTON_FLAG_0x020000;
+            if (checked) {
+                button->flags |= BUTTON_FLAG_CHECKED;
 
-                if ((a3 & 0x02) == 0) {
-                    _button_draw(button, window, button->mouseDownImage, 1, NULL, 0);
+                if ((flags & 0x02) == 0) {
+                    _button_draw(button, window, button->pressedImage, true, nullptr, false);
                 }
 
-                if (button->radioGroup != NULL) {
-                    button->radioGroup->field_4++;
+                if (button->buttonGroup != nullptr) {
+                    button->buttonGroup->currChecked++;
                 }
 
                 keyCode = button->lefMouseDownEventCode;
@@ -2301,7 +2353,7 @@ int _win_set_button_rest_state(int btn, bool a2, int a3)
         }
 
         if (keyCode != -1) {
-            if ((a3 & 0x01) != 0) {
+            if ((flags & 0x01) != 0) {
                 enqueueInputEvent(keyCode);
             }
         }
@@ -2311,39 +2363,39 @@ int _win_set_button_rest_state(int btn, bool a2, int a3)
 }
 
 // 0x4D962C
-int _win_group_check_buttons(int buttonCount, int* btns, int a3, void (*a4)(int))
+int _win_group_check_buttons(int buttonCount, int* btns, int maxChecked, RadioButtonCallback* func)
 {
     if (!gWindowSystemInitialized) {
         return -1;
     }
 
-    if (buttonCount >= RADIO_GROUP_BUTTON_LIST_CAPACITY) {
+    if (buttonCount >= BUTTON_GROUP_BUTTON_LIST_CAPACITY) {
         return -1;
     }
 
-    for (int groupIndex = 0; groupIndex < RADIO_GROUP_LIST_CAPACITY; groupIndex++) {
-        RadioGroup* radioGroup = &(gRadioGroups[groupIndex]);
-        if (radioGroup->buttonsLength == 0) {
-            radioGroup->field_4 = 0;
+    for (int groupIndex = 0; groupIndex < BUTTON_GROUP_LIST_CAPACITY; groupIndex++) {
+        ButtonGroup* buttonGroup = &(gButtonGroups[groupIndex]);
+        if (buttonGroup->buttonsLength == 0) {
+            buttonGroup->currChecked = 0;
 
             for (int buttonIndex = 0; buttonIndex < buttonCount; buttonIndex++) {
-                Button* button = buttonGetButton(btns[buttonIndex], NULL);
-                if (button == NULL) {
+                Button* button = buttonGetButton(btns[buttonIndex], nullptr);
+                if (button == nullptr) {
                     return -1;
                 }
 
-                radioGroup->buttons[buttonIndex] = button;
+                buttonGroup->buttons[buttonIndex] = button;
 
-                button->radioGroup = radioGroup;
+                button->buttonGroup = buttonGroup;
 
-                if ((button->flags & BUTTON_FLAG_0x020000) != 0) {
-                    radioGroup->field_4++;
+                if ((button->flags & BUTTON_FLAG_CHECKED) != 0) {
+                    buttonGroup->currChecked++;
                 }
             }
 
-            radioGroup->buttonsLength = buttonCount;
-            radioGroup->field_0 = a3;
-            radioGroup->field_8 = a4;
+            buttonGroup->buttonsLength = buttonCount;
+            buttonGroup->maxChecked = maxChecked;
+            buttonGroup->func = func;
             return 0;
         }
     }
@@ -2358,16 +2410,16 @@ int _win_group_radio_buttons(int count, int* btns)
         return -1;
     }
 
-    if (_win_group_check_buttons(count, btns, 1, NULL) == -1) {
+    if (_win_group_check_buttons(count, btns, 1, nullptr) == -1) {
         return -1;
     }
 
-    Button* button = buttonGetButton(btns[0], NULL);
-    RadioGroup* radioGroup = button->radioGroup;
+    Button* button = buttonGetButton(btns[0], nullptr);
+    ButtonGroup* buttonGroup = button->buttonGroup;
 
-    for (int index = 0; index < radioGroup->buttonsLength; index++) {
-        Button* v1 = radioGroup->buttons[index];
-        v1->flags |= BUTTON_FLAG_0x040000;
+    for (int index = 0; index < buttonGroup->buttonsLength; index++) {
+        Button* v1 = buttonGroup->buttons[index];
+        v1->flags |= BUTTON_FLAG_RADIO;
     }
 
     return 0;
@@ -2376,62 +2428,62 @@ int _win_group_radio_buttons(int count, int* btns)
 // 0x4D9744
 int _button_check_group(Button* button)
 {
-    if (button->radioGroup == NULL) {
+    if (button->buttonGroup == nullptr) {
         return 0;
     }
 
-    if ((button->flags & BUTTON_FLAG_0x040000) != 0) {
-        if (button->radioGroup->field_4 > 0) {
-            for (int index = 0; index < button->radioGroup->buttonsLength; index++) {
-                Button* v1 = button->radioGroup->buttons[index];
-                if ((v1->flags & BUTTON_FLAG_0x020000) != 0) {
-                    v1->flags &= ~BUTTON_FLAG_0x020000;
+    if ((button->flags & BUTTON_FLAG_RADIO) != 0) {
+        if (button->buttonGroup->currChecked > 0) {
+            for (int index = 0; index < button->buttonGroup->buttonsLength; index++) {
+                Button* v1 = button->buttonGroup->buttons[index];
+                if ((v1->flags & BUTTON_FLAG_CHECKED) != 0) {
+                    v1->flags &= ~BUTTON_FLAG_CHECKED;
 
                     Window* window;
                     buttonGetButton(v1->id, &window);
-                    _button_draw(v1, window, v1->mouseUpImage, 1, NULL, 1);
+                    _button_draw(v1, window, v1->normalImage, true, nullptr, true);
 
-                    if (v1->leftMouseUpProc != NULL) {
+                    if (v1->leftMouseUpProc != nullptr) {
                         v1->leftMouseUpProc(v1->id, v1->leftMouseUpEventCode);
                     }
                 }
             }
         }
 
-        if ((button->flags & BUTTON_FLAG_0x020000) == 0) {
-            button->radioGroup->field_4++;
+        if ((button->flags & BUTTON_FLAG_CHECKED) == 0) {
+            button->buttonGroup->currChecked++;
         }
 
         return 0;
     }
 
-    if (button->radioGroup->field_4 < button->radioGroup->field_0) {
-        if ((button->flags & BUTTON_FLAG_0x020000) == 0) {
-            button->radioGroup->field_4++;
+    if (button->buttonGroup->currChecked < button->buttonGroup->maxChecked) {
+        if ((button->flags & BUTTON_FLAG_CHECKED) == 0) {
+            button->buttonGroup->currChecked++;
         }
 
         return 0;
     }
 
-    if (button->radioGroup->field_8 != NULL) {
-        button->radioGroup->field_8(button->id);
+    if (button->buttonGroup->func != nullptr) {
+        button->buttonGroup->func(button->id);
     }
 
     return -1;
 }
 
 // 0x4D9808
-void _button_draw(Button* button, Window* window, unsigned char* data, int a4, Rect* a5, int a6)
+void _button_draw(Button* button, Window* window, unsigned char* data, bool draw, Rect* bound, bool sound)
 {
-    unsigned char* previousImage = NULL;
-    if (data != NULL) {
+    unsigned char* previousImage = nullptr;
+    if (data != nullptr) {
         Rect v2;
         rectCopy(&v2, &(button->rect));
         rectOffset(&v2, window->rect.left, window->rect.top);
 
         Rect v3;
-        if (a5 != NULL) {
-            if (rectIntersection(&v2, a5, &v2) == -1) {
+        if (bound != nullptr) {
+            if (rectIntersection(&v2, bound, &v2) == -1) {
                 return;
             }
 
@@ -2441,30 +2493,30 @@ void _button_draw(Button* button, Window* window, unsigned char* data, int a4, R
             rectCopy(&v3, &(button->rect));
         }
 
-        if (data == button->mouseUpImage && (button->flags & BUTTON_FLAG_0x020000)) {
-            data = button->mouseDownImage;
+        if (data == button->normalImage && (button->flags & BUTTON_FLAG_CHECKED)) {
+            data = button->pressedImage;
         }
 
         if (button->flags & BUTTON_FLAG_DISABLED) {
-            if (data == button->mouseUpImage) {
-                data = button->field_3C;
-            } else if (data == button->mouseDownImage) {
-                data = button->field_40;
-            } else if (data == button->mouseHoverImage) {
-                data = button->field_44;
+            if (data == button->normalImage) {
+                data = button->disabledNormalImage;
+            } else if (data == button->pressedImage) {
+                data = button->disabledPressedImage;
+            } else if (data == button->hoverImage) {
+                data = button->disabledHoverImage;
             }
         } else {
-            if (data == button->field_3C) {
-                data = button->mouseUpImage;
-            } else if (data == button->field_40) {
-                data = button->mouseDownImage;
-            } else if (data == button->field_44) {
-                data = button->mouseHoverImage;
+            if (data == button->disabledNormalImage) {
+                data = button->normalImage;
+            } else if (data == button->disabledPressedImage) {
+                data = button->pressedImage;
+            } else if (data == button->disabledHoverImage) {
+                data = button->hoverImage;
             }
         }
 
         if (data) {
-            if (a4 == 0) {
+            if (!draw) {
                 int width = button->rect.right - button->rect.left + 1;
                 if ((button->flags & BUTTON_FLAG_TRANSPARENT) != 0) {
                     blitBufferToBufferTrans(
@@ -2488,18 +2540,18 @@ void _button_draw(Button* button, Window* window, unsigned char* data, int a4, R
             previousImage = button->currentImage;
             button->currentImage = data;
 
-            if (a4 != 0) {
-                _GNW_win_refresh(window, &v2, 0);
+            if (draw) {
+                _GNW_win_refresh(window, &v2, nullptr);
             }
         }
     }
 
-    if (a6) {
+    if (sound) {
         if (previousImage != data) {
-            if (data == button->mouseDownImage && button->onPressed != NULL) {
-                button->onPressed(button->id, button->lefMouseDownEventCode);
-            } else if (data == button->mouseUpImage && button->onUnpressed != NULL) {
-                button->onUnpressed(button->id, button->leftMouseUpEventCode);
+            if (data == button->pressedImage && button->pressSoundFunc != nullptr) {
+                button->pressSoundFunc(button->id, button->lefMouseDownEventCode);
+            } else if (data == button->normalImage && button->releaseSoundFunc != nullptr) {
+                button->releaseSoundFunc(button->id, button->leftMouseUpEventCode);
             }
         }
     }
@@ -2509,14 +2561,14 @@ void _button_draw(Button* button, Window* window, unsigned char* data, int a4, R
 void _GNW_button_refresh(Window* window, Rect* rect)
 {
     Button* button = window->buttonListHead;
-    if (button != NULL) {
-        while (button->next != NULL) {
+    if (button != nullptr) {
+        while (button->next != nullptr) {
             button = button->next;
         }
     }
 
-    while (button != NULL) {
-        _button_draw(button, window, button->currentImage, 0, rect, 0);
+    while (button != nullptr) {
+        _button_draw(button, window, button->currentImage, false, rect, false);
         button = button->prev;
     }
 }
@@ -2530,13 +2582,13 @@ int _win_button_press_and_release(int btn)
 
     Window* window;
     Button* button = buttonGetButton(btn, &window);
-    if (button == NULL) {
+    if (button == nullptr) {
         return -1;
     }
 
-    _button_draw(button, window, button->mouseDownImage, 1, NULL, 1);
+    _button_draw(button, window, button->pressedImage, true, nullptr, true);
 
-    if (button->leftMouseDownProc != NULL) {
+    if (button->leftMouseDownProc != nullptr) {
         button->leftMouseDownProc(btn, button->lefMouseDownEventCode);
 
         if ((button->flags & BUTTON_FLAG_0x40) != 0) {
@@ -2548,9 +2600,9 @@ int _win_button_press_and_release(int btn)
         }
     }
 
-    _button_draw(button, window, button->mouseUpImage, 1, NULL, 1);
+    _button_draw(button, window, button->normalImage, true, nullptr, true);
 
-    if (button->leftMouseUpProc != NULL) {
+    if (button->leftMouseUpProc != nullptr) {
         button->leftMouseUpProc(btn, button->leftMouseUpEventCode);
 
         if ((button->flags & BUTTON_FLAG_0x40) != 0) {

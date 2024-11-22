@@ -67,7 +67,6 @@ typedef enum Background {
     BACKGROUND_COUNT,
 } Background;
 
-#pragma pack(2)
 typedef struct Art {
     int field_0;
     short framesPerSecond;
@@ -76,9 +75,9 @@ typedef struct Art {
     short xOffsets[6];
     short yOffsets[6];
     int dataOffsets[6];
-    int field_3A;
+    int padding[6];
+    int dataSize;
 } Art;
-#pragma pack()
 
 typedef struct ArtFrame {
     short width;
@@ -124,6 +123,7 @@ char* artGetObjectTypeName(int objectType);
 int artIsObjectTypeHidden(int objectType);
 int artGetFidgetCount(int headFid);
 void artRender(int fid, unsigned char* dest, int width, int height, int pitch);
+int art_list_str(int fid, char* name);
 Art* artLock(int fid, CacheEntry** cache_entry);
 unsigned char* artLockFrameData(int fid, int frame, int direction, CacheEntry** out_cache_entry);
 unsigned char* artLockFrameDataReturningSize(int fid, CacheEntry** out_cache_entry, int* widthPtr, int* heightPtr);
@@ -148,6 +148,7 @@ int _art_alias_num(int a1);
 int artCritterFidShouldRun(int a1);
 int artAliasFid(int fid);
 int buildFid(int objectType, int frmId, int animType, int a4, int rotation);
+Art* artLoad(const char* path);
 int artRead(const char* path, unsigned char* data);
 int artWrite(const char* path, unsigned char* data);
 

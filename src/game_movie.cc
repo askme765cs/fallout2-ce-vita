@@ -18,6 +18,7 @@
 #include "settings.h"
 #include "svga.h"
 #include "text_font.h"
+#include "touch.h"
 #include "window_manager.h"
 
 namespace fallout {
@@ -53,18 +54,18 @@ static const char* gMovieFileNames[MOVIE_COUNT] = {
 
 // 0x518DE4
 static const char* gMoviePaletteFilePaths[MOVIE_COUNT] = {
-    NULL,
+    nullptr,
     "art\\cuts\\introsub.pal",
     "art\\cuts\\eldersub.pal",
-    NULL,
+    nullptr,
     "art\\cuts\\artmrsub.pal",
-    NULL,
-    NULL,
-    NULL,
+    nullptr,
+    nullptr,
+    nullptr,
     "art\\cuts\\artmrsub.pal",
-    NULL,
-    NULL,
-    NULL,
+    nullptr,
+    nullptr,
+    nullptr,
     "art\\cuts\\artmrsub.pal",
     "art\\cuts\\artmrsub.pal",
     "art\\cuts\\artmrsub.pal",
@@ -149,12 +150,12 @@ int gameMoviePlay(int movie, int flags)
     bool movieFound = false;
 
     if (compat_stricmp(language, ENGLISH) != 0) {
-        sprintf(movieFilePath, "art\\%s\\cuts\\%s", language, gMovieFileNames[movie]);
+        snprintf(movieFilePath, sizeof(movieFilePath), "art\\%s\\cuts\\%s", language, gMovieFileNames[movie]);
         movieFound = dbGetFileSize(movieFilePath, &movieFileSize) == 0;
     }
 
     if (!movieFound) {
-        sprintf(movieFilePath, "art\\cuts\\%s", gMovieFileNames[movie]);
+        snprintf(movieFilePath, sizeof(movieFilePath), "art\\cuts\\%s", gMovieFileNames[movie]);
         movieFound = dbGetFileSize(movieFilePath, &movieFileSize) == 0;
     }
 
@@ -176,7 +177,7 @@ int gameMoviePlay(int movie, int flags)
         GAME_MOVIE_WINDOW_WIDTH,
         GAME_MOVIE_WINDOW_HEIGHT,
         0,
-        WINDOW_FLAG_0x10);
+        WINDOW_MODAL);
     if (win == -1) {
         gGameMovieIsPlaying = false;
         return -1;
@@ -209,7 +210,7 @@ int gameMoviePlay(int movie, int flags)
     int oldFont;
     if (subtitlesEnabled) {
         const char* subtitlesPaletteFilePath;
-        if (gMoviePaletteFilePaths[movie] != NULL) {
+        if (gMoviePaletteFilePaths[movie] != nullptr) {
             subtitlesPaletteFilePath = gMoviePaletteFilePaths[movie];
         } else {
             subtitlesPaletteFilePath = "art\\cuts\\subtitle.pal";
@@ -249,6 +250,11 @@ int gameMoviePlay(int movie, int flags)
             break;
         }
 
+        Gesture gesture;
+        if (touch_get_gesture(&gesture) && gesture.state == kEnded) {
+            break;
+        }
+
         int x;
         int y;
         _mouse_get_raw_state(&x, &y, &buttons);
@@ -276,9 +282,9 @@ int gameMoviePlay(int movie, int flags)
 
         windowSetFont(oldFont);
 
-        float r = (float)((_Color2RGB_(oldTextColor) & 0x7C00) >> 10) * flt_50352A;
-        float g = (float)((_Color2RGB_(oldTextColor) & 0x3E0) >> 5) * flt_50352A;
-        float b = (float)(_Color2RGB_(oldTextColor) & 0x1F) * flt_50352A;
+        float r = (float)((Color2RGB(oldTextColor) & 0x7C00) >> 10) * flt_50352A;
+        float g = (float)((Color2RGB(oldTextColor) & 0x3E0) >> 5) * flt_50352A;
+        float b = (float)(Color2RGB(oldTextColor) & 0x1F) * flt_50352A;
         windowSetTextColor(r, g, b);
     }
 
@@ -332,11 +338,11 @@ static char* gameMovieBuildSubtitlesFilePath(char* movieFilePath)
     char* path = movieFilePath;
 
     char* separator = strrchr(path, '\\');
-    if (separator != NULL) {
+    if (separator != nullptr) {
         path = separator + 1;
     }
 
-    sprintf(gGameMovieSubtitlesFilePath, "text\\%s\\cuts\\%s", settings.system.language.c_str(), path);
+    snprintf(gGameMovieSubtitlesFilePath, sizeof(gGameMovieSubtitlesFilePath), "text\\%s\\cuts\\%s", settings.system.language.c_str(), path);
 
     char* pch = strrchr(gGameMovieSubtitlesFilePath, '.');
     if (*pch != '\0') {

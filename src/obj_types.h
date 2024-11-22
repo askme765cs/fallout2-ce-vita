@@ -29,7 +29,7 @@ enum {
     OBJ_TYPE_COUNT,
 };
 
-#define FID_TYPE(value) ((value) & 0xF000000) >> 24
+#define FID_TYPE(value) ((value)&0xF000000) >> 24
 #define PID_TYPE(value) (value) >> 24
 #define SID_TYPE(value) (value) >> 24
 
@@ -44,11 +44,28 @@ typedef enum OutlineType {
 
 typedef enum ObjectFlags {
     OBJECT_HIDDEN = 0x01,
-    OBJECT_TEMPORARY = 0x04,
+
+    // Specifies that the object should not be saved to the savegame file.
+    //
+    // This flag is used in these situations:
+    //  - To prevent saving of system objects like dude (which has separate
+    // saving routine), egg, mouse cursors, etc.
+    //  - To prevent saving of temporary objects (projectiles, explosion
+    // effects, etc.).
+    //  - To prevent saving of objects which cannot be removed for some reason,
+    // like objects trying to delete themselves from scripting engine (used
+    // together with `OBJECT_HIDDEN` to prevent affecting game world).
+    OBJECT_NO_SAVE = 0x04,
     OBJECT_FLAT = 0x08,
     OBJECT_NO_BLOCK = 0x10,
     OBJECT_LIGHTING = 0x20,
-    OBJECT_FLAG_0x400 = 0x400, // ???
+
+    // Specifies that the object should not be removed (freed) from the game
+    // world for whatever reason.
+    //
+    // This flag is used to prevent freeing of system objects like dude, egg,
+    // mouse cursors, etc.
+    OBJECT_NO_REMOVE = 0x400,
     OBJECT_MULTIHEX = 0x800,
     OBJECT_NO_HIGHLIGHT = 0x1000,
     OBJECT_QUEUED = 0x2000, // set if there was/is any event for the object
@@ -101,8 +118,8 @@ typedef enum CritterFlags {
 
 typedef enum CritterManeuver {
     CRITTER_MANEUVER_NONE = 0,
-    CRITTER_MANEUVER_0x01 = 0x01,
-    CRITTER_MANEUVER_STOP_ATTACKING = 0x02,
+    CRITTER_MANEUVER_ENGAGING = 0x01,
+    CRITTER_MANEUVER_DISENGAGING = 0x02,
     CRITTER_MANUEVER_FLEEING = 0x04,
 } CritterManeuver;
 

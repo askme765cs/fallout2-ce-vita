@@ -104,11 +104,11 @@ int gMapSid = -1;
 
 // local_vars
 // 0x519568
-int* gMapLocalVars = NULL;
+int* gMapLocalVars = nullptr;
 
 // map_vars
 // 0x51956C
-static int* gMapGlobalVars = NULL;
+int* gMapGlobalVars = nullptr;
 
 // local_vars_num
 // 0x519570
@@ -116,7 +116,7 @@ int gMapLocalVarsLength = 0;
 
 // map_vars_num
 // 0x519574
-static int gMapGlobalVarsLength = 0;
+int gMapGlobalVarsLength = 0;
 
 // Current elevation.
 //
@@ -159,11 +159,6 @@ int gIsoWindow;
 // 0x631E50
 static char _scratchStr[40];
 
-// Last map file name.
-//
-// 0x631E78
-static char _map_path[COMPAT_MAX_PATH];
-
 // CE: Basically the same problem described in |gMapLocalPointers|, but this
 // time Olympus folks use global map variables to store objects (looks like
 // only `self_obj`).
@@ -192,7 +187,7 @@ int isoInit()
     }
 
     gIsoWindowBuffer = windowGetBuffer(gIsoWindow);
-    if (gIsoWindowBuffer == NULL) {
+    if (gIsoWindowBuffer == nullptr) {
         debugPrint("win_get_buf failed in iso_init\n");
         return -1;
     }
@@ -293,7 +288,7 @@ void _map_init()
 
     if (messageListInit(&gMapMessageList)) {
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "%smap.msg", asc_5186C8);
+        snprintf(path, sizeof(path), "%smap.msg", asc_5186C8);
 
         if (!messageListLoad(&gMapMessageList, path)) {
             debugPrint("\nError loading map_msg_file!");
@@ -305,7 +300,7 @@ void _map_init()
     mapNewMap();
     tickersAdd(gameMouseRefresh);
     _gmouse_disable(0);
-    windowUnhide(gIsoWindow);
+    windowShow(gIsoWindow);
 
     messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_MAP, &gMapMessageList);
 }
@@ -483,7 +478,7 @@ int _map_malloc_local_var(int a1)
     gMapLocalVarsLength += a1;
 
     int* vars = (int*)internal_realloc(gMapLocalVars, sizeof(*vars) * gMapLocalVarsLength);
-    if (vars == NULL) {
+    if (vars == nullptr) {
         debugPrint("\nError: Ran out of memory!");
     }
 
@@ -507,11 +502,11 @@ void mapSetStart(int tile, int elevation, int rotation)
 char* mapGetName(int map, int elevation)
 {
     if (map < 0 || map >= wmMapMaxCount()) {
-        return NULL;
+        return nullptr;
     }
 
     if (!elevationIsValid(elevation)) {
-        return NULL;
+        return nullptr;
     }
 
     MessageListItem messageListItem;
@@ -709,10 +704,13 @@ int mapScroll(int dx, int dy)
 // 0x482900
 static char* mapBuildPath(char* name)
 {
+    // 0x631E78
+    static char map_path[COMPAT_MAX_PATH];
+
     if (*name != '\\') {
         // NOTE: Uppercased from "maps".
-        sprintf(_map_path, "MAPS\\%s", name);
-        return _map_path;
+        snprintf(map_path, sizeof(map_path), "MAPS\\%s", name);
+        return map_path;
     }
     return name;
 }
@@ -762,7 +760,7 @@ int mapLoadByName(char* fileName)
     rc = -1;
 
     char* extension = strstr(fileName, ".MAP");
-    if (extension != NULL) {
+    if (extension != nullptr) {
         strcpy(extension, ".SAV");
 
         const char* filePath = mapBuildPath(fileName);
@@ -771,7 +769,7 @@ int mapLoadByName(char* fileName)
 
         strcpy(extension, ".MAP");
 
-        if (stream != NULL) {
+        if (stream != nullptr) {
             fileClose(stream);
             rc = mapLoadSaved(fileName);
             wmMapMusicStart();
@@ -781,14 +779,14 @@ int mapLoadByName(char* fileName)
     if (rc == -1) {
         const char* filePath = mapBuildPath(fileName);
         File* stream = fileOpen(filePath, "rb");
-        if (stream != NULL) {
+        if (stream != nullptr) {
             rc = mapLoad(stream);
             fileClose(stream);
         }
 
         if (rc == 0) {
             strcpy(gMapHeader.name, fileName);
-            gDude->data.critter.combat.whoHitMe = NULL;
+            gDude->data.critter.combat.whoHitMe = nullptr;
         }
     }
 
@@ -801,7 +799,7 @@ int mapLoadById(int map)
     scriptSetFixedParam(gMapSid, map);
 
     char name[16];
-    if (wmMapIdxToName(map, name) == -1) {
+    if (wmMapIdxToName(map, name, sizeof(name)) == -1) {
         return -1;
     }
 
@@ -830,17 +828,22 @@ static int mapLoad(File* stream)
 
     int rc = 0;
 
-    windowFill(gIsoWindow, 0, 0, _scr_size.right - _scr_size.left + 1, _scr_size.bottom - _scr_size.top - 99, _colorTable[0]);
+    windowFill(gIsoWindow,
+        0,
+        0,
+        windowGetWidth(gIsoWindow),
+        windowGetHeight(gIsoWindow),
+        _colorTable[0]);
     windowRefresh(gIsoWindow);
     animationStop();
     scriptsDisable();
 
     gMapSid = -1;
 
-    const char* error = NULL;
+    const char* error = nullptr;
 
     error = "Invalid file handle";
-    if (stream == NULL) {
+    if (stream == nullptr) {
         goto err;
     }
 
@@ -921,21 +924,21 @@ static int mapLoad(File* stream)
         goto err;
     }
 
-    lightSetLightLevel(LIGHT_LEVEL_MAX, false);
-    objectSetLocation(gDude, gCenterTile, gElevation, NULL);
-    objectSetRotation(gDude, gEnteringRotation, NULL);
+    lightSetAmbientIntensity(LIGHT_INTENSITY_MAX, false);
+    objectSetLocation(gDude, gCenterTile, gElevation, nullptr);
+    objectSetRotation(gDude, gEnteringRotation, nullptr);
     gMapHeader.field_34 = wmMapMatchNameToIdx(gMapHeader.name);
 
     if ((gMapHeader.flags & 1) == 0) {
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "maps\\%s", gMapHeader.name);
+        snprintf(path, sizeof(path), "maps\\%s", gMapHeader.name);
 
         char* extension = strstr(path, ".MAP");
-        if (extension == NULL) {
+        if (extension == nullptr) {
             extension = strstr(path, ".map");
         }
 
-        if (extension != NULL) {
+        if (extension != nullptr) {
             *extension = '\0';
         }
 
@@ -955,8 +958,8 @@ static int mapLoad(File* stream)
         Object* object;
         int fid = buildFid(OBJ_TYPE_MISC, 12, 0, 0, 0);
         objectCreateWithFidPid(&object, fid, -1);
-        object->flags |= (OBJECT_LIGHT_THRU | OBJECT_TEMPORARY | OBJECT_HIDDEN);
-        objectSetLocation(object, 1, 0, NULL);
+        object->flags |= (OBJECT_LIGHT_THRU | OBJECT_NO_SAVE | OBJECT_HIDDEN);
+        objectSetLocation(object, 1, 0, nullptr);
         object->sid = gMapSid;
         scriptSetFixedParam(gMapSid, (gMapHeader.flags & 1) == 0);
 
@@ -977,13 +980,13 @@ static int mapLoad(File* stream)
         }
     }
 
-    error = NULL;
+    error = nullptr;
 
 err:
 
-    if (error != NULL) {
+    if (error != nullptr) {
         char message[100]; // TODO: Size is probably wrong.
-        sprintf(message, "%s while loading map.", error);
+        snprintf(message, sizeof(message), "%s while loading map.", error);
         debugPrint(message);
         mapNewMap();
         rc = -1;
@@ -992,10 +995,10 @@ err:
     }
 
     _partyMemberRecoverLoad();
-    _intface_show();
+    interfaceBarShow();
     _proto_dude_update_gender();
     _map_place_dude_and_mouse();
-    fileSetReadProgressHandler(NULL, 0);
+    fileSetReadProgressHandler(nullptr, 0);
     isoEnable();
     _gmouse_disable_scrolling();
     gameMouseSetCursor(MOUSE_CURSOR_WAIT_PLANET);
@@ -1010,7 +1013,7 @@ err:
 
     if (gMapTransition.map > 0) {
         if (gMapTransition.rotation >= 0) {
-            objectSetRotation(gDude, gMapTransition.rotation, NULL);
+            objectSetRotation(gDude, gMapTransition.rotation, nullptr);
         }
     } else {
         tileWindowRefresh();
@@ -1029,7 +1032,7 @@ err:
         rc = -1;
     }
 
-    fileSetReadProgressHandler(NULL, 0);
+    fileSetReadProgressHandler(nullptr, 0);
 
     if (gameUiIsDisabled() == 0) {
         _gmouse_enable_scrolling();
@@ -1097,7 +1100,7 @@ static int _map_age_dead_critters()
     }
 
     Object* obj = objectFindFirst();
-    while (obj != NULL) {
+    while (obj != nullptr) {
         if (PID_TYPE(obj->pid) == OBJ_TYPE_CRITTER
             && obj != gDude
             && !objectIsPartyMember(obj)
@@ -1124,7 +1127,7 @@ static int _map_age_dead_critters()
     Object** objects = (Object**)internal_malloc(sizeof(*objects) * capacity);
 
     obj = objectFindFirst();
-    while (obj != NULL) {
+    while (obj != nullptr) {
         int type = PID_TYPE(obj->pid);
         if (type == OBJ_TYPE_CRITTER) {
             if (obj != gDude && critterIsDead(obj)) {
@@ -1134,7 +1137,7 @@ static int _map_age_dead_critters()
                     if (count >= capacity) {
                         capacity *= 2;
                         objects = (Object**)internal_realloc(objects, sizeof(*objects) * capacity);
-                        if (objects == NULL) {
+                        if (objects == nullptr) {
                             debugPrint("\nError: Out of Memory!");
                             return -1;
                         }
@@ -1146,7 +1149,7 @@ static int _map_age_dead_critters()
             if (count >= capacity) {
                 capacity *= 2;
                 objects = (Object**)internal_realloc(objects, sizeof(*objects) * capacity);
-                if (objects == NULL) {
+                if (objects == nullptr) {
                     debugPrint("\nError: Out of Memory!");
                     return -1;
                 }
@@ -1169,7 +1172,7 @@ static int _map_age_dead_critters()
                 break;
             }
 
-            objectSetLocation(blood, obj->tile, obj->elevation, NULL);
+            objectSetLocation(blood, obj->tile, obj->elevation, nullptr);
 
             Proto* proto;
             protoGetProto(obj->pid, &proto);
@@ -1184,11 +1187,11 @@ static int _map_age_dead_critters()
                 }
             }
 
-            objectSetFrame(blood, frame, NULL);
+            objectSetFrame(blood, frame, nullptr);
         }
 
         reg_anim_clear(obj);
-        objectDestroy(obj, NULL);
+        objectDestroy(obj, nullptr);
     }
 
     internal_free(objects);
@@ -1209,7 +1212,7 @@ int _map_target_load_area()
 // 0x4835B4
 int mapSetTransition(MapTransition* transition)
 {
-    if (transition == NULL) {
+    if (transition == nullptr) {
         return -1;
     }
 
@@ -1258,9 +1261,9 @@ int mapHandleTransition()
             if (gMapTransition.tile != -1 && gMapTransition.tile != 0
                 && gMapHeader.field_34 != MAP_MODOC_BEDNBREAKFAST && gMapHeader.field_34 != MAP_THE_SQUAT_A
                 && elevationIsValid(gMapTransition.elevation)) {
-                objectSetLocation(gDude, gMapTransition.tile, gMapTransition.elevation, NULL);
+                objectSetLocation(gDude, gMapTransition.tile, gMapTransition.elevation, nullptr);
                 mapSetElevation(gMapTransition.elevation);
-                objectSetRotation(gDude, gMapTransition.rotation, NULL);
+                objectSetRotation(gDude, gMapTransition.rotation, nullptr);
             }
 
             if (tileSetCenter(gDude->tile, TILE_SET_CENTER_REFRESH_WINDOW) == -1) {
@@ -1283,7 +1286,7 @@ int mapHandleTransition()
 // 0x483784
 static void _map_fix_critter_combat_data()
 {
-    for (Object* object = objectFindFirst(); object != NULL; object = objectFindNext()) {
+    for (Object* object = objectFindFirst(); object != nullptr; object = objectFindNext()) {
         if (object->pid == -1) {
             continue;
         }
@@ -1293,7 +1296,7 @@ static void _map_fix_critter_combat_data()
         }
 
         if (object->data.critter.combat.whoHitMeCid == -1) {
-            object->data.critter.combat.whoHitMe = NULL;
+            object->data.critter.combat.whoHitMe = nullptr;
         }
     }
 }
@@ -1315,16 +1318,16 @@ static int _map_save()
     if (gMapHeader.name[0] != '\0') {
         char* mapFileName = mapBuildPath(gMapHeader.name);
         File* stream = fileOpen(mapFileName, "wb");
-        if (stream != NULL) {
+        if (stream != nullptr) {
             rc = _map_save_file(stream);
             fileClose(stream);
         } else {
-            sprintf(temp, "Unable to open %s to write!", gMapHeader.name);
+            snprintf(temp, sizeof(temp), "Unable to open %s to write!", gMapHeader.name);
             debugPrint(temp);
         }
 
         if (rc == 0) {
-            sprintf(temp, "%s saved.", gMapHeader.name);
+            snprintf(temp, sizeof(temp), "%s saved.", gMapHeader.name);
             debugPrint(temp);
         }
     } else {
@@ -1337,7 +1340,7 @@ static int _map_save()
 // 0x483980
 static int _map_save_file(File* stream)
 {
-    if (stream == NULL) {
+    if (stream == nullptr) {
         return -1;
     }
 
@@ -1361,13 +1364,13 @@ static int _map_save_file(File* stream)
 
         if (tile == SQUARE_GRID_SIZE) {
             Object* object = objectFindFirstAtElevation(elevation);
-            if (object != NULL) {
+            if (object != nullptr) {
                 // TODO: Implementation is slightly different, check in debugger.
-                while (object != NULL && (object->flags & OBJECT_TEMPORARY)) {
+                while (object != nullptr && (object->flags & OBJECT_NO_SAVE)) {
                     object = objectFindNextAtElevation();
                 }
 
-                if (object != NULL) {
+                if (object != nullptr) {
                     gMapHeader.flags &= ~_map_data_elev_flags[elevation];
                 } else {
                     gMapHeader.flags |= _map_data_elev_flags[elevation];
@@ -1403,12 +1406,12 @@ static int _map_save_file(File* stream)
     char err[80];
 
     if (scriptSaveAll(stream) == -1) {
-        sprintf(err, "Error saving scripts in %s", gMapHeader.name);
+        snprintf(err, sizeof(err), "Error saving scripts in %s", gMapHeader.name);
         _win_msg(err, 80, 80, _colorTable[31744]);
     }
 
     if (objectSaveAll(stream) == -1) {
-        sprintf(err, "Error saving objects in %s", gMapHeader.name);
+        snprintf(err, sizeof(err), "Error saving objects in %s", gMapHeader.name);
         _win_msg(err, 80, 80, _colorTable[31744]);
     }
 
@@ -1500,36 +1503,44 @@ static void isoWindowRefreshRect(Rect* rect)
 // 0x483EE4
 static void isoWindowRefreshRectGame(Rect* rect)
 {
-    Rect clampedDirtyRect;
-    if (rectIntersection(rect, &gIsoWindowRect, &clampedDirtyRect) == -1) {
+    Rect rectToUpdate;
+    if (rectIntersection(rect, &gIsoWindowRect, &rectToUpdate) == -1) {
         return;
     }
 
-    tileRenderFloorsInRect(&clampedDirtyRect, gElevation);
-    _grid_render(&clampedDirtyRect, gElevation);
-    _obj_render_pre_roof(&clampedDirtyRect, gElevation);
-    tileRenderRoofsInRect(&clampedDirtyRect, gElevation);
-    _obj_render_post_roof(&clampedDirtyRect, gElevation);
+    // CE: Clear dirty rect to prevent most of the visual artifacts near map
+    // edges.
+    bufferFill(gIsoWindowBuffer + rectToUpdate.top * rectGetWidth(&gIsoWindowRect) + rectToUpdate.left,
+        rectGetWidth(&rectToUpdate),
+        rectGetHeight(&rectToUpdate),
+        rectGetWidth(&gIsoWindowRect),
+        0);
+
+    tileRenderFloorsInRect(&rectToUpdate, gElevation);
+    _obj_render_pre_roof(&rectToUpdate, gElevation);
+    tileRenderRoofsInRect(&rectToUpdate, gElevation);
+    _obj_render_post_roof(&rectToUpdate, gElevation);
 }
 
 // 0x483F44
 static void isoWindowRefreshRectMapper(Rect* rect)
 {
-    Rect clampedDirtyRect;
-    if (rectIntersection(rect, &gIsoWindowRect, &clampedDirtyRect) == -1) {
+    Rect rectToUpdate;
+    if (rectIntersection(rect, &gIsoWindowRect, &rectToUpdate) == -1) {
         return;
     }
 
-    bufferFill(gIsoWindowBuffer + clampedDirtyRect.top * (_scr_size.right - _scr_size.left + 1) + clampedDirtyRect.left,
-        clampedDirtyRect.right - clampedDirtyRect.left + 1,
-        clampedDirtyRect.bottom - clampedDirtyRect.top + 1,
-        _scr_size.right - _scr_size.left + 1,
+    bufferFill(gIsoWindowBuffer + rectToUpdate.top * rectGetWidth(&gIsoWindowRect) + rectToUpdate.left,
+        rectGetWidth(&rectToUpdate),
+        rectGetHeight(&rectToUpdate),
+        rectGetWidth(&gIsoWindowRect),
         0);
-    tileRenderFloorsInRect(&clampedDirtyRect, gElevation);
-    _grid_render(&clampedDirtyRect, gElevation);
-    _obj_render_pre_roof(&clampedDirtyRect, gElevation);
-    tileRenderRoofsInRect(&clampedDirtyRect, gElevation);
-    _obj_render_post_roof(&clampedDirtyRect, gElevation);
+
+    tileRenderFloorsInRect(&rectToUpdate, gElevation);
+    _grid_render(&rectToUpdate, gElevation);
+    _obj_render_pre_roof(&rectToUpdate, gElevation);
+    tileRenderRoofsInRect(&rectToUpdate, gElevation);
+    _obj_render_post_roof(&rectToUpdate, gElevation);
 }
 
 // NOTE: Inlined.
@@ -1541,7 +1552,7 @@ static int mapGlobalVariablesInit(int count)
 
     if (count != 0) {
         gMapGlobalVars = (int*)internal_malloc(sizeof(*gMapGlobalVars) * count);
-        if (gMapGlobalVars == NULL) {
+        if (gMapGlobalVars == nullptr) {
             return -1;
         }
 
@@ -1556,9 +1567,9 @@ static int mapGlobalVariablesInit(int count)
 // 0x484038
 static void mapGlobalVariablesFree()
 {
-    if (gMapGlobalVars != NULL) {
+    if (gMapGlobalVars != nullptr) {
         internal_free(gMapGlobalVars);
-        gMapGlobalVars = NULL;
+        gMapGlobalVars = nullptr;
         gMapGlobalVarsLength = 0;
     }
 
@@ -1586,7 +1597,7 @@ static int mapLocalVariablesInit(int count)
 
     if (count != 0) {
         gMapLocalVars = (int*)internal_malloc(sizeof(*gMapLocalVars) * count);
-        if (gMapLocalVars == NULL) {
+        if (gMapLocalVars == nullptr) {
             return -1;
         }
 
@@ -1601,9 +1612,9 @@ static int mapLocalVariablesInit(int count)
 // 0x4840D4
 static void mapLocalVariablesFree()
 {
-    if (gMapLocalVars != NULL) {
+    if (gMapLocalVars != nullptr) {
         internal_free(gMapLocalVars);
-        gMapLocalVars = NULL;
+        gMapLocalVars = nullptr;
         gMapLocalVarsLength = 0;
     }
 
@@ -1627,19 +1638,19 @@ static void _map_place_dude_and_mouse()
 {
     _obj_clear_seen();
 
-    if (gDude != NULL) {
+    if (gDude != nullptr) {
         if (FID_ANIM_TYPE(gDude->fid) != ANIM_STAND) {
-            objectSetFrame(gDude, 0, 0);
+            objectSetFrame(gDude, 0, nullptr);
             gDude->fid = buildFid(OBJ_TYPE_CRITTER, gDude->fid & 0xFFF, ANIM_STAND, (gDude->fid & 0xF000) >> 12, gDude->rotation + 1);
         }
 
         if (gDude->tile == -1) {
-            objectSetLocation(gDude, gCenterTile, gElevation, NULL);
-            objectSetRotation(gDude, gMapHeader.enteringRotation, 0);
+            objectSetLocation(gDude, gCenterTile, gElevation, nullptr);
+            objectSetRotation(gDude, gMapHeader.enteringRotation, nullptr);
         }
 
-        objectSetLight(gDude, 4, 0x10000, 0);
-        gDude->flags |= OBJECT_TEMPORARY;
+        objectSetLight(gDude, 4, 0x10000, nullptr);
+        gDude->flags |= OBJECT_NO_SAVE;
 
         _dude_stand(gDude, gDude->rotation, gDude->fid);
         _partyMemberSyncPosition();
@@ -1735,7 +1746,7 @@ static int mapHeaderWrite(MapHeader* ptr, File* stream)
     if (fileWriteInt32(stream, ptr->darkness) == -1) return -1;
     if (fileWriteInt32(stream, ptr->globalVariablesCount) == -1) return -1;
     if (fileWriteInt32(stream, ptr->field_34) == -1) return -1;
-    if (fileWriteInt32(stream, ptr->lastVisitTime) == -1) return -1;
+    if (fileWriteUInt32(stream, ptr->lastVisitTime) == -1) return -1;
     if (fileWriteInt32List(stream, ptr->field_3C, 44) == -1) return -1;
 
     return 0;
@@ -1755,7 +1766,7 @@ static int mapHeaderRead(MapHeader* ptr, File* stream)
     if (fileReadInt32(stream, &(ptr->darkness)) == -1) return -1;
     if (fileReadInt32(stream, &(ptr->globalVariablesCount)) == -1) return -1;
     if (fileReadInt32(stream, &(ptr->field_34)) == -1) return -1;
-    if (fileReadInt32(stream, &(ptr->lastVisitTime)) == -1) return -1;
+    if (fileReadUInt32(stream, &(ptr->lastVisitTime)) == -1) return -1;
     if (fileReadInt32List(stream, ptr->field_3C, 44) == -1) return -1;
 
     return 0;

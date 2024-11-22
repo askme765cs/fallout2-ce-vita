@@ -13,6 +13,7 @@
 #include "cycle.h"
 #include "dbox.h"
 #include "debug.h"
+#include "delay.h"
 #include "draw.h"
 #include "game.h"
 #include "game_mouse.h"
@@ -250,13 +251,13 @@ const int gPipboyFrmIds[PIPBOY_FRM_COUNT] = {
 };
 
 // 0x51C128
-QuestDescription* gQuestDescriptions = NULL;
+QuestDescription* gQuestDescriptions = nullptr;
 
 // 0x51C12C
 int gQuestsCount = 0;
 
 // 0x51C130
-HolodiskDescription* gHolodiskDescriptions = NULL;
+HolodiskDescription* gHolodiskDescriptions = nullptr;
 
 // 0x51C134
 int gHolodisksCount = 0;
@@ -406,9 +407,11 @@ int pipboyOpen(int intent)
     if (!wmMapPipboyActive()) {
         // You aren't wearing the pipboy!
         const char* text = getmsg(&gMiscMessageList, &gPipboyMessageListItem, 7000);
-        showDialogBox(text, NULL, 0, 192, 135, _colorTable[32328], NULL, _colorTable[32328], 1);
+        showDialogBox(text, nullptr, 0, 192, 135, _colorTable[32328], nullptr, _colorTable[32328], 1);
         return 0;
     }
+
+    ScopedGameMode gm(GameMode::kPipboy);
 
     intent = pipboyWindowInit(intent);
     if (intent == -1) {
@@ -524,7 +527,7 @@ static int pipboyWindowInit(int intent)
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "pipboy.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "pipboy.msg");
 
     if (!(messageListLoad(&gPipboyMessageList, path))) {
         return -1;
@@ -550,7 +553,7 @@ static int pipboyWindowInit(int intent)
 
     int pipboyWindowX = (screenGetWidth() - PIPBOY_WINDOW_WIDTH) / 2;
     int pipboyWindowY = (screenGetHeight() - PIPBOY_WINDOW_HEIGHT) / 2;
-    gPipboyWindow = windowCreate(pipboyWindowX, pipboyWindowY, PIPBOY_WINDOW_WIDTH, PIPBOY_WINDOW_HEIGHT, _colorTable[0], WINDOW_FLAG_0x10);
+    gPipboyWindow = windowCreate(pipboyWindowX, pipboyWindowY, PIPBOY_WINDOW_WIDTH, PIPBOY_WINDOW_HEIGHT, _colorTable[0], WINDOW_MODAL);
     if (gPipboyWindow == -1) {
         debugPrint("\n** Error opening pipboy window! **\n");
         for (int index = 0; index < PIPBOY_FRM_COUNT; index++) {
@@ -576,7 +579,7 @@ static int pipboyWindowInit(int intent)
         504,
         _pipboyFrmImages[PIPBOY_FRM_ALARM_UP].getData(),
         _pipboyFrmImages[PIPBOY_FRM_ALARM_DOWN].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (alarmButton != -1) {
         buttonSetCallbacks(alarmButton, _gsound_med_butt_press, _gsound_med_butt_release);
@@ -597,7 +600,7 @@ static int pipboyWindowInit(int intent)
                 eventCode,
                 _pipboyFrmImages[PIPBOY_FRM_LITTLE_RED_BUTTON_UP].getData(),
                 _pipboyFrmImages[PIPBOY_FRM_LITTLE_RED_BUTTON_DOWN].getData(),
-                NULL,
+                nullptr,
                 BUTTON_FLAG_TRANSPARENT);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -651,7 +654,7 @@ static int pipboyWindowInit(int intent)
             soundPlayFile("iisxxxx1");
 
             const char* text = getmsg(&gPipboyMessageList, &gPipboyMessageListItem, 215);
-            showDialogBox(text, NULL, 0, 192, 135, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
+            showDialogBox(text, nullptr, 0, 192, 135, _colorTable[32328], nullptr, _colorTable[32328], DIALOG_BOX_LARGE);
 
             intent = PIPBOY_OPEN_INTENT_UNSPECIFIED;
         }
@@ -1177,7 +1180,7 @@ static void pipboyWindowHandleStatus(int a1)
         const char* text1 = getmsg(&gPipboyMessageList, &gPipboyMessageListItem, 210);
         const char* text2 = getmsg(&gMapMessageList, &gPipboyMessageListItem, questDescription->location);
         char formattedText[1024];
-        sprintf(formattedText, "%s %s", text2, text1);
+        snprintf(formattedText, sizeof(formattedText), "%s %s", text2, text1);
         pipboyDrawText(formattedText, PIPBOY_TEXT_STYLE_UNDERLINE, _colorTable[992]);
 
         if (gPipboyLinesCount >= 3) {
@@ -1190,7 +1193,7 @@ static void pipboyWindowHandleStatus(int a1)
             if (gGameGlobalVars[questDescription->gvar] >= questDescription->displayThreshold) {
                 const char* text = getmsg(&gQuestsMessageList, &gPipboyMessageListItem, questDescription->description);
                 char formattedText[1024];
-                sprintf(formattedText, "%d. %s", number, text);
+                snprintf(formattedText, sizeof(formattedText), "%d. %s", number, text);
                 number += 1;
 
                 short beginnings[WORD_WRAP_MAX_COUNT];
@@ -1363,7 +1366,7 @@ static void pipboyRenderHolodiskText()
         // of
         const char* of = getmsg(&gPipboyMessageList, &gPipboyMessageListItem, 212);
         char formattedText[60]; // TODO: Size is probably wrong.
-        sprintf(formattedText, "%d %s %d", _view_page + 1, of, gPipboyHolodiskLastPage + 1);
+        snprintf(formattedText, sizeof(formattedText), "%d %s %d", _view_page + 1, of, gPipboyHolodiskLastPage + 1);
 
         int len = fontGetStringWidth(of);
         fontDrawText(gPipboyWindowBuffer + PIPBOY_WINDOW_WIDTH * 47 + 616 + 604 - len, formattedText, 350, PIPBOY_WINDOW_WIDTH, _colorTable[992]);
@@ -1804,7 +1807,7 @@ static void pipboyHandleAlarmClock(int a1)
 
             // You cannot rest at this location!
             const char* text = getmsg(&gPipboyMessageList, &gPipboyMessageListItem, 215);
-            showDialogBox(text, NULL, 0, 192, 135, _colorTable[32328], 0, _colorTable[32328], DIALOG_BOX_LARGE);
+            showDialogBox(text, nullptr, 0, 192, 135, _colorTable[32328], nullptr, _colorTable[32328], DIALOG_BOX_LARGE);
 
             // CE: Restore previous tab to make sure clicks are processed by
             // appropriate handler (not the alarm clock).
@@ -1928,7 +1931,7 @@ static void pipboyDrawHitPoints()
     max_hp = critterGetStat(gDude, STAT_MAXIMUM_HIT_POINTS);
     cur_hp = critterGetHitPoints(gDude);
     text = getmsg(&gPipboyMessageList, &gPipboyMessageListItem, 301); // Hit Points
-    sprintf(msg, "%s %d/%d", text, cur_hp, max_hp);
+    snprintf(msg, sizeof(msg), "%s %d/%d", text, cur_hp, max_hp);
     len = fontGetStringWidth(msg);
     fontDrawText(gPipboyWindowBuffer + 66 * PIPBOY_WINDOW_WIDTH + 254 + (350 - len) / 2, msg, PIPBOY_WINDOW_WIDTH, PIPBOY_WINDOW_WIDTH, _colorTable[992]);
 }
@@ -1952,14 +1955,14 @@ static void pipboyWindowCreateButtons(int start, int count, bool a3)
                 break;
             }
 
-            _HotLines[index] = buttonCreate(gPipboyWindow, 254, y, 350, height, -1, -1, -1, eventCode, NULL, NULL, NULL, BUTTON_FLAG_TRANSPARENT);
+            _HotLines[index] = buttonCreate(gPipboyWindow, 254, y, 350, height, -1, -1, -1, eventCode, nullptr, nullptr, nullptr, BUTTON_FLAG_TRANSPARENT);
             y += height * 2;
             eventCode += 1;
         }
     }
 
     if (a3) {
-        _button = buttonCreate(gPipboyWindow, 254, height * gPipboyLinesCount + PIPBOY_WINDOW_CONTENT_VIEW_Y, 350, height, -1, -1, -1, 528, NULL, NULL, NULL, BUTTON_FLAG_TRANSPARENT);
+        _button = buttonCreate(gPipboyWindow, 254, height * gPipboyLinesCount + PIPBOY_WINDOW_CONTENT_VIEW_Y, 350, height, -1, -1, -1, 528, nullptr, nullptr, nullptr, BUTTON_FLAG_TRANSPARENT);
     }
 }
 
@@ -2005,7 +2008,7 @@ static bool pipboyRest(int hours, int minutes, int duration)
         double v2 = v1 * (1.0 / 1440.0) * 3.5 + 0.25;
         double v3 = (double)minutes / v1 * v2;
         if (minutes != 0) {
-            int gameTime = gameTimeGetTime();
+            unsigned int gameTime = gameTimeGetTime();
 
             double v4 = v3 * 20.0;
             int v5 = 0;
@@ -2044,8 +2047,7 @@ static bool pipboyRest(int hours, int minutes, int duration)
                     pipboyDrawDate();
                     windowRefresh(gPipboyWindow);
 
-                    while (getTicksSince(start) < 50) {
-                    }
+                    delay_ms(50 - (getTicks() - start));
                 }
 
 #ifndef __vita__
@@ -2070,7 +2072,7 @@ static bool pipboyRest(int hours, int minutes, int duration)
         }
 
         if (hours != 0 && !rc) {
-            int gameTime = gameTimeGetTime();
+            unsigned int gameTime = gameTimeGetTime();
             double v7 = (v2 - v3) * 20.0;
 
             for (int hour = 0; hour < (int)v7; hour++) {
@@ -2117,8 +2119,7 @@ static bool pipboyRest(int hours, int minutes, int duration)
                     pipboyDrawHitPoints();
                     windowRefresh(gPipboyWindow);
 
-                    while (getTicksSince(start) < 50) {
-                    }
+                    delay_ms(50 - (getTicks() - start));
                 }
 
 #ifndef __vita__
@@ -2190,9 +2191,7 @@ static bool pipboyRest(int hours, int minutes, int duration)
         }
     }
 
-    int gameTime = gameTimeGetTime();
-    int nextEventGameTime = queueGetNextEventTime();
-    if (gameTime > nextEventGameTime) {
+    if (gameTimeGetTime() > queueGetNextEventTime()) {
         if (queueProcessEvents()) {
             debugPrint("PIPBOY: Returning from Queue trigger...\n");
             _proc_bail_flag = 1;
@@ -2278,7 +2277,7 @@ static int pipboyRenderScreensaver()
     _gmouse_disable(0);
 
     unsigned char* buf = (unsigned char*)internal_malloc(412 * 374);
-    if (buf == NULL) {
+    if (buf == nullptr) {
         return -1;
     }
 
@@ -2415,8 +2414,7 @@ static int pipboyRenderScreensaver()
             v31 -= 1;
         } else {
             windowRefreshRect(gPipboyWindow, &gPipboyWindowContentRect);
-            while (getTicksSince(time) < 50) {
-            }
+            delay_ms(50 - (getTicks() - time));
         }
 
 #ifndef __vita__
@@ -2443,9 +2441,9 @@ static int pipboyRenderScreensaver()
 // 0x49A5D4
 static int questInit()
 {
-    if (gQuestDescriptions != NULL) {
+    if (gQuestDescriptions != nullptr) {
         internal_free(gQuestDescriptions);
-        gQuestDescriptions = NULL;
+        gQuestDescriptions = nullptr;
     }
 
     gQuestsCount = 0;
@@ -2461,7 +2459,7 @@ static int questInit()
     }
 
     File* stream = fileOpen("data\\quests.txt", "rt");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         return -1;
     }
 
@@ -2481,42 +2479,42 @@ static int questInit()
         }
 
         tok = strtok(pch, delim);
-        if (tok == NULL) {
+        if (tok == nullptr) {
             continue;
         }
 
         entry.location = atoi(tok);
 
-        tok = strtok(NULL, delim);
-        if (tok == NULL) {
+        tok = strtok(nullptr, delim);
+        if (tok == nullptr) {
             continue;
         }
 
         entry.description = atoi(tok);
 
-        tok = strtok(NULL, delim);
-        if (tok == NULL) {
+        tok = strtok(nullptr, delim);
+        if (tok == nullptr) {
             continue;
         }
 
         entry.gvar = atoi(tok);
 
-        tok = strtok(NULL, delim);
-        if (tok == NULL) {
+        tok = strtok(nullptr, delim);
+        if (tok == nullptr) {
             continue;
         }
 
         entry.displayThreshold = atoi(tok);
 
-        tok = strtok(NULL, delim);
-        if (tok == NULL) {
+        tok = strtok(nullptr, delim);
+        if (tok == nullptr) {
             continue;
         }
 
         entry.completedThreshold = atoi(tok);
 
         QuestDescription* entries = (QuestDescription*)internal_realloc(gQuestDescriptions, sizeof(*gQuestDescriptions) * (gQuestsCount + 1));
-        if (entries == NULL) {
+        if (entries == nullptr) {
             goto err;
         }
 
@@ -2542,9 +2540,9 @@ err:
 // 0x49A7E4
 static void questFree()
 {
-    if (gQuestDescriptions != NULL) {
+    if (gQuestDescriptions != nullptr) {
         internal_free(gQuestDescriptions);
-        gQuestDescriptions = NULL;
+        gQuestDescriptions = nullptr;
     }
 
     gQuestsCount = 0;
@@ -2563,15 +2561,15 @@ static int questDescriptionCompare(const void* a1, const void* a2)
 // 0x49A824
 static int holodiskInit()
 {
-    if (gHolodiskDescriptions != NULL) {
+    if (gHolodiskDescriptions != nullptr) {
         internal_free(gHolodiskDescriptions);
-        gHolodiskDescriptions = NULL;
+        gHolodiskDescriptions = nullptr;
     }
 
     gHolodisksCount = 0;
 
     File* stream = fileOpen("data\\holodisk.txt", "rt");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         return -1;
     }
 
@@ -2591,28 +2589,28 @@ static int holodiskInit()
         }
 
         tok = strtok(ch, delim);
-        if (tok == NULL) {
+        if (tok == nullptr) {
             continue;
         }
 
         entry.gvar = atoi(tok);
 
-        tok = strtok(NULL, delim);
-        if (tok == NULL) {
+        tok = strtok(nullptr, delim);
+        if (tok == nullptr) {
             continue;
         }
 
         entry.name = atoi(tok);
 
-        tok = strtok(NULL, delim);
-        if (tok == NULL) {
+        tok = strtok(nullptr, delim);
+        if (tok == nullptr) {
             continue;
         }
 
         entry.description = atoi(tok);
 
         HolodiskDescription* entries = (HolodiskDescription*)internal_realloc(gHolodiskDescriptions, sizeof(*gHolodiskDescriptions) * (gHolodisksCount + 1));
-        if (entries == NULL) {
+        if (entries == nullptr) {
             goto err;
         }
 
@@ -2636,9 +2634,9 @@ err:
 // 0x49A968
 static void holodiskFree()
 {
-    if (gHolodiskDescriptions != NULL) {
+    if (gHolodiskDescriptions != nullptr) {
         internal_free(gHolodiskDescriptions);
-        gHolodiskDescriptions = NULL;
+        gHolodiskDescriptions = nullptr;
     }
 
     gHolodisksCount = 0;

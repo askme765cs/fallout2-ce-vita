@@ -4,19 +4,23 @@
 
 #include <SDL.h>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #include "main.h"
 #include "svga.h"
 #include "window_manager.h"
-
-#if __APPLE__ && TARGET_OS_IOS
-#include "platform/ios/paths.h"
-#endif
 
 #ifdef __vita__
 #include <psp2/power.h>
 #include <psp2/sysmodule.h>
 
-int _newlib_heap_size_user = 224 * 1024 * 1024;
+int _newlib_heap_size_user = 330 * 1024 * 1024;
+#endif
+
+#if __APPLE__ && TARGET_OS_IOS
+#include "platform/ios/paths.h"
 #endif
 
 namespace fallout {
@@ -26,7 +30,7 @@ namespace fallout {
 bool gProgramIsActive = false;
 
 // GNW95MUTEX
-HANDLE _GNW95_mutex = NULL;
+HANDLE _GNW95_mutex = nullptr;
 
 // 0x4DE700
 int main(int argc, char* argv[])
@@ -72,10 +76,10 @@ int main(int argc, char* argv[])
     chdir("ux0:data/fallout2/");
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
-	scePowerSetArmClockFrequency(444);
+    scePowerSetArmClockFrequency(444);
     scePowerSetGpuClockFrequency(222);
     scePowerSetBusClockFrequency(222);
-	scePowerSetGpuXbarClockFrequency(166);
+    scePowerSetGpuXbarClockFrequency(166);
 #endif
 
     return falloutMain(argc, argv);

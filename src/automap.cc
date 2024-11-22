@@ -272,7 +272,7 @@ int automapReset()
 void automapExit()
 {
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", AUTOMAP_DB);
+    snprintf(path, sizeof(path), "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", AUTOMAP_DB);
     compat_remove(path);
 }
 
@@ -297,6 +297,8 @@ int _automapDisplayMap(int map)
 // 0x41B8BC
 void automapShow(bool isInGame, bool isUsingScanner)
 {
+    ScopedGameMode gm(GameMode::kAutomap);
+
     int frmIds[AUTOMAP_FRM_COUNT];
     memcpy(frmIds, gAutomapFrmIds, sizeof(gAutomapFrmIds));
 
@@ -321,7 +323,7 @@ void automapShow(bool isInGame, bool isUsingScanner)
 
     int automapWindowX = (screenGetWidth() - AUTOMAP_WINDOW_WIDTH) / 2;
     int automapWindowY = (screenGetHeight() - AUTOMAP_WINDOW_HEIGHT) / 2;
-    int window = windowCreate(automapWindowX, automapWindowY, AUTOMAP_WINDOW_WIDTH, AUTOMAP_WINDOW_HEIGHT, color, WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+    int window = windowCreate(automapWindowX, automapWindowY, AUTOMAP_WINDOW_WIDTH, AUTOMAP_WINDOW_HEIGHT, color, WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
 
     int scannerBtn = buttonCreate(window,
         111,
@@ -334,7 +336,7 @@ void automapShow(bool isInGame, bool isUsingScanner)
         KEY_LOWERCASE_S,
         frmImages[AUTOMAP_FRM_BUTTON_UP].getData(),
         frmImages[AUTOMAP_FRM_BUTTON_DOWN].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (scannerBtn != -1) {
         buttonSetCallbacks(scannerBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -351,7 +353,7 @@ void automapShow(bool isInGame, bool isUsingScanner)
         KEY_ESCAPE,
         frmImages[AUTOMAP_FRM_BUTTON_UP].getData(),
         frmImages[AUTOMAP_FRM_BUTTON_DOWN].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (cancelBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
@@ -368,7 +370,7 @@ void automapShow(bool isInGame, bool isUsingScanner)
         KEY_LOWERCASE_H,
         frmImages[AUTOMAP_FRM_SWITCH_UP].getData(),
         frmImages[AUTOMAP_FRM_SWITCH_DOWN].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT | BUTTON_FLAG_0x01);
     if (switchBtn != -1) {
         buttonSetCallbacks(switchBtn, _gsound_toggle_butt_press_, _gsound_toggle_butt_press_);
@@ -433,19 +435,19 @@ void automapShow(bool isInGame, bool isUsingScanner)
             }
 
             if ((gAutomapFlags & AUTOMAP_WITH_SCANNER) == 0) {
-                Object* scanner = NULL;
+                Object* scanner = nullptr;
 
                 Object* item1 = critterGetItem1(gDude);
-                if (item1 != NULL && item1->pid == PROTO_ID_MOTION_SENSOR) {
+                if (item1 != nullptr && item1->pid == PROTO_ID_MOTION_SENSOR) {
                     scanner = item1;
                 } else {
                     Object* item2 = critterGetItem2(gDude);
-                    if (item2 != NULL && item2->pid == PROTO_ID_MOTION_SENSOR) {
+                    if (item2 != nullptr && item2->pid == PROTO_ID_MOTION_SENSOR) {
                         scanner = item2;
                     }
                 }
 
-                if (scanner != NULL && miscItemGetCharges(scanner) > 0) {
+                if (scanner != nullptr && miscItemGetCharges(scanner) > 0) {
                     needsRefresh = true;
                     gAutomapFlags |= AUTOMAP_WITH_SCANNER;
                     miscItemConsumeCharge(scanner);
@@ -455,8 +457,8 @@ void automapShow(bool isInGame, bool isUsingScanner)
                     MessageListItem messageListItem;
                     // 17 - The motion sensor is not installed.
                     // 18 - The motion sensor has no charges remaining.
-                    const char* title = getmsg(&gMiscMessageList, &messageListItem, scanner != NULL ? 18 : 17);
-                    showDialogBox(title, NULL, 0, 165, 140, _colorTable[32328], NULL, _colorTable[32328], 0);
+                    const char* title = getmsg(&gMiscMessageList, &messageListItem, scanner != nullptr ? 18 : 17);
+                    showDialogBox(title, nullptr, 0, 165, 140, _colorTable[32328], nullptr, _colorTable[32328], 0);
                 }
             }
 
@@ -511,7 +513,7 @@ static void automapRenderInMapWindow(int window, int elevation, unsigned char* b
     unsigned char* windowBuffer = windowGetBuffer(window);
     blitBufferToBuffer(backgroundData, AUTOMAP_WINDOW_WIDTH, AUTOMAP_WINDOW_HEIGHT, AUTOMAP_WINDOW_WIDTH, windowBuffer, AUTOMAP_WINDOW_WIDTH);
 
-    for (Object* object = objectFindFirstAtElevation(elevation); object != NULL; object = objectFindNextAtElevation()) {
+    for (Object* object = objectFindFirstAtElevation(elevation); object != nullptr; object = objectFindNextAtElevation()) {
         if (object->tile == -1) {
             continue;
         }
@@ -625,7 +627,7 @@ int automapRenderInPipboyWindow(int window, int map, int elevation)
     unsigned char sceneryColor = _colorTable[480];
 
     gAutomapEntry.data = (unsigned char*)internal_malloc(11024);
-    if (gAutomapEntry.data == NULL) {
+    if (gAutomapEntry.data == nullptr) {
         debugPrint("\nAUTOMAP: Error allocating data buffer!\n");
         return -1;
     }
@@ -693,9 +695,9 @@ int automapSaveCurrent()
 
     bool dataBuffersAllocated = false;
     gAutomapEntry.data = (unsigned char*)internal_malloc(11024);
-    if (gAutomapEntry.data != NULL) {
+    if (gAutomapEntry.data != nullptr) {
         gAutomapEntry.compressedData = (unsigned char*)internal_malloc(11024);
-        if (gAutomapEntry.compressedData != NULL) {
+        if (gAutomapEntry.compressedData != nullptr) {
             dataBuffersAllocated = true;
         }
     }
@@ -708,10 +710,10 @@ int automapSaveCurrent()
 
     // NOTE: Not sure about the size.
     char path[256];
-    sprintf(path, "%s\\%s", "MAPS", AUTOMAP_DB);
+    snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_DB);
 
     File* stream1 = fileOpen(path, "r+b");
-    if (stream1 == NULL) {
+    if (stream1 == nullptr) {
         debugPrint("\nAUTOMAP: Error opening automap database file!\n");
         debugPrint("Error continued: automap_pip_save: path: %s", path);
         internal_free(gAutomapEntry.data);
@@ -739,10 +741,10 @@ int automapSaveCurrent()
     }
 
     if (entryOffset != 0) {
-        sprintf(path, "%s\\%s", "MAPS", AUTOMAP_TMP);
+        snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_TMP);
 
         File* stream2 = fileOpen(path, "wb");
-        if (stream2 == NULL) {
+        if (stream2 == nullptr) {
             debugPrint("\nAUTOMAP: Error creating temp file!\n");
             internal_free(gAutomapEntry.data);
             internal_free(gAutomapEntry.compressedData);
@@ -835,7 +837,7 @@ int automapSaveCurrent()
 
         // NOTE: Not sure about the size.
         char automapDbPath[512];
-        sprintf(automapDbPath, "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", AUTOMAP_DB);
+        snprintf(automapDbPath, sizeof(automapDbPath), "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", AUTOMAP_DB);
         if (compat_remove(automapDbPath) != 0) {
             debugPrint("\nAUTOMAP: Error removing database!\n");
             return -1;
@@ -843,7 +845,7 @@ int automapSaveCurrent()
 
         // NOTE: Not sure about the size.
         char automapTmpPath[512];
-        sprintf(automapTmpPath, "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", AUTOMAP_TMP);
+        snprintf(automapTmpPath, sizeof(automapTmpPath), "%s\\%s\\%s", settings.system.master_patches_path.c_str(), "MAPS", AUTOMAP_TMP);
         if (compat_rename(automapTmpPath, automapDbPath) != 0) {
             debugPrint("\nAUTOMAP: Error renaming database!\n");
             return -1;
@@ -927,15 +929,15 @@ err:
 // 0x41C8CC
 static int automapLoadEntry(int map, int elevation)
 {
-    gAutomapEntry.compressedData = NULL;
+    gAutomapEntry.compressedData = nullptr;
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s\\%s", "MAPS", AUTOMAP_DB);
+    snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_DB);
 
     bool success = true;
 
     File* stream = fileOpen(path, "r+b");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         debugPrint("\nAUTOMAP: Error opening automap database file!\n");
         debugPrint("Error continued: AM_ReadEntry: path: %s", path);
         return -1;
@@ -969,7 +971,7 @@ static int automapLoadEntry(int map, int elevation)
 
     if (gAutomapEntry.isCompressed == 1) {
         gAutomapEntry.compressedData = (unsigned char*)internal_malloc(11024);
-        if (gAutomapEntry.compressedData == NULL) {
+        if (gAutomapEntry.compressedData == nullptr) {
             debugPrint("\nAUTOMAP: Error allocating decompression buffer!\n");
             fileClose(stream);
             return -1;
@@ -1002,7 +1004,7 @@ out:
         return -1;
     }
 
-    if (gAutomapEntry.compressedData != NULL) {
+    if (gAutomapEntry.compressedData != nullptr) {
         internal_free(gAutomapEntry.compressedData);
     }
 
@@ -1072,7 +1074,7 @@ static void _decode_map_data(int elevation)
     _obj_process_seen();
 
     Object* object = objectFindFirstAtElevation(elevation);
-    while (object != NULL) {
+    while (object != nullptr) {
         if (object->tile != -1 && (object->flags & OBJECT_SEEN) != 0) {
             int contentType;
 
@@ -1105,10 +1107,10 @@ static int automapCreate()
     memcpy(gAutomapHeader.offsets, _defam, sizeof(_defam));
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s\\%s", "MAPS", AUTOMAP_DB);
+    snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_DB);
 
     File* stream = fileOpen(path, "wb");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         debugPrint("\nAUTOMAP: Error creating automap database file!\n");
         return -1;
     }
@@ -1128,7 +1130,7 @@ static int automapCreate()
 static int _copy_file_data(File* stream1, File* stream2, int length)
 {
     void* buffer = internal_malloc(0xFFFF);
-    if (buffer == NULL) {
+    if (buffer == nullptr) {
         return -1;
     }
 
@@ -1160,10 +1162,10 @@ static int _copy_file_data(File* stream1, File* stream2, int length)
 int automapGetHeader(AutomapHeader** automapHeaderPtr)
 {
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s\\%s", "MAPS", AUTOMAP_DB);
+    snprintf(path, sizeof(path), "%s\\%s", "MAPS", AUTOMAP_DB);
 
     File* stream = fileOpen(path, "rb");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         debugPrint("\nAUTOMAP: Error opening database file for reading!\n");
         debugPrint("Error continued: ReadAMList: path: %s", path);
         return -1;

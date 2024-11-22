@@ -109,6 +109,8 @@ static FrmImage _skilldexFrmImages[SKILLDEX_FRM_COUNT];
 // 0x4ABFD0
 int skilldexOpen()
 {
+    ScopedGameMode gm(GameMode::kSkilldex);
+
     if (skilldexWindowInit() == -1) {
         debugPrint("\n ** Error loading skilldex dialog data! **\n");
         return -1;
@@ -159,7 +161,7 @@ static int skilldexWindowInit()
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", asc_5186C8, "skilldex.msg");
+    snprintf(path, sizeof(path), "%s%s", asc_5186C8, "skilldex.msg");
 
     if (!messageListLoad(&gSkilldexMessageList, path)) {
         return -1;
@@ -187,7 +189,7 @@ static int skilldexWindowInit()
     int buttonDataIndex;
     for (buttonDataIndex = 0; buttonDataIndex < SKILLDEX_SKILL_BUTTON_BUFFER_COUNT; buttonDataIndex++) {
         gSkilldexButtonsData[buttonDataIndex] = (unsigned char*)internal_malloc(_skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getHeight() * _skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON].getWidth() + 512);
-        if (gSkilldexButtonsData[buttonDataIndex] == NULL) {
+        if (gSkilldexButtonsData[buttonDataIndex] == nullptr) {
             break;
         }
 
@@ -229,7 +231,7 @@ static int skilldexWindowInit()
         _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth(),
         _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getHeight(),
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x02);
+        WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
     if (gSkilldexWindow == -1) {
         for (int index = 0; index < SKILLDEX_SKILL_BUTTON_BUFFER_COUNT; index++) {
             internal_free(gSkilldexButtonsData[index]);
@@ -349,7 +351,7 @@ static int skilldexWindowInit()
             501 + index,
             gSkilldexButtonsData[index * 2],
             gSkilldexButtonsData[index * 2 + 1],
-            NULL,
+            nullptr,
             BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_lrg_butt_press, _gsound_lrg_butt_release);
@@ -377,7 +379,7 @@ static int skilldexWindowInit()
         500,
         _skilldexFrmImages[SKILLDEX_FRM_LITTLE_RED_BUTTON_UP].getData(),
         _skilldexFrmImages[SKILLDEX_FRM_LITTLE_RED_BUTTON_DOWN].getData(),
-        NULL,
+        nullptr,
         BUTTON_FLAG_TRANSPARENT);
     if (cancelBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);

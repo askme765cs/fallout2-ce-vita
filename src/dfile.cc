@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
+
 #include <fpattern.h>
 
 #include "platform_compat.h"
@@ -49,14 +51,14 @@ DBase* dbaseOpen(const char* filePath)
     assert(filePath); // "filename", "dfile.c", 74
 
     FILE* stream = compat_fopen(filePath, "rb");
-    if (stream == NULL) {
-        return NULL;
+    if (stream == nullptr) {
+        return nullptr;
     }
 
     DBase* dbase = (DBase*)malloc(sizeof(*dbase));
-    if (dbase == NULL) {
+    if (dbase == nullptr) {
         fclose(stream);
-        return NULL;
+        return nullptr;
     }
 
     memset(dbase, 0, sizeof(*dbase));
@@ -93,7 +95,7 @@ DBase* dbaseOpen(const char* filePath)
     }
 
     dbase->entries = (DBaseEntry*)malloc(sizeof(*dbase->entries) * dbase->entriesLength);
-    if (dbase->entries == NULL) {
+    if (dbase->entries == nullptr) {
         goto err;
     }
 
@@ -110,7 +112,7 @@ DBase* dbaseOpen(const char* filePath)
         }
 
         entry->path = (char*)malloc(pathLength + 1);
-        if (entry->path == NULL) {
+        if (entry->path == nullptr) {
             break;
         }
 
@@ -156,7 +158,7 @@ err:
 
     fclose(stream);
 
-    return NULL;
+    return nullptr;
 }
 
 // Closes [dbase], all open file handles, frees all associated resources,
@@ -168,24 +170,24 @@ bool dbaseClose(DBase* dbase)
     assert(dbase); // "dbase", "dfile.c", 173
 
     DFile* curr = dbase->dfileHead;
-    while (curr != NULL) {
+    while (curr != nullptr) {
         DFile* next = curr->next;
         dfileClose(curr);
         curr = next;
     }
 
-    if (dbase->entries != NULL) {
+    if (dbase->entries != nullptr) {
         for (int index = 0; index < dbase->entriesLength; index++) {
             DBaseEntry* entry = &(dbase->entries[index]);
             char* entryName = entry->path;
-            if (entryName != NULL) {
+            if (entryName != nullptr) {
                 free(entryName);
             }
         }
         free(dbase->entries);
     }
 
-    if (dbase->path != NULL) {
+    if (dbase->path != nullptr) {
         free(dbase->path);
     }
 
@@ -256,15 +258,15 @@ int dfileClose(DFile* stream)
         }
     }
 
-    if (stream->decompressionStream != NULL) {
+    if (stream->decompressionStream != nullptr) {
         free(stream->decompressionStream);
     }
 
-    if (stream->decompressionBuffer != NULL) {
+    if (stream->decompressionBuffer != nullptr) {
         free(stream->decompressionBuffer);
     }
 
-    if (stream->stream != NULL) {
+    if (stream->stream != nullptr) {
         fclose(stream->stream);
     }
 
@@ -273,8 +275,8 @@ int dfileClose(DFile* stream)
     //
     // NOTE: Compiled code is slightly different.
     DFile* curr = stream->dbase->dfileHead;
-    DFile* prev = NULL;
-    while (curr != NULL) {
+    DFile* prev = nullptr;
+    while (curr != nullptr) {
         if (curr == stream) {
             break;
         }
@@ -283,8 +285,8 @@ int dfileClose(DFile* stream)
         curr = curr->next;
     }
 
-    if (curr != NULL) {
-        if (prev == NULL) {
+    if (curr != nullptr) {
+        if (prev == nullptr) {
             stream->dbase->dfileHead = stream->next;
         } else {
             prev->next = stream->next;
@@ -307,7 +309,7 @@ DFile* dfileOpen(DBase* dbase, const char* filePath, const char* mode)
     assert(filePath); // dfile.c, 296
     assert(mode); // dfile.c, 297
 
-    return dfileOpenInternal(dbase, filePath, mode, 0);
+    return dfileOpenInternal(dbase, filePath, mode, nullptr);
 }
 
 // [vfprintf].
@@ -361,7 +363,7 @@ char* dfileReadString(char* string, int size, DFile* stream)
     assert(stream); // "stream", "dfile.c", 409
 
     if ((stream->flags & DFILE_EOF) != 0 || (stream->flags & DFILE_ERROR) != 0) {
-        return NULL;
+        return nullptr;
     }
 
     char* pch = string;
@@ -389,7 +391,7 @@ char* dfileReadString(char* string, int size, DFile* stream)
 
     if (pch == string) {
         // No character was set into the buffer.
-        return NULL;
+        return nullptr;
     }
 
     *pch = '\0';
@@ -631,7 +633,7 @@ static int dbaseFindEntryByFilePath(const void* a1, const void* a2)
 static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* mode, DFile* dfile)
 {
     DBaseEntry* entry = (DBaseEntry*)bsearch(filePath, dbase->entries, dbase->entriesLength, sizeof(*dbase->entries), dbaseFindEntryByFilePath);
-    if (entry == NULL) {
+    if (entry == nullptr) {
         goto err;
     }
 
@@ -639,10 +641,10 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
         goto err;
     }
 
-    if (dfile == NULL) {
+    if (dfile == nullptr) {
         dfile = (DFile*)malloc(sizeof(*dfile));
-        if (dfile == NULL) {
-            return NULL;
+        if (dfile == nullptr) {
+            return nullptr;
         }
 
         memset(dfile, 0, sizeof(*dfile));
@@ -654,9 +656,9 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
             goto err;
         }
 
-        if (dfile->stream != NULL) {
+        if (dfile->stream != nullptr) {
             fclose(dfile->stream);
-            dfile->stream = NULL;
+            dfile->stream = nullptr;
         }
 
         dfile->compressedBytesRead = 0;
@@ -668,7 +670,7 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
 
     // Open stream to .DAT file.
     dfile->stream = compat_fopen(dbase->path, "rb");
-    if (dfile->stream == NULL) {
+    if (dfile->stream == nullptr) {
         goto err;
     }
 
@@ -682,14 +684,14 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
         // buffer. This step is not needed when previous instance of dfile is
         // passed via parameter, which might already have stream and
         // buffer allocated.
-        if (dfile->decompressionStream == NULL) {
+        if (dfile->decompressionStream == nullptr) {
             dfile->decompressionStream = (z_streamp)malloc(sizeof(*dfile->decompressionStream));
-            if (dfile->decompressionStream == NULL) {
+            if (dfile->decompressionStream == nullptr) {
                 goto err;
             }
 
             dfile->decompressionBuffer = (unsigned char*)malloc(DFILE_DECOMPRESSION_BUFFER_SIZE);
-            if (dfile->decompressionBuffer == NULL) {
+            if (dfile->decompressionBuffer == nullptr) {
                 goto err;
             }
         }
@@ -707,14 +709,14 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
         // Entry is not compressed, there is no need to keep decompression
         // stream and decompression buffer (in case [dfile] was passed via
         // parameter).
-        if (dfile->decompressionStream != NULL) {
+        if (dfile->decompressionStream != nullptr) {
             free(dfile->decompressionStream);
-            dfile->decompressionStream = NULL;
+            dfile->decompressionStream = nullptr;
         }
 
-        if (dfile->decompressionBuffer != NULL) {
+        if (dfile->decompressionBuffer != nullptr) {
             free(dfile->decompressionBuffer);
-            dfile->decompressionBuffer = NULL;
+            dfile->decompressionBuffer = nullptr;
         }
     }
 
@@ -726,11 +728,11 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
 
 err:
 
-    if (dfile != NULL) {
+    if (dfile != nullptr) {
         dfileClose(dfile);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 // 0x4E5F9C
@@ -818,10 +820,7 @@ static bool dfileReadCompressed(DFile* stream, void* ptr, size_t size)
 
         if (stream->decompressionStream->avail_in == 0) {
             // No more unprocessed data, request next chunk.
-            size_t bytesToRead = stream->entry->dataSize - stream->compressedBytesRead;
-            if (bytesToRead > DFILE_DECOMPRESSION_BUFFER_SIZE) {
-                bytesToRead = DFILE_DECOMPRESSION_BUFFER_SIZE;
-            }
+            size_t bytesToRead = std::min(DFILE_DECOMPRESSION_BUFFER_SIZE, stream->entry->dataSize - stream->compressedBytesRead);
 
             if (fread(stream->decompressionBuffer, bytesToRead, 1, stream->stream) != 1) {
                 break;

@@ -20,11 +20,11 @@ int gSelfrunState = SELFRUN_STATE_TURNED_OFF;
 // 0x4A8BE0
 int selfrunInitFileList(char*** fileListPtr, int* fileListLengthPtr)
 {
-    if (fileListPtr == NULL) {
+    if (fileListPtr == nullptr) {
         return -1;
     }
 
-    if (fileListLengthPtr == NULL) {
+    if (fileListLengthPtr == nullptr) {
         return -1;
     }
 
@@ -36,7 +36,7 @@ int selfrunInitFileList(char*** fileListPtr, int* fileListLengthPtr)
 // 0x4A8C10
 int selfrunFreeFileList(char*** fileListPtr)
 {
-    if (fileListPtr == NULL) {
+    if (fileListPtr == nullptr) {
         return -1;
     }
 
@@ -48,11 +48,11 @@ int selfrunFreeFileList(char*** fileListPtr)
 // 0x4A8C28
 int selfrunPreparePlayback(const char* fileName, SelfrunData* selfrunData)
 {
-    if (fileName == NULL) {
+    if (fileName == nullptr) {
         return -1;
     }
 
-    if (selfrunData == NULL) {
+    if (selfrunData == nullptr) {
         return -1;
     }
 
@@ -65,7 +65,7 @@ int selfrunPreparePlayback(const char* fileName, SelfrunData* selfrunData)
     }
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s", "selfrun\\", fileName);
+    snprintf(path, sizeof(path), "%s%s", "selfrun\\", fileName);
 
     if (selfrunReadData(path, selfrunData) != 0) {
         return -1;
@@ -81,7 +81,7 @@ void selfrunPlaybackLoop(SelfrunData* selfrunData)
 {
     if (gSelfrunState == SELFRUN_STATE_PLAYING) {
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "%s%s", "selfrun\\", selfrunData->recordingFileName);
+        snprintf(path, sizeof(path), "%s%s", "selfrun\\", selfrunData->recordingFileName);
 
         if (vcrPlay(path, VCR_TERMINATE_ON_KEY_PRESS | VCR_TERMINATE_ON_MOUSE_PRESS, selfrunPlaybackCompleted)) {
             bool cursorWasHidden = cursorIsHidden();
@@ -124,11 +124,11 @@ void selfrunPlaybackLoop(SelfrunData* selfrunData)
 // 0x4A8D28
 int selfrunPrepareRecording(const char* recordingName, const char* mapFileName, SelfrunData* selfrunData)
 {
-    if (recordingName == NULL) {
+    if (recordingName == nullptr) {
         return -1;
     }
 
-    if (mapFileName == NULL) {
+    if (mapFileName == nullptr) {
         return -1;
     }
 
@@ -140,13 +140,13 @@ int selfrunPrepareRecording(const char* recordingName, const char* mapFileName, 
         return -1;
     }
 
-    sprintf(selfrunData->recordingFileName, "%s%s", recordingName, ".vcr");
+    snprintf(selfrunData->recordingFileName, sizeof(selfrunData->recordingFileName), "%s%s", recordingName, ".vcr");
     strcpy(selfrunData->mapFileName, mapFileName);
 
     selfrunData->stopKeyCode = KEY_CTRL_R;
 
     char path[COMPAT_MAX_PATH];
-    sprintf(path, "%s%s%s", "selfrun\\", recordingName, ".sdf");
+    snprintf(path, sizeof(path), "%s%s%s", "selfrun\\", recordingName, ".sdf");
 
     if (selfrunWriteData(path, selfrunData) != 0) {
         return -1;
@@ -162,7 +162,7 @@ void selfrunRecordingLoop(SelfrunData* selfrunData)
 {
     if (gSelfrunState == SELFRUN_STATE_RECORDING) {
         char path[COMPAT_MAX_PATH];
-        sprintf(path, "%s%s", "selfrun\\", selfrunData->recordingFileName);
+        snprintf(path, sizeof(path), "%s%s", "selfrun\\", selfrunData->recordingFileName);
         if (vcrRecord(path)) {
             if (!cursorIsHidden()) {
                 mouseShowCursor();
@@ -201,16 +201,16 @@ void selfrunPlaybackCompleted(int reason)
 // 0x4A8E8C
 int selfrunReadData(const char* path, SelfrunData* selfrunData)
 {
-    if (path == NULL) {
+    if (path == nullptr) {
         return -1;
     }
 
-    if (selfrunData == NULL) {
+    if (selfrunData == nullptr) {
         return -1;
     }
 
     File* stream = fileOpen(path, "rb");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         return -1;
     }
 
@@ -229,21 +229,21 @@ int selfrunReadData(const char* path, SelfrunData* selfrunData)
 // 0x4A8EF4
 int selfrunWriteData(const char* path, SelfrunData* selfrunData)
 {
-    if (path == NULL) {
+    if (path == nullptr) {
         return -1;
     }
 
-    if (selfrunData == NULL) {
+    if (selfrunData == nullptr) {
         return -1;
     }
 
     char selfrunDirectoryPath[COMPAT_MAX_PATH];
-    sprintf(selfrunDirectoryPath, "%s\\%s", settings.system.master_patches_path.c_str(), "selfrun\\");
+    snprintf(selfrunDirectoryPath, sizeof(selfrunDirectoryPath), "%s\\%s", settings.system.master_patches_path.c_str(), "selfrun\\");
 
     compat_mkdir(selfrunDirectoryPath);
 
     File* stream = fileOpen(path, "wb");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         return -1;
     }
 

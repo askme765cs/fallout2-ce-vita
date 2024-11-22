@@ -34,8 +34,10 @@ static int artReadList(const char* path, char** out_arr, int* out_count);
 static int artCacheGetFileSizeImpl(int a1, int* out_size);
 static int artCacheReadDataImpl(int a1, int* a2, unsigned char* data);
 static void artCacheFreeImpl(void* ptr);
-static int artReadFrameData(unsigned char* data, File* stream, int count);
+static int artReadFrameData(unsigned char* data, File* stream, int count, int* paddingPtr);
 static int artReadHeader(Art* art, File* stream);
+static int artGetDataSize(Art* art);
+static int paddingForSize(int size);
 
 // 0x5002D8
 static char gDefaultJumpsuitMaleFileName[] = "hmjmps";
@@ -51,17 +53,17 @@ static char gDefaultTribalFemaleFileName[] = "hfprim";
 
 // 0x510738
 static ArtListDescription gArtListDescriptions[OBJ_TYPE_COUNT] = {
-    { 0, "items", 0, 0, 0 },
-    { 0, "critters", 0, 0, 0 },
-    { 0, "scenery", 0, 0, 0 },
-    { 0, "walls", 0, 0, 0 },
-    { 0, "tiles", 0, 0, 0 },
-    { 0, "misc", 0, 0, 0 },
-    { 0, "intrface", 0, 0, 0 },
-    { 0, "inven", 0, 0, 0 },
-    { 0, "heads", 0, 0, 0 },
-    { 0, "backgrnd", 0, 0, 0 },
-    { 0, "skilldex", 0, 0, 0 },
+    { 0, "items", nullptr, nullptr, 0 },
+    { 0, "critters", nullptr, nullptr, 0 },
+    { 0, "scenery", nullptr, nullptr, 0 },
+    { 0, "walls", nullptr, nullptr, 0 },
+    { 0, "tiles", nullptr, nullptr, 0 },
+    { 0, "misc", nullptr, nullptr, 0 },
+    { 0, "intrface", nullptr, nullptr, 0 },
+    { 0, "inven", nullptr, nullptr, 0 },
+    { 0, "heads", nullptr, nullptr, 0 },
+    { 0, "backgrnd", nullptr, nullptr, 0 },
+    { 0, "skilldex", nullptr, nullptr, 0 },
 };
 
 // This flag denotes that localized arts should be looked up first. Used
@@ -133,6 +135,15 @@ int artInit()
     char string[200];
 
     int cacheSize = settings.system.art_cache_size;
+
+#ifdef __vita__
+    // since RAM is limited on Vita
+    if (cacheSize > 256)
+    {
+        cacheSize = 256;
+    }
+#endif
+
     if (!cacheInit(&gArtCache, artCacheGetFileSizeImpl, artCacheReadDataImpl, artCacheFreeImpl, cacheSize << 20)) {
         debugPrint("cache_init failed in art_init\n");
         return -1;
@@ -147,32 +158,17 @@ int artInit()
     bool critterDbSelected = false;
     for (int objectType = 0; objectType < OBJ_TYPE_COUNT; objectType++) {
         gArtListDescriptions[objectType].flags = 0;
-        sprintf(path, "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[objectType].name, gArtListDescriptions[objectType].name);
-
-        int oldDb;
-        if (objectType == OBJ_TYPE_CRITTER) {
-            oldDb = _db_current();
-            critterDbSelected = true;
-            _db_select(_critter_db_handle);
-        }
+        snprintf(path, sizeof(path), "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[objectType].name, gArtListDescriptions[objectType].name);
 
         if (artReadList(path, &(gArtListDescriptions[objectType].fileNames), &(gArtListDescriptions[objectType].fileNamesLength)) != 0) {
             debugPrint("art_read_lst failed in art_init\n");
-            if (critterDbSelected) {
-                _db_select(oldDb);
-            }
             cacheFree(&gArtCache);
             return -1;
-        }
-
-        if (objectType == OBJ_TYPE_CRITTER) {
-            critterDbSelected = false;
-            _db_select(oldDb);
         }
     }
 
     _anon_alias = (int*)internal_malloc(sizeof(*_anon_alias) * gArtListDescriptions[OBJ_TYPE_CRITTER].fileNamesLength);
-    if (_anon_alias == NULL) {
+    if (_anon_alias == nullptr) {
         gArtListDescriptions[OBJ_TYPE_CRITTER].fileNamesLength = 0;
         debugPrint("Out of memory for anon_alias in art_init\n");
         cacheFree(&gArtCache);
@@ -180,7 +176,7 @@ int artInit()
     }
 
     gArtCritterFidShoudRunData = (int*)internal_malloc(sizeof(*gArtCritterFidShoudRunData) * gArtListDescriptions[1].fileNamesLength);
-    if (gArtCritterFidShoudRunData == NULL) {
+    if (gArtCritterFidShoudRunData == nullptr) {
         gArtListDescriptions[OBJ_TYPE_CRITTER].fileNamesLength = 0;
         debugPrint("Out of memory for artCritterFidShouldRunData in art_init\n");
         cacheFree(&gArtCache);
@@ -191,37 +187,37 @@ int artInit()
         gArtCritterFidShoudRunData[critterIndex] = 0;
     }
 
-    sprintf(path, "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[OBJ_TYPE_CRITTER].name, gArtListDescriptions[OBJ_TYPE_CRITTER].name);
+    snprintf(path, sizeof(path), "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[OBJ_TYPE_CRITTER].name, gArtListDescriptions[OBJ_TYPE_CRITTER].name);
 
     stream = fileOpen(path, "rt");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         debugPrint("Unable to open %s in art_init\n", path);
         cacheFree(&gArtCache);
         return -1;
     }
 
     // SFALL: Modify player model settings.
-    char* jumpsuitMaleFileName = NULL;
+    char* jumpsuitMaleFileName = nullptr;
     configGetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_DUDE_NATIVE_LOOK_JUMPSUIT_MALE_KEY, &jumpsuitMaleFileName);
-    if (jumpsuitMaleFileName == NULL || jumpsuitMaleFileName[0] == '\0') {
+    if (jumpsuitMaleFileName == nullptr || jumpsuitMaleFileName[0] == '\0') {
         jumpsuitMaleFileName = gDefaultJumpsuitMaleFileName;
     }
 
-    char* jumpsuitFemaleFileName = NULL;
+    char* jumpsuitFemaleFileName = nullptr;
     configGetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_DUDE_NATIVE_LOOK_JUMPSUIT_FEMALE_KEY, &jumpsuitFemaleFileName);
-    if (jumpsuitFemaleFileName == NULL || jumpsuitFemaleFileName[0] == '\0') {
+    if (jumpsuitFemaleFileName == nullptr || jumpsuitFemaleFileName[0] == '\0') {
         jumpsuitFemaleFileName = gDefaultJumpsuitFemaleFileName;
     }
 
-    char* tribalMaleFileName = NULL;
+    char* tribalMaleFileName = nullptr;
     configGetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_DUDE_NATIVE_LOOK_TRIBAL_MALE_KEY, &tribalMaleFileName);
-    if (tribalMaleFileName == NULL || tribalMaleFileName[0] == '\0') {
+    if (tribalMaleFileName == nullptr || tribalMaleFileName[0] == '\0') {
         tribalMaleFileName = gDefaultTribalMaleFileName;
     }
 
-    char* tribalFemaleFileName = NULL;
+    char* tribalFemaleFileName = nullptr;
     configGetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_DUDE_NATIVE_LOOK_TRIBAL_FEMALE_KEY, &tribalFemaleFileName);
-    if (tribalFemaleFileName == NULL || tribalFemaleFileName[0] == '\0') {
+    if (tribalFemaleFileName == nullptr || tribalFemaleFileName[0] == '\0') {
         tribalFemaleFileName = gDefaultTribalFemaleFileName;
     }
 
@@ -249,11 +245,11 @@ int artInit()
         }
 
         char* sep1 = strchr(string, ',');
-        if (sep1 != NULL) {
+        if (sep1 != nullptr) {
             _anon_alias[critterIndex] = atoi(sep1 + 1);
 
             char* sep2 = strchr(sep1 + 1, ',');
-            if (sep2 != NULL) {
+            if (sep2 != nullptr) {
                 gArtCritterFidShoudRunData[critterIndex] = atoi(sep2 + 1);
             } else {
                 gArtCritterFidShoudRunData[critterIndex] = 0;
@@ -275,17 +271,17 @@ int artInit()
     }
 
     gHeadDescriptions = (HeadDescription*)internal_malloc(sizeof(*gHeadDescriptions) * gArtListDescriptions[OBJ_TYPE_HEAD].fileNamesLength);
-    if (gHeadDescriptions == NULL) {
+    if (gHeadDescriptions == nullptr) {
         gArtListDescriptions[OBJ_TYPE_HEAD].fileNamesLength = 0;
         debugPrint("Out of memory for head_info in art_init\n");
         cacheFree(&gArtCache);
         return -1;
     }
 
-    sprintf(path, "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[OBJ_TYPE_HEAD].name, gArtListDescriptions[OBJ_TYPE_HEAD].name);
+    snprintf(path, sizeof(path), "%s%s%s\\%s.lst", _cd_path_base, "art\\", gArtListDescriptions[OBJ_TYPE_HEAD].name, gArtListDescriptions[OBJ_TYPE_HEAD].name);
 
     stream = fileOpen(path, "rt");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         debugPrint("Unable to open %s in art_init\n", path);
         cacheFree(&gArtCache);
         return -1;
@@ -297,14 +293,14 @@ int artInit()
         }
 
         char* sep1 = strchr(string, ',');
-        if (sep1 != NULL) {
+        if (sep1 != nullptr) {
             *sep1 = '\0';
         } else {
             sep1 = string;
         }
 
         char* sep2 = strchr(sep1, ',');
-        if (sep2 != NULL) {
+        if (sep2 != nullptr) {
             *sep2 = '\0';
         } else {
             sep2 = sep1;
@@ -313,7 +309,7 @@ int artInit()
         gHeadDescriptions[headIndex].goodFidgetCount = atoi(sep1 + 1);
 
         char* sep3 = strchr(sep2, ',');
-        if (sep3 != NULL) {
+        if (sep3 != nullptr) {
             *sep3 = '\0';
         } else {
             sep3 = sep2;
@@ -322,7 +318,7 @@ int artInit()
         gHeadDescriptions[headIndex].neutralFidgetCount = atoi(sep2 + 1);
 
         char* sep4 = strpbrk(sep3 + 1, " ,;\t\n");
-        if (sep4 != NULL) {
+        if (sep4 != nullptr) {
             *sep4 = '\0';
         }
 
@@ -349,10 +345,10 @@ void artExit()
 
     for (int index = 0; index < OBJ_TYPE_COUNT; index++) {
         internal_free(gArtListDescriptions[index].fileNames);
-        gArtListDescriptions[index].fileNames = NULL;
+        gArtListDescriptions[index].fileNames = nullptr;
 
         internal_free(gArtListDescriptions[index].field_18);
-        gArtListDescriptions[index].field_18 = NULL;
+        gArtListDescriptions[index].field_18 = nullptr;
     }
 
     internal_free(gHeadDescriptions);
@@ -361,7 +357,7 @@ void artExit()
 // 0x418F1C
 char* artGetObjectTypeName(int objectType)
 {
-    return objectType >= OBJ_TYPE_ITEM && objectType < OBJ_TYPE_COUNT ? gArtListDescriptions[objectType].name : NULL;
+    return objectType >= OBJ_TYPE_ITEM && objectType < OBJ_TYPE_COUNT ? gArtListDescriptions[objectType].name : nullptr;
 }
 
 // 0x418F34
@@ -409,7 +405,7 @@ void artRender(int fid, unsigned char* dest, int width, int height, int pitch)
 
     CacheEntry* handle;
     Art* frm = artLock(fid, &handle);
-    if (frm == NULL) {
+    if (frm == nullptr) {
         return;
     }
 
@@ -451,14 +447,22 @@ void artRender(int fid, unsigned char* dest, int width, int height, int pitch)
     artUnlock(handle);
 }
 
+// mapper2.exe: 0x40A03C
+int art_list_str(int fid, char* name)
+{
+    // TODO: Incomplete.
+
+    return -1;
+}
+
 // 0x419160
 Art* artLock(int fid, CacheEntry** handlePtr)
 {
-    if (handlePtr == NULL) {
-        return NULL;
+    if (handlePtr == nullptr) {
+        return nullptr;
     }
 
-    Art* art = NULL;
+    Art* art = nullptr;
     cacheLock(&gArtCache, fid, (void**)&art, handlePtr);
     return art;
 }
@@ -469,44 +473,44 @@ unsigned char* artLockFrameData(int fid, int frame, int direction, CacheEntry** 
     Art* art;
     ArtFrame* frm;
 
-    art = NULL;
+    art = nullptr;
     if (handlePtr) {
         cacheLock(&gArtCache, fid, (void**)&art, handlePtr);
     }
 
-    if (art != NULL) {
+    if (art != nullptr) {
         frm = artGetFrame(art, frame, direction);
-        if (frm != NULL) {
+        if (frm != nullptr) {
 
             return (unsigned char*)frm + sizeof(*frm);
         }
     }
 
-    return NULL;
+    return nullptr;
 }
 
 // 0x4191CC
 unsigned char* artLockFrameDataReturningSize(int fid, CacheEntry** handlePtr, int* widthPtr, int* heightPtr)
 {
-    *handlePtr = NULL;
+    *handlePtr = nullptr;
 
-    Art* art;
+    Art* art = nullptr;
     cacheLock(&gArtCache, fid, (void**)&art, handlePtr);
 
-    if (art == NULL) {
-        return NULL;
+    if (art == nullptr) {
+        return nullptr;
     }
 
     // NOTE: Uninline.
     *widthPtr = artGetWidth(art, 0, 0);
     if (*widthPtr == -1) {
-        return NULL;
+        return nullptr;
     }
 
     // NOTE: Uninline.
     *heightPtr = artGetHeight(art, 0, 0);
     if (*heightPtr == -1) {
-        return NULL;
+        return nullptr;
     }
 
     // NOTE: Uninline.
@@ -639,33 +643,33 @@ char* artBuildFilePath(int fid)
     type = FID_TYPE(v2);
 
     if (v3 >= gArtListDescriptions[type].fileNamesLength) {
-        return NULL;
+        return nullptr;
     }
 
     if (type < OBJ_TYPE_ITEM || type >= OBJ_TYPE_COUNT) {
-        return NULL;
+        return nullptr;
     }
 
     v8 = v3 * 13;
 
     if (type == 1) {
         if (_art_get_code(v4, v5, &v11, &v12) == -1) {
-            return NULL;
+            return nullptr;
         }
         if (v10) {
-            sprintf(_art_name, "%s%s%s\\%s%c%c.fr%c", _cd_path_base, "art\\", gArtListDescriptions[1].name, gArtListDescriptions[1].fileNames + v8, v11, v12, v10 + 47);
+            snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s%c%c.fr%c", _cd_path_base, "art\\", gArtListDescriptions[1].name, gArtListDescriptions[1].fileNames + v8, v11, v12, v10 + 47);
         } else {
-            sprintf(_art_name, "%s%s%s\\%s%c%c.frm", _cd_path_base, "art\\", gArtListDescriptions[1].name, gArtListDescriptions[1].fileNames + v8, v11, v12);
+            snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s%c%c.frm", _cd_path_base, "art\\", gArtListDescriptions[1].name, gArtListDescriptions[1].fileNames + v8, v11, v12);
         }
     } else if (type == 8) {
         v9 = _head2[v4];
         if (v9 == 'f') {
-            sprintf(_art_name, "%s%s%s\\%s%c%c%d.frm", _cd_path_base, "art\\", gArtListDescriptions[8].name, gArtListDescriptions[8].fileNames + v8, _head1[v4], 102, v5);
+            snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s%c%c%d.frm", _cd_path_base, "art\\", gArtListDescriptions[8].name, gArtListDescriptions[8].fileNames + v8, _head1[v4], 102, v5);
         } else {
-            sprintf(_art_name, "%s%s%s\\%s%c%c.frm", _cd_path_base, "art\\", gArtListDescriptions[8].name, gArtListDescriptions[8].fileNames + v8, _head1[v4], v9);
+            snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s%c%c.frm", _cd_path_base, "art\\", gArtListDescriptions[8].name, gArtListDescriptions[8].fileNames + v8, _head1[v4], v9);
         }
     } else {
-        sprintf(_art_name, "%s%s%s\\%s", _cd_path_base, "art\\", gArtListDescriptions[type].name, gArtListDescriptions[type].fileNames + v8);
+        snprintf(_art_name, sizeof(_art_name), "%s%s%s\\%s", _cd_path_base, "art\\", gArtListDescriptions[type].name, gArtListDescriptions[type].fileNames + v8);
     }
 
     return _art_name;
@@ -676,7 +680,7 @@ char* artBuildFilePath(int fid)
 static int artReadList(const char* path, char** artListPtr, int* artListSizePtr)
 {
     File* stream = fileOpen(path, "rt");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         return -1;
     }
 
@@ -692,14 +696,14 @@ static int artReadList(const char* path, char** artListPtr, int* artListSizePtr)
 
     char* artList = (char*)internal_malloc(13 * count);
     *artListPtr = artList;
-    if (artList == NULL) {
+    if (artList == nullptr) {
         fileClose(stream);
         return -1;
     }
 
     while (fileReadString(string, sizeof(string), stream)) {
         char* brk = strpbrk(string, " ,;\r\t\n");
-        if (brk != NULL) {
+        if (brk != nullptr) {
             *brk = '\0';
         }
 
@@ -717,7 +721,7 @@ static int artReadList(const char* path, char** artListPtr, int* artListSizePtr)
 // 0x419760
 int artGetFramesPerSecond(Art* art)
 {
-    if (art == NULL) {
+    if (art == nullptr) {
         return 10;
     }
 
@@ -727,13 +731,13 @@ int artGetFramesPerSecond(Art* art)
 // 0x419778
 int artGetActionFrame(Art* art)
 {
-    return art == NULL ? -1 : art->actionFrame;
+    return art == nullptr ? -1 : art->actionFrame;
 }
 
 // 0x41978C
 int artGetFrameCount(Art* art)
 {
-    return art == NULL ? -1 : art->frameCount;
+    return art == nullptr ? -1 : art->frameCount;
 }
 
 // 0x4197A0
@@ -742,7 +746,7 @@ int artGetWidth(Art* art, int frame, int direction)
     ArtFrame* frm;
 
     frm = artGetFrame(art, frame, direction);
-    if (frm == NULL) {
+    if (frm == nullptr) {
         return -1;
     }
 
@@ -755,7 +759,7 @@ int artGetHeight(Art* art, int frame, int direction)
     ArtFrame* frm;
 
     frm = artGetFrame(art, frame, direction);
-    if (frm == NULL) {
+    if (frm == nullptr) {
         return -1;
     }
 
@@ -768,23 +772,23 @@ int artGetSize(Art* art, int frame, int direction, int* widthPtr, int* heightPtr
     ArtFrame* frm;
 
     frm = artGetFrame(art, frame, direction);
-    if (frm == NULL) {
-        if (widthPtr != NULL) {
+    if (frm == nullptr) {
+        if (widthPtr != nullptr) {
             *widthPtr = 0;
         }
 
-        if (heightPtr != NULL) {
+        if (heightPtr != nullptr) {
             *heightPtr = 0;
         }
 
         return -1;
     }
 
-    if (widthPtr != NULL) {
+    if (widthPtr != nullptr) {
         *widthPtr = frm->width;
     }
 
-    if (heightPtr != NULL) {
+    if (heightPtr != nullptr) {
         *heightPtr = frm->height;
     }
 
@@ -797,7 +801,7 @@ int artGetFrameOffsets(Art* art, int frame, int direction, int* xPtr, int* yPtr)
     ArtFrame* frm;
 
     frm = artGetFrame(art, frame, direction);
-    if (frm == NULL) {
+    if (frm == nullptr) {
         return -1;
     }
 
@@ -810,7 +814,7 @@ int artGetFrameOffsets(Art* art, int frame, int direction, int* xPtr, int* yPtr)
 // 0x41984C
 int artGetRotationOffsets(Art* art, int rotation, int* xPtr, int* yPtr)
 {
-    if (art == NULL) {
+    if (art == nullptr) {
         return -1;
     }
 
@@ -826,8 +830,8 @@ unsigned char* artGetFrameData(Art* art, int frame, int direction)
     ArtFrame* frm;
 
     frm = artGetFrame(art, frame, direction);
-    if (frm == NULL) {
-        return NULL;
+    if (frm == nullptr) {
+        return nullptr;
     }
 
     return (unsigned char*)frm + sizeof(*frm);
@@ -837,20 +841,20 @@ unsigned char* artGetFrameData(Art* art, int frame, int direction)
 ArtFrame* artGetFrame(Art* art, int frame, int rotation)
 {
     if (rotation < 0 || rotation >= 6) {
-        return NULL;
+        return nullptr;
     }
 
-    if (art == NULL) {
-        return NULL;
+    if (art == nullptr) {
+        return nullptr;
     }
 
     if (frame < 0 || frame >= art->frameCount) {
-        return NULL;
+        return nullptr;
     }
 
-    ArtFrame* frm = (ArtFrame*)((unsigned char*)art + sizeof(*art) + art->dataOffsets[rotation]);
+    ArtFrame* frm = (ArtFrame*)((unsigned char*)art + sizeof(*art) + art->dataOffsets[rotation] + art->padding[rotation]);
     for (int index = 0; index < frame; index++) {
-        frm = (ArtFrame*)((unsigned char*)frm + sizeof(*frm) + frm->size);
+        frm = (ArtFrame*)((unsigned char*)frm + sizeof(*frm) + frm->size + paddingForSize(frm->size));
     }
     return frm;
 }
@@ -859,23 +863,13 @@ ArtFrame* artGetFrame(Art* art, int frame, int rotation)
 bool artExists(int fid)
 {
     bool result = false;
-    int oldDb = -1;
-
-    if (FID_TYPE(fid) == OBJ_TYPE_CRITTER) {
-        oldDb = _db_current();
-        _db_select(_critter_db_handle);
-    }
 
     char* filePath = artBuildFilePath(fid);
-    if (filePath != NULL) {
+    if (filePath != nullptr) {
         int fileSize;
         if (dbGetFileSize(filePath, &fileSize) != -1) {
             result = true;
         }
-    }
-
-    if (oldDb != -1) {
-        _db_select(oldDb);
     }
 
     return result;
@@ -887,23 +881,13 @@ bool artExists(int fid)
 bool _art_fid_valid(int fid)
 {
     bool result = false;
-    int oldDb = -1;
-
-    if (FID_TYPE(fid) == OBJ_TYPE_CRITTER) {
-        oldDb = _db_current();
-        _db_select(_critter_db_handle);
-    }
 
     char* filePath = artBuildFilePath(fid);
-    if (filePath != NULL) {
+    if (filePath != nullptr) {
         int fileSize;
         if (dbGetFileSize(filePath, &fileSize) != -1) {
             result = true;
         }
-    }
-
-    if (oldDb != -1) {
-        _db_select(oldDb);
     }
 
     return result;
@@ -952,47 +936,37 @@ int artAliasFid(int fid)
 // 0x419A78
 static int artCacheGetFileSizeImpl(int fid, int* sizePtr)
 {
-    int oldDb = -1;
     int result = -1;
 
-    if (FID_TYPE(fid) == OBJ_TYPE_CRITTER) {
-        oldDb = _db_current();
-        _db_select(_critter_db_handle);
-    }
-
     char* artFilePath = artBuildFilePath(fid);
-    if (artFilePath != NULL) {
-        int fileSize;
+    if (artFilePath != nullptr) {
         bool loaded = false;
+        File* stream = nullptr;
 
         if (gArtLanguageInitialized) {
             char* pch = strchr(artFilePath, '\\');
-            if (pch == NULL) {
+            if (pch == nullptr) {
                 pch = artFilePath;
             }
 
             char localizedPath[COMPAT_MAX_PATH];
-            sprintf(localizedPath, "art\\%s\\%s", gArtLanguage, pch);
+            snprintf(localizedPath, sizeof(localizedPath), "art\\%s\\%s", gArtLanguage, pch);
 
-            if (dbGetFileSize(localizedPath, &fileSize) == 0) {
-                loaded = true;
+            stream = fileOpen(localizedPath, "rb");
+        }
+
+        if (stream == nullptr) {
+            stream = fileOpen(artFilePath, "rb");
+        }
+
+        if (stream != nullptr) {
+            Art art;
+            if (artReadHeader(&art, stream) == 0) {
+                *sizePtr = artGetDataSize(&art);
+                result = 0;
             }
+            fileClose(stream);
         }
-
-        if (!loaded) {
-            if (dbGetFileSize(artFilePath, &fileSize) == 0) {
-                loaded = true;
-            }
-        }
-
-        if (loaded) {
-            *sizePtr = fileSize;
-            result = 0;
-        }
-    }
-
-    if (oldDb != -1) {
-        _db_select(oldDb);
     }
 
     return result;
@@ -1001,25 +975,19 @@ static int artCacheGetFileSizeImpl(int fid, int* sizePtr)
 // 0x419B78
 static int artCacheReadDataImpl(int fid, int* sizePtr, unsigned char* data)
 {
-    int oldDb = -1;
     int result = -1;
 
-    if (FID_TYPE(fid) == OBJ_TYPE_CRITTER) {
-        oldDb = _db_current();
-        _db_select(_critter_db_handle);
-    }
-
     char* artFileName = artBuildFilePath(fid);
-    if (artFileName != NULL) {
+    if (artFileName != nullptr) {
         bool loaded = false;
         if (gArtLanguageInitialized) {
             char* pch = strchr(artFileName, '\\');
-            if (pch == NULL) {
+            if (pch == nullptr) {
                 pch = artFileName;
             }
 
             char localizedPath[COMPAT_MAX_PATH];
-            sprintf(localizedPath, "art\\%s\\%s", gArtLanguage, pch);
+            snprintf(localizedPath, sizeof(localizedPath), "art\\%s\\%s", gArtLanguage, pch);
 
             if (artRead(localizedPath, data) == 0) {
                 loaded = true;
@@ -1033,14 +1001,9 @@ static int artCacheReadDataImpl(int fid, int* sizePtr, unsigned char* data)
         }
 
         if (loaded) {
-            // TODO: Why it adds 74?
-            *sizePtr = ((Art*)data)->field_3A + 74;
+            *sizePtr = artGetDataSize((Art*)data);
             result = 0;
         }
-    }
-
-    if (oldDb != -1) {
-        _db_select(oldDb);
     }
 
     return result;
@@ -1094,9 +1057,10 @@ out:
 }
 
 // 0x419D60
-static int artReadFrameData(unsigned char* data, File* stream, int count)
+static int artReadFrameData(unsigned char* data, File* stream, int count, int* paddingPtr)
 {
     unsigned char* ptr = data;
+    int padding = 0;
     for (int index = 0; index < count; index++) {
         ArtFrame* frame = (ArtFrame*)ptr;
 
@@ -1108,7 +1072,11 @@ static int artReadFrameData(unsigned char* data, File* stream, int count)
         if (fileRead(ptr + sizeof(ArtFrame), frame->size, 1, stream) != 1) return -1;
 
         ptr += sizeof(ArtFrame) + frame->size;
+        ptr += paddingForSize(frame->size);
+        padding += paddingForSize(frame->size);
     }
+
+    *paddingPtr = padding;
 
     return 0;
 }
@@ -1123,16 +1091,55 @@ static int artReadHeader(Art* art, File* stream)
     if (fileReadInt16List(stream, art->xOffsets, ROTATION_COUNT) == -1) return -1;
     if (fileReadInt16List(stream, art->yOffsets, ROTATION_COUNT) == -1) return -1;
     if (fileReadInt32List(stream, art->dataOffsets, ROTATION_COUNT) == -1) return -1;
-    if (fileReadInt32(stream, &(art->field_3A)) == -1) return -1;
+    if (fileReadInt32(stream, &(art->dataSize)) == -1) return -1;
+
+    // CE: Fix malformed `frm` files with `dataSize` set to 0 in Nevada.
+    if (art->dataSize == 0) {
+        art->dataSize = fileGetSize(stream);
+    }
 
     return 0;
+}
+
+// NOTE: Original function was slightly different, but never used. Basically
+// it's a memory allocating variant of `artRead` (which reads data into given
+// buffer). This function is useful to load custom `frm` files since `Art` now
+// needs more memory then it's on-disk size (due to memory padding).
+//
+// 0x419EC0
+Art* artLoad(const char* path)
+{
+    File* stream = fileOpen(path, "rb");
+    if (stream == nullptr) {
+        return nullptr;
+    }
+
+    Art header;
+    if (artReadHeader(&header, stream) != 0) {
+        fileClose(stream);
+        return nullptr;
+    }
+
+    fileClose(stream);
+
+    unsigned char* data = reinterpret_cast<unsigned char*>(internal_malloc(artGetDataSize(&header)));
+    if (data == nullptr) {
+        return nullptr;
+    }
+
+    if (artRead(path, data) != 0) {
+        internal_free(data);
+        return nullptr;
+    }
+
+    return reinterpret_cast<Art*>(data);
 }
 
 // 0x419FC0
 int artRead(const char* path, unsigned char* data)
 {
     File* stream = fileOpen(path, "rb");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         return -2;
     }
 
@@ -1142,9 +1149,16 @@ int artRead(const char* path, unsigned char* data)
         return -3;
     }
 
+    int currentPadding = paddingForSize(sizeof(Art));
+    int previousPadding = 0;
+
     for (int index = 0; index < ROTATION_COUNT; index++) {
+        art->padding[index] = currentPadding;
+
         if (index == 0 || art->dataOffsets[index - 1] != art->dataOffsets[index]) {
-            if (artReadFrameData(data + sizeof(Art) + art->dataOffsets[index], stream, art->frameCount) != 0) {
+            art->padding[index] += previousPadding;
+            currentPadding += previousPadding;
+            if (artReadFrameData(data + sizeof(Art) + art->dataOffsets[index] + art->padding[index], stream, art->frameCount, &previousPadding) != 0) {
                 fileClose(stream);
                 return -5;
             }
@@ -1172,6 +1186,7 @@ int artWriteFrameData(unsigned char* data, File* stream, int count)
         if (fileWrite(ptr + sizeof(ArtFrame), frame->size, 1, stream) != 1) return -1;
 
         ptr += sizeof(ArtFrame) + frame->size;
+        ptr += paddingForSize(frame->size);
     }
 
     return 0;
@@ -1189,7 +1204,7 @@ int artWriteHeader(Art* art, File* stream)
     if (fileWriteInt16List(stream, art->xOffsets, ROTATION_COUNT) == -1) return -1;
     if (fileWriteInt16List(stream, art->yOffsets, ROTATION_COUNT) == -1) return -1;
     if (fileWriteInt32List(stream, art->dataOffsets, ROTATION_COUNT) == -1) return -1;
-    if (fileWriteInt32(stream, art->field_3A) == -1) return -1;
+    if (fileWriteInt32(stream, art->dataSize) == -1) return -1;
 
     return 0;
 }
@@ -1199,12 +1214,12 @@ int artWriteHeader(Art* art, File* stream)
 // 0x41A1E8
 int artWrite(const char* path, unsigned char* data)
 {
-    if (data == NULL) {
+    if (data == nullptr) {
         return -1;
     }
 
     File* stream = fileOpen(path, "wb");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         return -1;
     }
 
@@ -1216,7 +1231,7 @@ int artWrite(const char* path, unsigned char* data)
 
     for (int index = 0; index < ROTATION_COUNT; index++) {
         if (index == 0 || art->dataOffsets[index - 1] != art->dataOffsets[index]) {
-            if (artWriteFrameData(data + sizeof(Art) + art->dataOffsets[index], stream, art->frameCount) != 0) {
+            if (artWriteFrameData(data + sizeof(Art) + art->dataOffsets[index] + art->padding[index], stream, art->frameCount) != 0) {
                 fileClose(stream);
                 return -1;
             }
@@ -1225,6 +1240,26 @@ int artWrite(const char* path, unsigned char* data)
 
     fileClose(stream);
     return 0;
+}
+
+static int artGetDataSize(Art* art)
+{
+    int dataSize = sizeof(*art) + art->dataSize;
+
+    for (int index = 0; index < ROTATION_COUNT; index++) {
+        if (index == 0 || art->dataOffsets[index - 1] != art->dataOffsets[index]) {
+            // Assume worst case - every frame is unaligned and need
+            // max padding.
+            dataSize += (sizeof(int) - 1) * art->frameCount;
+        }
+    }
+
+    return dataSize;
+}
+
+static int paddingForSize(int size)
+{
+    return (sizeof(int) - size % sizeof(int)) % sizeof(int);
 }
 
 FrmImage::FrmImage()

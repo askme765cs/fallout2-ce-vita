@@ -120,7 +120,7 @@ int displayMonitorInit()
         fontSetCurrent(oldFont);
 
         gDisplayMonitorBackgroundFrmData = (unsigned char*)internal_malloc(DISPLAY_MONITOR_WIDTH * DISPLAY_MONITOR_HEIGHT);
-        if (gDisplayMonitorBackgroundFrmData == NULL) {
+        if (gDisplayMonitorBackgroundFrmData == nullptr) {
             return -1;
         }
 
@@ -160,16 +160,16 @@ int displayMonitorInit()
             -1,
             -1,
             -1,
-            NULL,
-            NULL,
-            NULL,
+            nullptr,
+            nullptr,
+            nullptr,
             0);
         if (gDisplayMonitorScrollUpButton != -1) {
             buttonSetMouseCallbacks(gDisplayMonitorScrollUpButton,
                 displayMonitorScrollUpOnMouseEnter,
                 displayMonitorOnMouseExit,
                 displayMonitorScrollUpOnMouseDown,
-                NULL);
+                nullptr);
         }
 
         gDisplayMonitorScrollDownButton = buttonCreate(gInterfaceBarWindow,
@@ -181,16 +181,16 @@ int displayMonitorInit()
             -1,
             -1,
             -1,
-            NULL,
-            NULL,
-            NULL,
+            nullptr,
+            nullptr,
+            nullptr,
             0);
         if (gDisplayMonitorScrollDownButton != -1) {
             buttonSetMouseCallbacks(gDisplayMonitorScrollDownButton,
                 displayMonitorScrollDownOnMouseEnter,
                 displayMonitorOnMouseExit,
                 displayMonitorScrollDownOnMouseDown,
-                NULL);
+                nullptr);
         }
 
         gDisplayMonitorEnabled = true;
@@ -307,7 +307,7 @@ static void displayMonitorRefresh()
     }
 
     unsigned char* buf = windowGetBuffer(gInterfaceBarWindow);
-    if (buf == NULL) {
+    if (buf == nullptr) {
         return;
     }
 
@@ -399,11 +399,11 @@ static void consoleFileInit()
 {
     char* consoleFilePath;
     configGetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_CONSOLE_OUTPUT_FILE_KEY, &consoleFilePath);
-    if (consoleFilePath != NULL && *consoleFilePath == '\0') {
-        consoleFilePath = NULL;
+    if (consoleFilePath != nullptr && *consoleFilePath == '\0') {
+        consoleFilePath = nullptr;
     }
 
-    if (consoleFilePath != NULL) {
+    if (consoleFilePath != nullptr) {
         gConsoleFileStream.open(consoleFilePath);
     }
 }

@@ -3,18 +3,12 @@
 
 #include <stddef.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#endif
-
 #include "geometry.h"
 
 namespace fallout {
 
 // The maximum number of buttons in one radio group.
-#define RADIO_GROUP_BUTTON_LIST_CAPACITY (64)
+#define BUTTON_GROUP_BUTTON_LIST_CAPACITY (64)
 
 typedef enum WindowManagerErr {
     WINDOW_MANAGER_OK = 0,
@@ -38,15 +32,21 @@ typedef enum WindowManagerErr {
 } WindowManagerErr;
 
 typedef enum WindowFlags {
-    WINDOW_FLAG_0x01 = 0x01,
-    WINDOW_FLAG_0x02 = 0x02,
-    WINDOW_FLAG_0x04 = 0x04,
-    WINDOW_HIDDEN = 0x08,
-    WINDOW_FLAG_0x10 = 0x10,
-    WINDOW_FLAG_0x20 = 0x20,
+    // Use system window flags which are set during game startup and does not
+    // change afterwards.
+    WINDOW_USE_DEFAULTS = 0x1,
+    WINDOW_DONT_MOVE_TOP = 0x2,
+    WINDOW_MOVE_ON_TOP = 0x4,
+    WINDOW_HIDDEN = 0x8,
+    // Sfall calls this Exclusive.
+    WINDOW_MODAL = 0x10,
+    WINDOW_TRANSPARENT = 0x20,
     WINDOW_FLAG_0x40 = 0x40,
-    WINDOW_FLAG_0x80 = 0x80,
-    WINDOW_FLAG_0x0100 = 0x0100,
+
+    /// Specifies that the window is draggable by clicking and moving anywhere
+    /// in its background.
+    WINDOW_DRAGGABLE_BY_BACKGROUND = 0x80,
+    WINDOW_MANAGED = 0x100,
 } WindowFlags;
 
 typedef enum ButtonFlags {
@@ -54,12 +54,14 @@ typedef enum ButtonFlags {
     BUTTON_FLAG_0x02 = 0x02,
     BUTTON_FLAG_0x04 = 0x04,
     BUTTON_FLAG_DISABLED = 0x08,
-    BUTTON_FLAG_0x10 = 0x10,
+
+    /// Specifies that the button is a drag handle for parent window.
+    BUTTON_DRAG_HANDLE = 0x10,
     BUTTON_FLAG_TRANSPARENT = 0x20,
     BUTTON_FLAG_0x40 = 0x40,
-    BUTTON_FLAG_0x010000 = 0x010000,
-    BUTTON_FLAG_0x020000 = 0x020000,
-    BUTTON_FLAG_0x040000 = 0x040000,
+    BUTTON_FLAG_GRAPHIC = 0x010000,
+    BUTTON_FLAG_CHECKED = 0x020000,
+    BUTTON_FLAG_RADIO = 0x040000,
     BUTTON_FLAG_RIGHT_MOUSE_BUTTON_CONFIGURED = 0x080000,
 } ButtonFlags;
 
@@ -68,8 +70,8 @@ typedef struct MenuPulldown {
     int keyCode;
     int itemsLength;
     char** items;
-    int field_1C;
-    int field_20;
+    int foregroundColor;
+    int backgroundColor;
 } MenuPulldown;
 
 typedef struct MenuBar {
@@ -77,14 +79,14 @@ typedef struct MenuBar {
     Rect rect;
     int pulldownsLength;
     MenuPulldown pulldowns[15];
-    int borderColor;
+    int foregroundColor;
     int backgroundColor;
 } MenuBar;
 
 typedef void WindowBlitProc(unsigned char* src, int width, int height, int srcPitch, unsigned char* dest, int destPitch);
 
 typedef struct Button Button;
-typedef struct RadioGroup RadioGroup;
+typedef struct ButtonGroup ButtonGroup;
 
 typedef struct Window {
     int id;
@@ -92,20 +94,19 @@ typedef struct Window {
     Rect rect;
     int width;
     int height;
-    int field_20;
-    // rand
-    int field_24;
-    // rand
-    int field_28;
+    int color;
+    int tx;
+    int ty;
     unsigned char* buffer;
     Button* buttonListHead;
-    Button* field_34;
-    Button* field_38;
+    Button* hoveredButton;
+    Button* clickedButton;
     MenuBar* menuBar;
     WindowBlitProc* blitProc;
 } Window;
 
 typedef void ButtonCallback(int btn, int keyCode);
+typedef void RadioButtonCallback(int btn);
 
 typedef struct Button {
     int id;
@@ -117,12 +118,12 @@ typedef struct Button {
     int leftMouseUpEventCode;
     int rightMouseDownEventCode;
     int rightMouseUpEventCode;
-    unsigned char* mouseUpImage;
-    unsigned char* mouseDownImage;
-    unsigned char* mouseHoverImage;
-    unsigned char* field_3C;
-    unsigned char* field_40;
-    unsigned char* field_44;
+    unsigned char* normalImage;
+    unsigned char* pressedImage;
+    unsigned char* hoverImage;
+    unsigned char* disabledNormalImage;
+    unsigned char* disabledPressedImage;
+    unsigned char* disabledHoverImage;
     unsigned char* currentImage;
     unsigned char* mask;
     ButtonCallback* mouseEnterProc;
@@ -131,20 +132,20 @@ typedef struct Button {
     ButtonCallback* leftMouseUpProc;
     ButtonCallback* rightMouseDownProc;
     ButtonCallback* rightMouseUpProc;
-    ButtonCallback* onPressed;
-    ButtonCallback* onUnpressed;
-    RadioGroup* radioGroup;
+    ButtonCallback* pressSoundFunc;
+    ButtonCallback* releaseSoundFunc;
+    ButtonGroup* buttonGroup;
     Button* prev;
     Button* next;
 } Button;
 
-typedef struct RadioGroup {
-    int field_0;
-    int field_4;
-    void (*field_8)(int);
+typedef struct ButtonGroup {
+    int maxChecked;
+    int currChecked;
+    RadioButtonCallback* func;
     int buttonsLength;
-    Button* buttons[RADIO_GROUP_BUTTON_LIST_CAPACITY];
-} RadioGroup;
+    Button* buttons[BUTTON_GROUP_BUTTON_LIST_CAPACITY];
+} ButtonGroup;
 
 typedef int(VideoSystemInitProc)();
 typedef void(VideoSystemExitProc)();
@@ -154,15 +155,15 @@ extern int _GNW_wcolor[6];
 
 int windowManagerInit(VideoSystemInitProc* videoSystemInitProc, VideoSystemExitProc* videoSystemExitProc, int a3);
 void windowManagerExit(void);
-int windowCreate(int x, int y, int width, int height, int a4, int flags);
+int windowCreate(int x, int y, int width, int height, int color, int flags);
 void windowDestroy(int win);
 void windowDrawBorder(int win);
 void windowDrawText(int win, const char* str, int a3, int x, int y, int a6);
 void _win_text(int win, char** fileNameList, int fileNameListLength, int maxWidth, int x, int y, int flags);
 void windowDrawLine(int win, int left, int top, int right, int bottom, int color);
 void windowDrawRect(int win, int left, int top, int right, int bottom, int color);
-void windowFill(int win, int x, int y, int width, int height, int a6);
-void windowUnhide(int win);
+void windowFill(int win, int x, int y, int width, int height, int color);
+void windowShow(int win);
 void windowHide(int win);
 void windowRefresh(int win);
 void windowRefreshRect(int win, const Rect* rect);
@@ -176,16 +177,16 @@ int windowGetWidth(int win);
 int windowGetHeight(int win);
 int windowGetRect(int win, Rect* rect);
 int _win_check_all_buttons();
-int _GNW_check_menu_bars(int a1);
+int _GNW_check_menu_bars(int input);
 void programWindowSetTitle(const char* title);
 bool showMesageBox(const char* str);
 int buttonCreate(int win, int x, int y, int width, int height, int mouseEnterEventCode, int mouseExitEventCode, int mouseDownEventCode, int mouseUpEventCode, unsigned char* up, unsigned char* dn, unsigned char* hover, int flags);
 int _win_register_text_button(int win, int x, int y, int mouseEnterEventCode, int mouseExitEventCode, int mouseDownEventCode, int mouseUpEventCode, const char* title, int flags);
 int _win_register_button_disable(int btn, unsigned char* up, unsigned char* down, unsigned char* hover);
-int _win_register_button_image(int btn, unsigned char* up, unsigned char* down, unsigned char* hover, int a5);
+int _win_register_button_image(int btn, unsigned char* up, unsigned char* down, unsigned char* hover, bool draw);
 int buttonSetMouseCallbacks(int btn, ButtonCallback* mouseEnterProc, ButtonCallback* mouseExitProc, ButtonCallback* mouseDownProc, ButtonCallback* mouseUpProc);
 int buttonSetRightMouseCallbacks(int btn, int rightMouseDownEventCode, int rightMouseUpEventCode, ButtonCallback* rightMouseDownProc, ButtonCallback* rightMouseUpProc);
-int buttonSetCallbacks(int btn, ButtonCallback* onPressed, ButtonCallback* onUnpressed);
+int buttonSetCallbacks(int btn, ButtonCallback* pressSoundFunc, ButtonCallback* releaseSoundFunc);
 int buttonSetMask(int btn, unsigned char* mask);
 bool _win_button_down(int btn);
 int buttonGetWindowId(int btn);
@@ -193,8 +194,8 @@ int _win_last_button_winID();
 int buttonDestroy(int btn);
 int buttonEnable(int btn);
 int buttonDisable(int btn);
-int _win_set_button_rest_state(int btn, bool a2, int a3);
-int _win_group_radio_buttons(int a1, int* a2);
+int _win_set_button_rest_state(int btn, bool checked, int flags);
+int _win_group_radio_buttons(int buttonCount, int* btns);
 int _win_button_press_and_release(int btn);
 
 } // namespace fallout

@@ -4,6 +4,7 @@
 
 #include "audio_engine.h"
 #include "color.h"
+#include "delay.h"
 #include "dinput.h"
 #include "draw.h"
 #include "kb.h"
@@ -11,12 +12,12 @@
 #include "mouse.h"
 #include "svga.h"
 #include "text_font.h"
+#include "touch.h"
 #include "vcr.h"
 #include "win32.h"
 
 #ifdef __vita__
 #include "map.h"
-#include <vita2d.h>
 #endif
 
 namespace fallout {
@@ -83,10 +84,10 @@ static void _GNW95_process_key(KeyboardData* data);
 static void idleImpl();
 
 // 0x51E234
-static IdleFunc* _idle_func = NULL;
+static IdleFunc* _idle_func = nullptr;
 
 // 0x51E238
-static FocusFunc* _focus_func = NULL;
+static FocusFunc* _focus_func = nullptr;
 
 // 0x51E23C
 static int gKeyboardKeyRepeatRate = 80;
@@ -152,6 +153,40 @@ static TickerListNode* gTickerListHead;
 // 0x6AC788
 static unsigned int gTickerLastTimestamp;
 
+#ifdef __vita__
+#if !defined(SCE_IME_LANGUAGE_ENGLISH_US)
+#define SCE_IME_LANGUAGE_ENGLISH_US SCE_IME_LANGUAGE_ENGLISH
+#endif
+
+// used to convert user-friendly pointer speed values into more useable ones
+const float CONTROLLER_SPEED_MOD = 0.000004f;
+// bigger value correndsponds to faster pointer movement speed with bigger stick axis values
+const float CONTROLLER_AXIS_SPEEDUP = 1.03f;
+
+enum
+{
+    CONTROLLER_L_DEADZONE = 3000,
+    CONTROLLER_R_DEADZONE = 25000
+};
+
+int16_t controllerLeftXAxis = 0;
+int16_t controllerLeftYAxis = 0;
+int16_t controllerRightXAxis = 0;
+int16_t controllerRightYAxis = 0;
+uint32_t lastControllerTime = 0;
+int32_t mapXScroll = 0;
+int32_t mapYScroll = 0;
+float cursorSpeedup = 1.0f;
+float resolutionSpeedMod = 1.0f;
+float controllerLeftoverX = 0;
+float controllerLeftoverY = 0;
+
+SceWChar16 libime_out[SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1];
+static char libime_initval[8] = { 1 };
+SceImeCaret caret_rev;
+int ime_active = 0;
+#endif
+
 // 0x4C8A70
 int inputInit(int a1)
 {
@@ -175,6 +210,10 @@ int inputInit(int a1)
     openController();
 #endif
 
+#ifdef __vita__
+    openController();
+#endif
+
     buildNormalizedQwertyKeys();
     _GNW95_clear_time_stamps();
 
@@ -188,7 +227,7 @@ int inputInit(int a1)
     gPauseKeyCode = KEY_ALT_P;
     gPauseHandler = pauseHandlerDefaultImpl;
     gScreenshotHandler = screenshotHandlerDefaultImpl;
-    gTickerListHead = NULL;
+    gTickerListHead = nullptr;
     gScreenshotKeyCode = KEY_ALT_C;
 
     // SFALL: Set idle function.
@@ -208,27 +247,10 @@ void inputExit()
 
 #ifdef __vita__
     closeController();
-
-    if ( gSdlWindow != nullptr ) {
-        SDL_DestroyWindow( gSdlWindow );
-        gSdlWindow = nullptr;
-    }
-
-    if ( vitaPaletteSurface != nullptr ) {
-        SDL_FreeSurface( vitaPaletteSurface );
-        vitaPaletteSurface = nullptr;
-    }
-
-    vita2d_fini();
-
-    if ( texBuffer != nullptr ) {
-        vita2d_free_texture( texBuffer );
-        texBuffer = nullptr;
-    }
 #endif
 
     TickerListNode* curr = gTickerListHead;
-    while (curr != NULL) {
+    while (curr != nullptr) {
         TickerListNode* next = curr->next;
         internal_free(curr);
         curr = next;
@@ -257,6 +279,13 @@ int inputGetInput()
     }
 
     return -1;
+}
+
+// 0x4C8BC8
+void get_input_position(int* x, int* y)
+{
+    *x = _input_mx;
+    *y = _input_my;
 }
 
 // 0x4C8BDC
@@ -370,7 +399,7 @@ void tickersExecute()
     TickerListNode* curr = gTickerListHead;
     TickerListNode** currPtr = &(gTickerListHead);
 
-    while (curr != NULL) {
+    while (curr != nullptr) {
         TickerListNode* next = curr->next;
         if (curr->flags & 1) {
             *currPtr = next;
@@ -388,7 +417,7 @@ void tickersExecute()
 void tickersAdd(TickerProc* proc)
 {
     TickerListNode* curr = gTickerListHead;
-    while (curr != NULL) {
+    while (curr != nullptr) {
         if (curr->proc == proc) {
             if ((curr->flags & 0x01) != 0) {
                 curr->flags &= ~0x01;
@@ -409,7 +438,7 @@ void tickersAdd(TickerProc* proc)
 void tickersRemove(TickerProc* proc)
 {
     TickerListNode* curr = gTickerListHead;
-    while (curr != NULL) {
+    while (curr != nullptr) {
         if (curr->proc == proc) {
             curr->flags |= 0x01;
             return;
@@ -457,7 +486,7 @@ static int pauseHandlerDefaultImpl()
         windowWidth,
         windowHeight,
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x04);
+        WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
     if (win == -1) {
         return -1;
     }
@@ -491,7 +520,7 @@ void pauseHandlerConfigure(int keyCode, PauseHandler* handler)
 {
     gPauseKeyCode = keyCode;
 
-    if (handler == NULL) {
+    if (handler == nullptr) {
         handler = pauseHandlerDefaultImpl;
     }
 
@@ -504,7 +533,7 @@ void takeScreenshot()
     int width = _scr_size.right - _scr_size.left + 1;
     int height = _scr_size.bottom - _scr_size.top + 1;
     gScreenshotBuffer = (unsigned char*)internal_malloc(width * height);
-    if (gScreenshotBuffer == NULL) {
+    if (gScreenshotBuffer == nullptr) {
         return;
     }
 
@@ -515,7 +544,7 @@ void takeScreenshot()
     _mouse_blit = screenshotBlitter;
 
     WindowDrawingProc2* v1 = _mouse_blit_trans;
-    _mouse_blit_trans = NULL;
+    _mouse_blit_trans = nullptr;
 
     windowRefreshAll(&_scr_size);
 
@@ -545,10 +574,10 @@ int screenshotHandlerDefaultImpl(int width, int height, unsigned char* data, uns
     unsigned short shortValue;
 
     for (index = 0; index < 100000; index++) {
-        sprintf(fileName, "scr%.5d.bmp", index);
+        snprintf(fileName, sizeof(fileName), "scr%.5d.bmp", index);
 
         stream = compat_fopen(fileName, "rb");
-        if (stream == NULL) {
+        if (stream == nullptr) {
             break;
         }
 
@@ -560,7 +589,7 @@ int screenshotHandlerDefaultImpl(int width, int height, unsigned char* data, uns
     }
 
     stream = compat_fopen(fileName, "wb");
-    if (stream == NULL) {
+    if (stream == nullptr) {
         return -1;
     }
 
@@ -659,7 +688,7 @@ void screenshotHandlerConfigure(int keyCode, ScreenshotHandler* handler)
 {
     gScreenshotKeyCode = keyCode;
 
-    if (handler == NULL) {
+    if (handler == nullptr) {
         handler = screenshotHandlerDefaultImpl;
     }
 
@@ -694,12 +723,7 @@ void inputPauseForTocks(unsigned int delay)
 // 0x4C93B8
 void inputBlockForTocks(unsigned int ms)
 {
-    unsigned int start = SDL_GetTicks();
-    unsigned int diff;
-    do {
-        // NOTE: Uninline
-        diff = getTicksSince(start);
-    } while (diff < ms);
+    delay_ms(ms);
 }
 
 // 0x4C93E0
@@ -1087,24 +1111,24 @@ static void buildNormalizedQwertyKeys()
     keys[SDL_SCANCODE_F13] = -1;
     keys[SDL_SCANCODE_F14] = -1;
     keys[SDL_SCANCODE_F15] = -1;
-    //keys[DIK_KANA] = -1;
-    //keys[DIK_CONVERT] = -1;
-    //keys[DIK_NOCONVERT] = -1;
-    //keys[DIK_YEN] = -1;
+    // keys[DIK_KANA] = -1;
+    // keys[DIK_CONVERT] = -1;
+    // keys[DIK_NOCONVERT] = -1;
+    // keys[DIK_YEN] = -1;
     keys[SDL_SCANCODE_KP_EQUALS] = -1;
-    //keys[DIK_PREVTRACK] = -1;
-    //keys[DIK_AT] = -1;
-    //keys[DIK_COLON] = -1;
-    //keys[DIK_UNDERLINE] = -1;
-    //keys[DIK_KANJI] = -1;
+    // keys[DIK_PREVTRACK] = -1;
+    // keys[DIK_AT] = -1;
+    // keys[DIK_COLON] = -1;
+    // keys[DIK_UNDERLINE] = -1;
+    // keys[DIK_KANJI] = -1;
     keys[SDL_SCANCODE_STOP] = -1;
-    //keys[DIK_AX] = -1;
-    //keys[DIK_UNLABELED] = -1;
+    // keys[DIK_AX] = -1;
+    // keys[DIK_UNLABELED] = -1;
     keys[SDL_SCANCODE_KP_ENTER] = SDL_SCANCODE_KP_ENTER;
     keys[SDL_SCANCODE_RCTRL] = SDL_SCANCODE_RCTRL;
     keys[SDL_SCANCODE_KP_COMMA] = -1;
     keys[SDL_SCANCODE_KP_DIVIDE] = SDL_SCANCODE_KP_DIVIDE;
-    //keys[DIK_SYSRQ] = 84;
+    // keys[DIK_SYSRQ] = 84;
     keys[SDL_SCANCODE_RALT] = SDL_SCANCODE_RALT;
     keys[SDL_SCANCODE_HOME] = SDL_SCANCODE_HOME;
     keys[SDL_SCANCODE_UP] = SDL_SCANCODE_UP;
@@ -1145,12 +1169,13 @@ void _GNW95_process_message()
             handleMouseEvent(&e);
             break;
         case SDL_FINGERDOWN:
+            touch_handle_start(&(e.tfinger));
+            break;
         case SDL_FINGERMOTION:
+            touch_handle_move(&(e.tfinger));
+            break;
         case SDL_FINGERUP:
-#ifdef __vita__
-            handleTouchEventDirect(e.tfinger);
-#endif
-            handleTouchEvent(&e);
+            touch_handle_end(&(e.tfinger));
             break;
         case SDL_KEYDOWN:
         case SDL_KEYUP:
@@ -1213,7 +1238,9 @@ void _GNW95_process_message()
         sceImeUpdate();
     }
     mapScroll(mapXScroll, mapYScroll);
+    processControllerAxisMotion();
 #endif
+    touch_process_gesture();
 
     if (gProgramIsActive && !keyboardIsDisabled()) {
         // NOTE: Uninline
@@ -1281,19 +1308,19 @@ static void _GNW95_process_key(KeyboardData* data)
 // 0x4C9EEC
 void _GNW95_lost_focus()
 {
-    if (_focus_func != NULL) {
+    if (_focus_func != nullptr) {
         _focus_func(false);
     }
 
     while (!gProgramIsActive) {
         _GNW95_process_message();
 
-        if (_idle_func != NULL) {
+        if (_idle_func != nullptr) {
             _idle_func();
         }
     }
 
-    if (_focus_func != NULL) {
+    if (_focus_func != nullptr) {
         _focus_func(true);
     }
 }
@@ -1303,64 +1330,26 @@ static void idleImpl()
     SDL_Delay(125);
 }
 
+void beginTextInput()
+{
 #ifdef __vita__
-void renderVita2dFrame(SDL_Surface *surface)
-{
-    memcpy(palettedTexturePointer, surface->pixels, surface->w * surface->h * sizeof(uint8_t));
-    vita2d_start_drawing();
-    vita2d_draw_rectangle(0, 0, VITA_FULLSCREEN_WIDTH, VITA_FULLSCREEN_HEIGHT, 0xff000000);
-    vita2d_draw_texture_scale(texBuffer, renderRect.x, renderRect.y, (float)(renderRect.w) / surface->w, (float)(renderRect.h) / surface->h);
-    vita2d_end_drawing();
-    vita2d_swap_buffers();
+    vitaActivateIme();
+#else
+    SDL_StartTextInput();
+#endif
 }
 
-void updateVita2dPalette(SDL_Color *colors, int start, int count)
+void endTextInput()
 {
-    uint32_t palette32Bit[count];
-
-    if (vitaPaletteSurface == NULL) {
-        vitaPaletteSurface = SDL_CreateRGBSurface(0, 1, 1, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
-    }
-
-    for ( size_t i = 0; i < count; ++i ) {
-        palette32Bit[i] = SDL_MapRGBA(vitaPaletteSurface->format, colors[i].r, colors[i].g, colors[i].b, colors[i].a);
-    }
-
-    memcpy(vita2d_texture_get_palette(texBuffer) + start * sizeof(uint32_t), palette32Bit, sizeof(uint32_t) * count);
+#ifdef __vita__
+    sceImeClose();
+    ime_active = 0;
+#else
+    SDL_StopTextInput();
+#endif
 }
 
-void setRenderRect(int width, int height, bool fullscreen)
-{
-    renderRect.x = 0;
-    renderRect.y = 0;
-    renderRect.w = width;
-    renderRect.h = height;
-    vita2d_texture_set_filters(texBuffer, SCE_GXM_TEXTURE_FILTER_POINT, SCE_GXM_TEXTURE_FILTER_POINT);
-
-    if (width != VITA_FULLSCREEN_WIDTH || height != VITA_FULLSCREEN_HEIGHT)	{
-        if (fullscreen) {
-            //resize to fullscreen
-            if ((static_cast<float>(VITA_FULLSCREEN_WIDTH) / VITA_FULLSCREEN_HEIGHT) >= (static_cast<float>(width) / height)) {
-                float scale = static_cast<float>(VITA_FULLSCREEN_HEIGHT) / height;
-                renderRect.w = width * scale;
-                renderRect.h = VITA_FULLSCREEN_HEIGHT;
-                renderRect.x = (VITA_FULLSCREEN_WIDTH - renderRect.w) / 2;
-            } else {
-                float scale = static_cast<float>(VITA_FULLSCREEN_WIDTH) / width;
-                renderRect.w = VITA_FULLSCREEN_WIDTH;
-                renderRect.h = height * scale;
-                renderRect.y = (VITA_FULLSCREEN_HEIGHT - renderRect.h) / 2;
-            }
-
-            vita2d_texture_set_filters(texBuffer, SCE_GXM_TEXTURE_FILTER_LINEAR, SCE_GXM_TEXTURE_FILTER_LINEAR);
-        } else {
-            //center game area
-            renderRect.x = (VITA_FULLSCREEN_WIDTH - width) / 2;
-            renderRect.y = (VITA_FULLSCREEN_HEIGHT - height) / 2;
-        }
-    }
-}
-
+#ifdef __vita__
 void openController()
 {
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
@@ -1378,66 +1367,51 @@ void closeController()
     }
 }
 
-void handleTouchEventDirect(const SDL_TouchFingerEvent& event)
-{
-    // ignore back touchpad
-    if (event.touchId == 0 && frontTouchpadMode != TouchpadMode::TOUCH_DIRECT || event.touchId == 1) {
-        return;
-    }
-
-    if (event.type == SDL_FINGERDOWN) {
-        ++numTouches;
-        if (numTouches == 1) {
-            delayedTouch = 0;
-            firstFingerId = event.fingerId;
-        }
-    } else if (event.type == SDL_FINGERUP) {
-        --numTouches;
-    }
-
-    if (firstFingerId == event.fingerId) {
-        int width = screenGetWidth();
-        int height = screenGetHeight();
-
-        int touchPosX = static_cast<float>(VITA_FULLSCREEN_WIDTH * event.x - renderRect.x) *
-                                    (static_cast<float>(width) / renderRect.w);
-        int touchPosY = static_cast<float>(VITA_FULLSCREEN_HEIGHT * event.y - renderRect.y) *
-                                    (static_cast<float>(height) / renderRect.h);
-
-        gTouchMouseDeltaX = touchPosX - gMouseCursorX;
-        gTouchMouseDeltaY = touchPosY - gMouseCursorY;
-    }
-}
-
 void processControllerAxisMotion()
 {
     const uint32_t currentTime = SDL_GetTicks();
-    const float deltaTime = currentTime - lastControllerTime;
+    const uint32_t deltaTime = currentTime - lastControllerTime;
     lastControllerTime = currentTime;
 
     if (controllerLeftXAxis != 0 || controllerLeftYAxis != 0) {
         const int16_t xSign = (controllerLeftXAxis > 0) - (controllerLeftXAxis < 0);
         const int16_t ySign = (controllerLeftYAxis > 0) - (controllerLeftYAxis < 0);
 
-        gTouchMouseDeltaX += std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
-                            * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
-        gTouchMouseDeltaY += std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
-                            * cursorSpeedup * resolutionSpeedMod * gMouseSensitivity * CONTROLLER_SPEED_MOD;
+        float gTouchMouseDeltaX = std::pow(std::abs(controllerLeftXAxis), CONTROLLER_AXIS_SPEEDUP) * xSign * deltaTime
+                            * cursorSpeedup * resolutionSpeedMod * mouseGetSensitivity() * CONTROLLER_SPEED_MOD + controllerLeftoverX;
+        float gTouchMouseDeltaY = std::pow(std::abs(controllerLeftYAxis), CONTROLLER_AXIS_SPEEDUP) * ySign * deltaTime
+                            * cursorSpeedup * resolutionSpeedMod * mouseGetSensitivity() * CONTROLLER_SPEED_MOD + controllerLeftoverY;
+
+        controllerLeftoverX = gTouchMouseDeltaX - static_cast<int>(gTouchMouseDeltaX);
+        controllerLeftoverY = gTouchMouseDeltaY - static_cast<int>(gTouchMouseDeltaY);
+
+        int buttonState = 0;
+        if (SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_A)) {
+            buttonState = MOUSE_STATE_LEFT_BUTTON_DOWN;
+        } else if (SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B)) {
+            buttonState = MOUSE_STATE_RIGHT_BUTTON_DOWN;
+        }
+
+        _mouse_simulate_input(gTouchMouseDeltaX, gTouchMouseDeltaY, buttonState);
     }
 }
 
 void handleControllerAxisEvent(const SDL_ControllerAxisEvent& motion)
 {
     if (motion.axis == SDL_CONTROLLER_AXIS_LEFTX) {
-        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE)
+        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE) {
             controllerLeftXAxis = motion.value;
-        else
+        } else {
             controllerLeftXAxis = 0;
+            controllerLeftoverX = 0;
+        }
     } else if (motion.axis == SDL_CONTROLLER_AXIS_LEFTY) {
-        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE)
+        if (std::abs(motion.value) > CONTROLLER_L_DEADZONE) {
             controllerLeftYAxis = motion.value;
-        else
+        } else {
             controllerLeftYAxis = 0;
+            controllerLeftoverY = 0;
+        }
     } else if (motion.axis == SDL_CONTROLLER_AXIS_RIGHTX) {
         if (std::abs(motion.value) > CONTROLLER_R_DEADZONE)
             controllerRightXAxis = motion.value;
@@ -1612,9 +1586,9 @@ void vitaActivateIme()
         param.arg = NULL;
         param.work = libime_work;
 
-        int res = sceImeOpen(&param);
+        int32_t res = sceImeOpen(&param);
         if (res < 0) {
-            sceClibPrintf("Failed to init IME\n");
+            sceClibPrintf("Failed to init IME: %ld\n", res);
         }
         ime_active = 1;
     }

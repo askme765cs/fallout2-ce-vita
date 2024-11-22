@@ -8,6 +8,7 @@
 #include "art.h"
 #include "cycle.h"
 #include "debug.h"
+#include "delay.h"
 #include "draw.h"
 #include "game_mouse.h"
 #include "game_sound.h"
@@ -455,8 +456,7 @@ int elevatorSelectLevel(int elevator, int* mapPtr, int* elevationPtr, int* tileP
 
                 windowRefresh(gElevatorWindow);
 
-                while (getTicksSince(tick) < delay) {
-                }
+                delay_ms(delay - (getTicks() - tick));
 
 #ifndef __vita__
             renderPresent();
@@ -554,7 +554,7 @@ static int elevatorWindowInit(int elevator)
         _elevatorBackgroundFrmImage.getWidth(),
         _elevatorBackgroundFrmImage.getHeight(),
         256,
-        WINDOW_FLAG_0x10 | WINDOW_FLAG_0x02);
+        WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
     if (gElevatorWindow == -1) {
         _elevatorBackgroundFrmImage.unlock();
         _elevatorPanelFrmImage.unlock();
@@ -597,10 +597,10 @@ static int elevatorWindowInit(int elevator)
             500 + level,
             _elevatorFrmImages[ELEVATOR_FRM_BUTTON_UP].getData(),
             _elevatorFrmImages[ELEVATOR_FRM_BUTTON_DOWN].getData(),
-            NULL,
+            nullptr,
             BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
-            buttonSetCallbacks(btn, _gsound_red_butt_press, NULL);
+            buttonSetCallbacks(btn, _gsound_red_butt_press, nullptr);
         }
         y += 60;
     }
@@ -654,18 +654,18 @@ void elevatorsInit()
 {
     char* elevatorsFileName;
     configGetString(&gSfallConfig, SFALL_CONFIG_MISC_KEY, SFALL_CONFIG_ELEVATORS_FILE_KEY, &elevatorsFileName);
-    if (elevatorsFileName != NULL && *elevatorsFileName == '\0') {
-        elevatorsFileName = NULL;
+    if (elevatorsFileName != nullptr && *elevatorsFileName == '\0') {
+        elevatorsFileName = nullptr;
     }
 
-    if (elevatorsFileName != NULL) {
+    if (elevatorsFileName != nullptr) {
         Config elevatorsConfig;
         if (configInit(&elevatorsConfig)) {
             if (configRead(&elevatorsConfig, elevatorsFileName, false)) {
                 char sectionKey[4];
                 char key[32];
                 for (int index = 0; index < ELEVATORS_MAX; index++) {
-                    sprintf(sectionKey, "%d", index);
+                    snprintf(sectionKey, sizeof(sectionKey), "%d", index);
 
                     if (index >= ELEVATOR_COUNT) {
                         int levels = 0;
@@ -677,13 +677,13 @@ void elevatorsInit()
                     configGetInt(&elevatorsConfig, sectionKey, "ButtonsFrm", &(gElevatorBackgrounds[index].panelFrmId));
 
                     for (int level = 0; level < ELEVATOR_LEVEL_MAX; level++) {
-                        sprintf(key, "ID%d", level + 1);
+                        snprintf(key, sizeof(key), "ID%d", level + 1);
                         configGetInt(&elevatorsConfig, sectionKey, key, &(gElevatorDescriptions[index][level].map));
 
-                        sprintf(key, "Elevation%d", level + 1);
+                        snprintf(key, sizeof(key), "Elevation%d", level + 1);
                         configGetInt(&elevatorsConfig, sectionKey, key, &(gElevatorDescriptions[index][level].elevation));
 
-                        sprintf(key, "Tile%d", level + 1);
+                        snprintf(key, sizeof(key), "Tile%d", level + 1);
                         configGetInt(&elevatorsConfig, sectionKey, key, &(gElevatorDescriptions[index][level].tile));
                     }
                 }
@@ -693,7 +693,7 @@ void elevatorsInit()
                 // value is then used in the certain places to remap from
                 // requested elevator to the new one.
                 for (int index = 0; index < ELEVATORS_MAX; index++) {
-                    sprintf(sectionKey, "%d", index);
+                    snprintf(sectionKey, sizeof(sectionKey), "%d", index);
 
                     int type;
                     if (configGetInt(&elevatorsConfig, sectionKey, "Image", &type)) {

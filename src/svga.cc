@@ -5,18 +5,11 @@
 
 #include <SDL.h>
 
-#include "audio_engine.h"
-#include "color.h"
 #include "config.h"
-#include "dinput.h"
 #include "draw.h"
 #include "interface.h"
-#include "kb.h"
 #include "memory.h"
-#include "mmx.h"
 #include "mouse.h"
-#include "text_font.h"
-#include "vcr.h"
 #include "win32.h"
 #include "window_manager.h"
 #include "window_manager_private.h"
@@ -28,87 +21,35 @@
 namespace fallout {
 
 #ifdef __vita__
+#include <vita2d.h>
+
 vita2d_texture *texBuffer;
 uint8_t *palettedTexturePointer;
+SDL_Rect renderRect;
+SDL_Surface *vitaPaletteSurface = nullptr;
+bool vitaFullscreen;
 #endif
 
 static bool createRenderer(int width, int height);
 static void destroyRenderer();
 
-// NOTE: This value is never set, so it's impossible to understand it's
-// meaning.
-//
-// 0x51E2C4
-void (*_update_palette_func)() = NULL;
-
-// 0x51E2C8
-bool gMmxEnabled = true;
-
-// 0x51E2CC
-bool gMmxProbed = false;
-
-// 0x6AC7F0
-unsigned short gSixteenBppPalette[256];
-
 // screen rect
 Rect _scr_size;
-
-// 0x6ACA00
-int gGreenMask;
-
-// 0x6ACA04
-int gRedMask;
-
-// 0x6ACA08
-int gBlueMask;
-
-// 0x6ACA0C
-int gBlueShift;
-
-// 0x6ACA10
-int gRedShift;
-
-// 0x6ACA14
-int gGreenShift;
 
 // 0x6ACA18
 void (*_scr_blit)(unsigned char* src, int src_pitch, int a3, int src_x, int src_y, int src_width, int src_height, int dest_x, int dest_y) = _GNW95_ShowRect;
 
 // 0x6ACA1C
-void (*_zero_mem)() = NULL;
+void (*_zero_mem)() = nullptr;
 
-// 0x6ACA20
-bool gMmxSupported;
-
-// FIXME: This buffer was supposed to be used as temporary place to store
-// current palette while switching video modes (changing resolution). However
-// the original game does not have UI to change video mode. Even if it did this
-// buffer it too small to hold the entire palette, which require 256 * 3 bytes.
-//
-// 0x6ACA24
-unsigned char gLastVideoModePalette[268];
-
-SDL_Window* gSdlWindow = NULL;
-SDL_Surface* gSdlSurface = NULL;
-SDL_Renderer* gSdlRenderer = NULL;
-SDL_Texture* gSdlTexture = NULL;
-SDL_Surface* gSdlTextureSurface = NULL;
+SDL_Window* gSdlWindow = nullptr;
+SDL_Surface* gSdlSurface = nullptr;
+SDL_Renderer* gSdlRenderer = nullptr;
+SDL_Texture* gSdlTexture = nullptr;
+SDL_Surface* gSdlTextureSurface = nullptr;
 
 // TODO: Remove once migration to update-render cycle is completed.
 FpsLimiter sharedFpsLimiter;
-
-// 0x4CACD0
-void mmxSetEnabled(bool a1)
-{
-    if (!gMmxProbed) {
-        gMmxSupported = mmxIsSupported();
-        gMmxProbed = true;
-    }
-
-    if (gMmxSupported) {
-        gMmxEnabled = a1;
-    }
-}
 
 // 0x4CAD08
 int _init_mode_320_200()
@@ -175,6 +116,7 @@ void _zero_vid_mem()
 int _GNW95_init_mode_ex(int width, int height, int bpp)
 {
     bool fullscreen = true;
+    int scale = 1;
 
     Config resolutionConfig;
     if (configInit(&resolutionConfig)) {
@@ -191,6 +133,7 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
                 configWrite(&resolutionConfig, "f2_res.ini", false);
             }
 #endif
+
             int screenHeight;
             if (configGetInt(&resolutionConfig, "MAIN", "SCR_HEIGHT", &screenHeight)) {
                 height = screenHeight;
@@ -203,6 +146,7 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
                 configWrite(&resolutionConfig, "f2_res.ini", false);
             }
 #endif
+
             bool windowed;
             if (configGetBool(&resolutionConfig, "MAIN", "WINDOWED", &windowed)) {
                 fullscreen = !windowed;
@@ -216,6 +160,23 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
             }
 #endif
 
+            int scaleValue;
+            if (configGetInt(&resolutionConfig, "MAIN", "SCALE_2X", &scaleValue)) {
+                scale = scaleValue + 1; // 0 = 1x, 1 = 2x
+                // Only allow scaling if resulting game resolution is >= 640x480
+                if ((width / scale) < 640 || (height / scale) < 480) {
+                    scale = 1;
+                } else {
+                    width /= scale;
+                    height /= scale;
+                }
+            }
+
+            configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode);
+            configGetInt(&resolutionConfig, "IFACE", "IFACE_BAR_WIDTH", &gInterfaceBarWidth);
+            configGetInt(&resolutionConfig, "IFACE", "IFACE_BAR_SIDE_ART", &gInterfaceSidePanelsImageId);
+            configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_SIDES_ORI", &gInterfaceSidePanelsExtendFromScreenEdge);
+
 #ifdef __vita__
             // load Vita options here
             if (width < DEFAULT_WIDTH) {
@@ -228,9 +189,7 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
             int frontTouch;
             if (configGetInt(&resolutionConfig, "VITA", "FRONT_TOUCH_MODE", &frontTouch)) {
                 frontTouchpadMode = static_cast<TouchpadMode>(frontTouch);
-            }
-            else
-            {
+            } else {
                 configSetInt(&resolutionConfig, "VITA", "FRONT_TOUCH_MODE", 1);
                 configWrite(&resolutionConfig, "f2_res.ini", false);
             }
@@ -238,28 +197,16 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
             int rearTouch;
             if (configGetInt(&resolutionConfig, "VITA", "REAR_TOUCH_MODE", &rearTouch)) {
                 rearTouchpadMode = static_cast<TouchpadMode>(rearTouch);
-            }
-            else
-            {
+            } else {
                 configSetInt(&resolutionConfig, "VITA", "REAR_TOUCH_MODE", 0);
                 configWrite(&resolutionConfig, "f2_res.ini", false);
             }
-
-            // Use FACE_BAR_MODE=1 by default on Vita
-            if (!configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode)) {
-                configSetInt(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", 1);
-                configWrite(&resolutionConfig, "f2_res.ini", false);
-            }
 #endif
-            configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode);
-            configGetInt(&resolutionConfig, "IFACE", "IFACE_BAR_WIDTH", &gInterfaceBarWidth);
-            configGetInt(&resolutionConfig, "IFACE", "IFACE_BAR_SIDE_ART", &gInterfaceSidePanelsImageId);
-            configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_SIDES_ORI", &gInterfaceSidePanelsExtendFromScreenEdge);
         }
         configFree(&resolutionConfig);
     }
 
-    if (_GNW95_init_window(width, height, fullscreen) == -1) {
+    if (_GNW95_init_window(width, height, fullscreen, scale) == -1) {
         return -1;
     }
 
@@ -272,19 +219,10 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
     _scr_size.right = width - 1;
     _scr_size.bottom = height - 1;
 
-    mmxSetEnabled(true);
-
-    if (bpp == 8) {
-        _mouse_blit_trans = NULL;
-        _scr_blit = _GNW95_ShowRect;
-        _zero_mem = _GNW95_zero_vid_mem;
-        _mouse_blit = _GNW95_ShowRect;
-    } else {
-        _zero_mem = NULL;
-        _mouse_blit = _GNW95_MouseShowRect16;
-        _mouse_blit_trans = _GNW95_MouseShowTransRect16;
-        _scr_blit = _GNW95_ShowRect16;
-    }
+    _mouse_blit_trans = nullptr;
+    _scr_blit = _GNW95_ShowRect;
+    _zero_mem = _GNW95_zero_vid_mem;
+    _mouse_blit = _GNW95_ShowRect;
 
     return 0;
 }
@@ -296,10 +234,9 @@ int _init_vesa_mode(int width, int height)
 }
 
 // 0x4CAEDC
-int _GNW95_init_window(int width, int height, bool fullscreen)
+int _GNW95_init_window(int width, int height, bool fullscreen, int scale)
 {
 #ifdef __vita__
-
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         return -1;
     }
@@ -308,21 +245,26 @@ int _GNW95_init_window(int width, int height, bool fullscreen)
     vita2d_set_vblank_wait(false);
 
     gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, fullscreen ? SDL_WINDOW_FULLSCREEN : 0);
-    if (gSdlWindow == NULL) {
+    if (gSdlWindow == nullptr) {
         return -1;
     }
 
-    vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW);
-    texBuffer = vita2d_create_empty_texture_format(width, height, SCE_GXM_TEXTURE_FORMAT_P8_ABGR);
-    palettedTexturePointer = (uint8_t*)(vita2d_texture_get_datap(texBuffer));
-    memset(palettedTexturePointer, 0, width * height * sizeof(uint8_t));
-    setRenderRect(width, height, fullscreen);
+    vitaFullscreen = fullscreen;
+
+    if (!createRenderer(width, height)) {
+        destroyRenderer();
+
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = nullptr;
+
+        return -1;
+    }
 
     float resolutionSpeedMod = static_cast<float>(height) / DEFAULT_HEIGHT;
 
     return 0;
 #else
-    if (gSdlWindow == NULL) {
+    if (gSdlWindow == nullptr) {
         SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
 
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -335,8 +277,8 @@ int _GNW95_init_window(int width, int height, bool fullscreen)
             windowFlags |= SDL_WINDOW_FULLSCREEN;
         }
 
-        gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, windowFlags);
-        if (gSdlWindow == NULL) {
+        gSdlWindow = SDL_CreateWindow(gProgramWindowTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width * scale, height * scale, windowFlags);
+        if (gSdlWindow == nullptr) {
             return -1;
         }
 
@@ -344,52 +286,20 @@ int _GNW95_init_window(int width, int height, bool fullscreen)
             destroyRenderer();
 
             SDL_DestroyWindow(gSdlWindow);
-            gSdlWindow = NULL;
+            gSdlWindow = nullptr;
 
             return -1;
         }
     }
-    return 0;
 #endif
-}
 
-// calculate shift for mask
-// 0x4CAF50
-int getShiftForBitMask(int mask)
-{
-    int shift = 0;
-
-    if ((mask & 0xFFFF0000) != 0) {
-        shift |= 16;
-        mask &= 0xFFFF0000;
-    }
-
-    if ((mask & 0xFF00FF00) != 0) {
-        shift |= 8;
-        mask &= 0xFF00FF00;
-    }
-
-    if ((mask & 0xF0F0F0F0) != 0) {
-        shift |= 4;
-        mask &= 0xF0F0F0F0;
-    }
-
-    if ((mask & 0xCCCCCCCC) != 0) {
-        shift |= 2;
-        mask &= 0xCCCCCCCC;
-    }
-
-    if ((mask & 0xAAAAAAAA) != 0) {
-        shift |= 1;
-    }
-
-    return shift;
+    return 0;
 }
 
 // 0x4CAF9C
 int directDrawInit(int width, int height, int bpp)
 {
-    if (gSdlSurface != NULL) {
+    if (gSdlSurface != nullptr) {
         unsigned char* palette = directDrawGetPalette();
         directDrawFree();
 
@@ -404,28 +314,18 @@ int directDrawInit(int width, int height, int bpp)
 
     gSdlSurface = SDL_CreateRGBSurface(0, width, height, bpp, 0, 0, 0, 0);
 
-    if (bpp == 8) {
-        SDL_Color colors[256];
-        for (int index = 0; index < 256; index++) {
-            colors[index].r = index;
-            colors[index].g = index;
-            colors[index].b = index;
-            colors[index].a = 255;
-        }
-
-        SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
-#ifdef __vita__
-        updateVita2dPalette(colors, 0, 256);
-#endif
-    } else {
-        gRedMask = gSdlSurface->format->Rmask;
-        gGreenMask = gSdlSurface->format->Gmask;
-        gBlueMask = gSdlSurface->format->Bmask;
-
-        gRedShift = gSdlSurface->format->Rshift;
-        gGreenShift = gSdlSurface->format->Gshift;
-        gBlueShift = gSdlSurface->format->Bshift;
+    SDL_Color colors[256];
+    for (int index = 0; index < 256; index++) {
+        colors[index].r = index;
+        colors[index].g = index;
+        colors[index].b = index;
+        colors[index].a = 255;
     }
+
+    SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
+#ifdef __vita__
+    updateVita2dPalette(colors, 0, 256);
+#endif
 
     return 0;
 }
@@ -433,16 +333,16 @@ int directDrawInit(int width, int height, int bpp)
 // 0x4CB1B0
 void directDrawFree()
 {
-    if (gSdlSurface != NULL) {
+    if (gSdlSurface != nullptr) {
         SDL_FreeSurface(gSdlSurface);
-        gSdlSurface = NULL;
+        gSdlSurface = nullptr;
     }
 }
 
 // 0x4CB310
 void directDrawSetPaletteInRange(unsigned char* palette, int start, int count)
 {
-    if (gSdlSurface != NULL && gSdlSurface->format->palette != NULL) {
+    if (gSdlSurface != nullptr && gSdlSurface->format->palette != nullptr) {
         SDL_Color colors[256];
 
         if (count != 0) {
@@ -457,42 +357,16 @@ void directDrawSetPaletteInRange(unsigned char* palette, int start, int count)
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, start, count);
 #ifdef __vita__
         updateVita2dPalette(colors, start, count);
-        renderVita2dFrame(gSdlSurface);
 #else
-        SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
+        SDL_BlitSurface(gSdlSurface, nullptr, gSdlTextureSurface, nullptr);
 #endif
-    } else {
-        for (int index = start; index < start + count; index++) {
-            unsigned short r = palette[0] << 2;
-            unsigned short g = palette[1] << 2;
-            unsigned short b = palette[2] << 2;
-            palette += 3;
-
-            r = gRedShift > 0 ? (r << gRedShift) : (r >> -gRedShift);
-            r &= gRedMask;
-
-            g = gGreenShift > 0 ? (g << gGreenShift) : (g >> -gGreenShift);
-            g &= gGreenMask;
-
-            b = gBlueShift > 0 ? (b << gBlueShift) : (b >> -gBlueShift);
-            b &= gBlueMask;
-
-            unsigned short rgb = r | g | b;
-            gSixteenBppPalette[index] = rgb;
-        }
-
-        windowRefreshAll(&_scr_size);
-    }
-
-    if (_update_palette_func != NULL) {
-        _update_palette_func();
     }
 }
 
 // 0x4CB568
 void directDrawSetPalette(unsigned char* palette)
 {
-    if (gSdlSurface != NULL && gSdlSurface->format->palette != NULL) {
+    if (gSdlSurface != nullptr && gSdlSurface->format->palette != nullptr) {
         SDL_Color colors[256];
 
         for (int index = 0; index < 256; index++) {
@@ -505,70 +379,30 @@ void directDrawSetPalette(unsigned char* palette)
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
 #ifdef __vita__
         updateVita2dPalette(colors, 0, 256);
-        renderVita2dFrame(gSdlSurface);
-#else    
-        SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
+#else
+        SDL_BlitSurface(gSdlSurface, nullptr, gSdlTextureSurface, nullptr);
 #endif
-    } else {
-        for (int index = 0; index < 256; index++) {
-            unsigned short r = palette[index * 3] << 2;
-            unsigned short g = palette[index * 3 + 1] << 2;
-            unsigned short b = palette[index * 3 + 2] << 2;
-
-            r = gRedShift > 0 ? (r << gRedShift) : (r >> -gRedShift);
-            r &= gRedMask;
-
-            g = gGreenShift > 0 ? (g << gGreenShift) : (g >> -gGreenShift);
-            g &= gGreenMask;
-
-            b = gBlueShift > 0 ? (b << gBlueShift) : (b >> -gBlueShift);
-            b &= gBlueMask;
-
-            unsigned short rgb = r | g | b;
-            gSixteenBppPalette[index] = rgb;
-        }
-
-        windowRefreshAll(&_scr_size);
-    }
-
-    if (_update_palette_func != NULL) {
-        _update_palette_func();
     }
 }
 
 // 0x4CB68C
 unsigned char* directDrawGetPalette()
 {
-    if (gSdlSurface != NULL && gSdlSurface->format->palette != NULL) {
+    // 0x6ACA24
+    static unsigned char palette[768];
+
+    if (gSdlSurface != nullptr && gSdlSurface->format->palette != nullptr) {
         SDL_Color* colors = gSdlSurface->format->palette->colors;
 
         for (int index = 0; index < 256; index++) {
             SDL_Color* color = &(colors[index]);
-            gLastVideoModePalette[index * 3] = color->r >> 2;
-            gLastVideoModePalette[index * 3 + 1] = color->g >> 2;
-            gLastVideoModePalette[index * 3 + 2] = color->b >> 2;
+            palette[index * 3] = color->r >> 2;
+            palette[index * 3 + 1] = color->g >> 2;
+            palette[index * 3 + 2] = color->b >> 2;
         }
-
-        return gLastVideoModePalette;
     }
 
-    int redShift = gRedShift + 2;
-    int greenShift = gGreenShift + 2;
-    int blueShift = gBlueShift + 2;
-
-    for (int index = 0; index < 256; index++) {
-        unsigned short rgb = gSixteenBppPalette[index];
-
-        unsigned short r = redShift > 0 ? ((rgb & gRedMask) >> redShift) : ((rgb & gRedMask) << -redShift);
-        unsigned short g = greenShift > 0 ? ((rgb & gGreenMask) >> greenShift) : ((rgb & gGreenMask) << -greenShift);
-        unsigned short b = blueShift > 0 ? ((rgb & gBlueMask) >> blueShift) : ((rgb & gBlueMask) << -blueShift);
-
-        gLastVideoModePalette[index * 3] = (r >> 2) & 0xFF;
-        gLastVideoModePalette[index * 3 + 1] = (g >> 2) & 0xFF;
-        gLastVideoModePalette[index * 3 + 2] = (b >> 2) & 0xFF;
-    }
-
-    return gLastVideoModePalette;
+    return palette;
 }
 
 // 0x4CB850
@@ -592,96 +426,6 @@ void _GNW95_ShowRect(unsigned char* src, int srcPitch, int a3, int srcX, int src
 #endif
 }
 
-// 0x4CB93C
-void _GNW95_MouseShowRect16(unsigned char* src, int srcPitch, int a3, int srcX, int srcY, int srcWidth, int srcHeight, int destX, int destY)
-{
-    if (!gProgramIsActive) {
-        return;
-    }
-
-    unsigned char* dest = (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + 2 * destX;
-
-    src += srcPitch * srcY + srcX;
-
-    for (int y = 0; y < srcHeight; y++) {
-        unsigned short* destPtr = (unsigned short*)dest;
-        unsigned char* srcPtr = src;
-        for (int x = 0; x < srcWidth; x++) {
-            *destPtr = gSixteenBppPalette[*srcPtr];
-            destPtr++;
-            srcPtr++;
-        }
-
-        dest += gSdlSurface->pitch;
-        src += srcPitch;
-    }
-
-#ifdef __vita__
-    renderVita2dFrame(gSdlSurface);
-#else
-
-    SDL_Rect srcRect;
-    srcRect.x = destX;
-    srcRect.y = destY;
-    srcRect.w = srcWidth;
-    srcRect.h = srcHeight;
-
-    SDL_Rect destRect;
-    destRect.x = destX;
-    destRect.y = destY;
-    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
-#endif
-}
-
-// 0x4CBA44
-void _GNW95_ShowRect16(unsigned char* src, int srcPitch, int a3, int srcX, int srcY, int srcWidth, int srcHeight, int destX, int destY)
-{
-    _GNW95_MouseShowRect16(src, srcPitch, a3, srcX, srcY, srcWidth, srcHeight, destX, destY);
-}
-
-// 0x4CBAB0
-void _GNW95_MouseShowTransRect16(unsigned char* src, int srcPitch, int a3, int srcX, int srcY, int srcWidth, int srcHeight, int destX, int destY, unsigned char keyColor)
-{
-    if (!gProgramIsActive) {
-        return;
-    }
-
-    unsigned char* dest = (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + 2 * destX;
-
-    src += srcPitch * srcY + srcX;
-
-    for (int y = 0; y < srcHeight; y++) {
-        unsigned short* destPtr = (unsigned short*)dest;
-        unsigned char* srcPtr = src;
-        for (int x = 0; x < srcWidth; x++) {
-            if (*srcPtr != keyColor) {
-                *destPtr = gSixteenBppPalette[*srcPtr];
-            }
-            destPtr++;
-            srcPtr++;
-        }
-
-        dest += gSdlSurface->pitch;
-        src += srcPitch;
-    }
-
-#ifdef __vita__
-    renderVita2dFrame(gSdlSurface);
-#else
-
-    SDL_Rect srcRect;
-    srcRect.x = destX;
-    srcRect.y = destY;
-    srcRect.w = srcWidth;
-    srcRect.h = srcHeight;
-
-    SDL_Rect destRect;
-    destRect.x = destX;
-    destRect.y = destY;
-    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
-#endif
-}
-
 // Clears drawing surface.
 //
 // 0x4CBBC8
@@ -691,20 +435,14 @@ void _GNW95_zero_vid_mem()
         return;
     }
 
-    SDL_LockSurface(gSdlSurface);
-
     unsigned char* surface = (unsigned char*)gSdlSurface->pixels;
     for (int y = 0; y < gSdlSurface->h; y++) {
         memset(surface, 0, gSdlSurface->w);
         surface += gSdlSurface->pitch;
     }
 
-    SDL_UnlockSurface(gSdlSurface);
-
-#ifdef __vita__
-    renderVita2dFrame(gSdlSurface);
-#else
-    SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
+#ifndef __vita__
+    SDL_BlitSurface(gSdlSurface, nullptr, gSdlTextureSurface, nullptr);
 #endif
 }
 
@@ -732,8 +470,17 @@ int screenGetVisibleHeight()
 
 static bool createRenderer(int width, int height)
 {
+#ifdef __vita__
+    vita2d_texture_set_alloc_memblock_type(SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW);
+    texBuffer = vita2d_create_empty_texture_format(width, height, SCE_GXM_TEXTURE_FORMAT_P8_ABGR);
+    palettedTexturePointer = (uint8_t*)(vita2d_texture_get_datap(texBuffer));
+    memset(palettedTexturePointer, 0, width * height * sizeof(uint8_t));
+    setRenderRect(width, height, vitaFullscreen);
+
+    return true;
+#else
     gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 0);
-    if (gSdlRenderer == NULL) {
+    if (gSdlRenderer == nullptr) {
         return false;
     }
 
@@ -742,39 +489,49 @@ static bool createRenderer(int width, int height)
     }
 
     gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, width, height);
-    if (gSdlTexture == NULL) {
+    if (gSdlTexture == nullptr) {
         return false;
     }
 
     Uint32 format;
-    if (SDL_QueryTexture(gSdlTexture, &format, NULL, NULL, NULL) != 0) {
+    if (SDL_QueryTexture(gSdlTexture, &format, nullptr, nullptr, nullptr) != 0) {
         return false;
     }
 
     gSdlTextureSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, SDL_BITSPERPIXEL(format), format);
-    if (gSdlTextureSurface == NULL) {
+    if (gSdlTextureSurface == nullptr) {
         return false;
     }
 
     return true;
+#endif
 }
 
 static void destroyRenderer()
 {
-    if (gSdlTextureSurface != NULL) {
+#ifdef __vita__
+    vita2d_wait_rendering_done();
+
+    if (texBuffer != nullptr) {
+        vita2d_free_texture(texBuffer);
+        texBuffer = nullptr;
+    }
+#else
+    if (gSdlTextureSurface != nullptr) {
         SDL_FreeSurface(gSdlTextureSurface);
-        gSdlTextureSurface = NULL;
+        gSdlTextureSurface = nullptr;
     }
 
-    if (gSdlTexture != NULL) {
+    if (gSdlTexture != nullptr) {
         SDL_DestroyTexture(gSdlTexture);
-        gSdlTexture = NULL;
+        gSdlTexture = nullptr;
     }
 
-    if (gSdlRenderer != NULL) {
+    if (gSdlRenderer != nullptr) {
         SDL_DestroyRenderer(gSdlRenderer);
-        gSdlRenderer = NULL;
+        gSdlRenderer = nullptr;
     }
+#endif
 }
 
 void handleWindowSizeChanged()
@@ -785,10 +542,78 @@ void handleWindowSizeChanged()
 
 void renderPresent()
 {
-    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
+#ifdef __vita__
+    renderVita2dFrame(gSdlSurface);
+#else
+    SDL_UpdateTexture(gSdlTexture, nullptr, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
     SDL_RenderClear(gSdlRenderer);
-    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+    SDL_RenderCopy(gSdlRenderer, gSdlTexture, nullptr, nullptr);
     SDL_RenderPresent(gSdlRenderer);
+#endif
 }
+
+#ifdef __vita__
+void renderVita2dFrame(SDL_Surface *surface)
+{
+    memcpy(palettedTexturePointer, surface->pixels, surface->w * surface->h * sizeof(uint8_t));
+    vita2d_start_drawing();
+    vita2d_draw_rectangle(0, 0, VITA_FULLSCREEN_WIDTH, VITA_FULLSCREEN_HEIGHT, 0xff000000);
+    vita2d_draw_texture_scale(texBuffer, renderRect.x, renderRect.y, (float)(renderRect.w) / surface->w, (float)(renderRect.h) / surface->h);
+    vita2d_end_drawing();
+    vita2d_swap_buffers();
+}
+
+void updateVita2dPalette(SDL_Color *colors, int start, int count)
+{
+    uint32_t palette32Bit[count];
+
+    if (vitaPaletteSurface == nullptr) {
+        vitaPaletteSurface = SDL_CreateRGBSurface(0, 1, 1, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
+    }
+
+    for ( size_t i = 0; i < count; ++i ) {
+        palette32Bit[i] = SDL_MapRGBA(vitaPaletteSurface->format, colors[i].r, colors[i].g, colors[i].b, colors[i].a);
+    }
+
+    memcpy(vita2d_texture_get_palette(texBuffer) + start * sizeof(uint32_t), palette32Bit, sizeof(uint32_t) * count);
+}
+
+void setRenderRect(int width, int height, bool fullscreen)
+{
+    renderRect.x = 0;
+    renderRect.y = 0;
+    renderRect.w = width;
+    renderRect.h = height;
+    vita2d_texture_set_filters(texBuffer, SCE_GXM_TEXTURE_FILTER_POINT, SCE_GXM_TEXTURE_FILTER_POINT);
+
+    if (width != VITA_FULLSCREEN_WIDTH || height != VITA_FULLSCREEN_HEIGHT)	{
+        if (fullscreen) {
+            //resize to fullscreen
+            if ((static_cast<float>(VITA_FULLSCREEN_WIDTH) / VITA_FULLSCREEN_HEIGHT) >= (static_cast<float>(width) / height)) {
+                float scale = static_cast<float>(VITA_FULLSCREEN_HEIGHT) / height;
+                renderRect.w = width * scale;
+                renderRect.h = VITA_FULLSCREEN_HEIGHT;
+                renderRect.x = (VITA_FULLSCREEN_WIDTH - renderRect.w) / 2;
+            } else {
+                float scale = static_cast<float>(VITA_FULLSCREEN_WIDTH) / width;
+                renderRect.w = VITA_FULLSCREEN_WIDTH;
+                renderRect.h = height * scale;
+                renderRect.y = (VITA_FULLSCREEN_HEIGHT - renderRect.h) / 2;
+            }
+
+            vita2d_texture_set_filters(texBuffer, SCE_GXM_TEXTURE_FILTER_LINEAR, SCE_GXM_TEXTURE_FILTER_LINEAR);
+        } else {
+            //center game area
+            renderRect.x = (VITA_FULLSCREEN_WIDTH - width) / 2;
+            renderRect.y = (VITA_FULLSCREEN_HEIGHT - height) / 2;
+        }
+    }
+}
+
+SDL_Rect getRenderRect()
+{
+    return renderRect;
+}
+#endif
 
 } // namespace fallout
