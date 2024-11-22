@@ -6,7 +6,7 @@
 
 https://github.com/Northfear/fallout2-ce-vita/commit/50431b1e27f200e066c414136122b5a8d9c90a1f
 
-此后版本发布同步上游代码，包括崩溃等问题同步优化
+此后版本发布同步上游代码，包括崩溃等问题同步优化.
 
 ## Install
 Download fallout2-ce.vpk file and install it to your PS Vita.
