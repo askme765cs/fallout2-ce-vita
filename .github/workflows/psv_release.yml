@@ -19,27 +19,10 @@ jobs:
 
   build-psv:
     name: Make (PS Vita)
-    runs-on: ubuntu-latest
+    runs-on: gnuton/vitasdk-docker:20240612
     timeout-minutes: 30
     steps:
     - uses: actions/checkout@v2
-    - name: Install dependencies
-      run: |
-        sudo apt-get -y update
-        sudo apt-get -y install libgcc1 gettext
-
-    - name: Setup Vita SDK
-      continue-on-error: true
-      run: |
-        git clone --depth 1 https://github.com/vitasdk/vdpm
-        cd vdpm
-        export PATH="$VITASDK/bin:$PATH"
-        ./bootstrap-vitasdk.sh
-        ./install-all.sh
-        rm -rf ~/.vitasdk-cache
-      env:
-        VITASDK: /usr/local/vitasdk
-
     - name: Build
       run: |
         export PATH="$VITASDK/bin:$PATH"
