@@ -1,4 +1,11 @@
-# Fallout 2 Community Edition port for PS Vita
+# Fallout 2 Community Edition port for PS Vita With TrueType Font Support
+
+## TrueType与中文支持
+归功于https://github.com/sonilyan/fallout2-ce项目中对TrueType的支持Commit，我们拥有了可以在psv运行的中文版辐射2
+https://github.com/Northfear/fallout2-ce-vita/commit/50431b1e27f200e066c414136122b5a8d9c90a1f
+
+运行效果：
+
 
 ## Install
 Download fallout2-ce.vpk file and install it to your PS Vita.
@@ -14,7 +21,9 @@ Copy ```master.dat```, ```critter.dat```, ```patch000.dat```, ```data``` and ```
 - SDL2
 
 ### Build
+The lastest vitasdk seems to break the build,so we need to use old version in docker:)
 ```
+docker  run -v "$PWD:/build/git" -it --rm  gnuton/vitasdk-docker:20240612
 mkdir build && cd build
 cmake .. -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=None
 make
