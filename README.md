@@ -4,9 +4,6 @@
 归功于https://github.com/sonilyan/fallout2-ce项目中对TrueType的支持Commit，我们拥有了可以在psv运行的中文版辐射2
 https://github.com/Northfear/fallout2-ce-vita/commit/50431b1e27f200e066c414136122b5a8d9c90a1f
 
-运行效果：
-
-
 ## Install
 Download fallout2-ce.vpk file and install it to your PS Vita.
 
