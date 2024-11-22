@@ -419,6 +419,8 @@ int showDialogBox(const char* title, const char** body, int bodyLength, int x, i
     int nextY = _ytable[dialogType];
     int maxY = _ytable[dialogType] + _dblines[dialogType] * fontGetLineHeight();
 
+    int v23 = _ytable[dialogType];
+
     if ((flags & DIALOG_BOX_NO_VERTICAL_CENTERING) == 0) {
         //int v41 = _dblines[dialogType] * fontGetLineHeight() / 2 + v23;
         //v23 = v41 - ((bodyLength + 1) * fontGetLineHeight() / 2);

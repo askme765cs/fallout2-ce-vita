@@ -39,9 +39,6 @@ static char libime_initval[8] = { 1 };
 SceImeCaret caret_rev;
 int ime_active = 0;
 
-SDL_Rect renderRect;
-SDL_Surface *vitaPaletteSurface = NULL;
-
 #if !defined(SCE_IME_LANGUAGE_ENGLISH_US)
 #define SCE_IME_LANGUAGE_ENGLISH_US SCE_IME_LANGUAGE_ENGLISH
 #endif
@@ -158,33 +155,15 @@ static unsigned int gTickerLastTimestamp;
 #define SCE_IME_LANGUAGE_ENGLISH_US SCE_IME_LANGUAGE_ENGLISH
 #endif
 
-// used to convert user-friendly pointer speed values into more useable ones
-const float CONTROLLER_SPEED_MOD = 0.000004f;
-// bigger value correndsponds to faster pointer movement speed with bigger stick axis values
-const float CONTROLLER_AXIS_SPEEDUP = 1.03f;
-
 enum
 {
     CONTROLLER_L_DEADZONE = 3000,
     CONTROLLER_R_DEADZONE = 25000
 };
 
-int16_t controllerLeftXAxis = 0;
-int16_t controllerLeftYAxis = 0;
-int16_t controllerRightXAxis = 0;
-int16_t controllerRightYAxis = 0;
-uint32_t lastControllerTime = 0;
-int32_t mapXScroll = 0;
-int32_t mapYScroll = 0;
-float cursorSpeedup = 1.0f;
-float resolutionSpeedMod = 1.0f;
 float controllerLeftoverX = 0;
 float controllerLeftoverY = 0;
 
-SceWChar16 libime_out[SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1];
-static char libime_initval[8] = { 1 };
-SceImeCaret caret_rev;
-int ime_active = 0;
 #endif
 
 // 0x4C8A70
