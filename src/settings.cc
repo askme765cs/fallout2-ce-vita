@@ -233,6 +233,7 @@ void initSettingsRegistry(bool isMapper)
 #define SECT vita
     SETTING_P(front_touch_mode, clamp(0, 2));
     SETTING_P(rear_touch_mode, clamp(0, 2));
+    SETTING(touch_port_swap);
 #undef SECT
 
     if (isMapper) {

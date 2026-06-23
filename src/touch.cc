@@ -44,6 +44,19 @@ static bool gUsePanMode = false;
 #ifdef __vita__
 TouchpadMode frontTouchpadMode = TouchpadMode::kTouchDirect;
 TouchpadMode rearTouchpadMode = TouchpadMode::kTouchDisabled;
+bool vitaTouchPortSwap = false;
+#endif
+
+#ifdef __vita__
+static SDL_TouchID get_front_touch_id()
+{
+    return vitaTouchPortSwap ? 1 : 0;
+}
+
+static SDL_TouchID get_rear_touch_id()
+{
+    return vitaTouchPortSwap ? 0 : 1;
+}
 #endif
 
 static int find_touch(SDL_TouchID touchId, SDL_FingerID fingerId)
@@ -97,8 +110,8 @@ static TouchLocation touch_get_current_location_centroid(int* indexes, int lengt
 void touch_handle_start(SDL_TouchFingerEvent* event)
 {
 #ifdef __vita__
-    if ((event->touchId == 0 && frontTouchpadMode == TouchpadMode::kTouchDisabled)
-        || (event->touchId == 1 && rearTouchpadMode == TouchpadMode::kTouchDisabled))
+    if ((event->touchId == get_front_touch_id() && frontTouchpadMode == TouchpadMode::kTouchDisabled)
+        || (event->touchId == get_rear_touch_id() && rearTouchpadMode == TouchpadMode::kTouchDisabled))
     {
         return;
     }
@@ -293,7 +306,7 @@ void touch_process_gesture()
 
 #ifdef __vita__
             bool handledVitaDirectTouch = false;
-            if (touches[active[0]].touchId == 0 && frontTouchpadMode == TouchpadMode::kTouchDirect)
+            if (touches[active[0]].touchId == get_front_touch_id() && frontTouchpadMode == TouchpadMode::kTouchDirect)
             {
                 SDL_Rect rect = getRenderRect();
                 float width = static_cast<float>(screenGetWidth());

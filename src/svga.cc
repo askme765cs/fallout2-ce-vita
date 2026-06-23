@@ -139,6 +139,7 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
 
     frontTouchpadMode = static_cast<TouchpadMode>(settings.vita.front_touch_mode);
     rearTouchpadMode = static_cast<TouchpadMode>(settings.vita.rear_touch_mode);
+    vitaTouchPortSwap = settings.vita.touch_port_swap;
 #endif
 
     if (_GNW95_init_window(width, height, !settings.screen.windowed, scale) == -1) {

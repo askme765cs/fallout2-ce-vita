@@ -62,6 +62,7 @@ enum
 
 extern TouchpadMode frontTouchpadMode;
 extern TouchpadMode rearTouchpadMode;
+extern bool vitaTouchPortSwap;
 
 void updateVita2dPalette(SDL_Color* colors, int start, int count);
 void renderVita2dFrame(SDL_Surface* surface);

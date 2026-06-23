@@ -20,7 +20,11 @@ static int mouseWindowMappingWindowWidth = 0;
 static int mouseWindowMappingWindowHeight = 0;
 static int mouseWindowMappingLogicalWidth = 0;
 static int mouseWindowMappingLogicalHeight = 0;
+#ifdef __vita__
+static bool mouseRelativeMode = true;
+#else
 static bool mouseRelativeMode = false;
+#endif
 
 static void mouseDeviceMapWindowToLogicalPosition(int* x, int* y);
 
@@ -166,6 +170,10 @@ bool keyboardDeviceGetData(KeyboardData* keyboardData)
 bool mouseDeviceInit()
 {
 #ifdef __vita__
+    // Vita controller sticks report deltas synthesized by input.cc. Treat them
+    // as relative mouse movement; absolute mode would pin small deltas to the
+    // top-left corner.
+    mouseRelativeMode = true;
     return true;
 #endif
     mouseDeviceRefreshWindowMapping();
