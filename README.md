@@ -1,8 +1,88 @@
 # Fallout 2 Community Engine
 
+[English](README.md) | [中文](README.zh-CN.md)
+
+## Fallout 2 CE Vita Chinese Port
+
+This branch is a PS Vita + Chinese language port of Fallout 2 Community Engine. It adds Vita build packaging, Vita controls/touch input, Chinese text rendering through TrueType/FreeType fonts, GBK text handling, and Vita IME support for Chinese input.
+
+### Acknowledgements
+
+- **PS Vita support** is based on [Northfear/fallout2-ce-vita](https://github.com/Northfear/fallout2-ce-vita).
+- **Chinese / TrueType font support** is based on [sonilyan/fallout2-ce](https://github.com/sonilyan/fallout2-ce).
+
+This fork follows the currently active upstream fork at [fallout2-ce/fallout2-ce](https://github.com/fallout2-ce/fallout2-ce) for future engine updates and fixes.
+
+### PS Vita Installation
+
+Download or build `fallout2-ce.vpk`, then install it on your PS Vita.
+
+Copy the required Fallout 2 game assets from your installed Fallout 2 folder into:
+
+```text
+ux0:data/fallout2/
+```
+
+Required files and folders:
+
+- `master.dat`
+- `critter.dat`
+- `patch000.dat`
+- `data`
+- `sound`
+- `fallout2.cfg` if you use a localized/non-English installation, or make sure the `language` setting is correct in `fallout2.cfg`.
+
+[FdFix](https://github.com/TheOfficialFloW/FdFix) is recommended for proper suspend/resume behavior on real hardware.
+
+### PS Vita Build
+
+Prerequisites:
+
+- VitaSDK
+- SDL2 for Vita
+
+This repository uses the Vita toolchain file in `vita/vita.cmake`.
+
+```console
+$ mkdir -p build_vita
+$ cd build_vita
+$ cmake .. -DCMAKE_TOOLCHAIN_FILE=../vita/vita.cmake -DCMAKE_BUILD_TYPE=None -DVITA=ON
+$ make -j4
+```
+
+Build output:
+
+- `build_vita/fallout2-ce.self`
+- `build_vita/fallout2-ce.vpk`
+
+### PS Vita Controls
+
+- Left analog stick - Cursor movement
+- Right analog stick - Map scrolling
+- Cross - Left mouse button
+- Circle - Right mouse button
+- Square - Skill list/selection
+- Triangle - Inventory
+- D-Pad Up - Character screen
+- D-Pad Down - Pip-Boy
+- D-Pad Left - Start combat
+- D-Pad Right - End turn
+- L1 - Toggle active item
+- R1 (hold) - Cursor movement speedup
+- SELECT - Esc
+- START - On-screen keyboard / IME
+- Circle + L1 - Quick save
+- Circle + R1 - Quick load
+
+### Touch Controls
+
+The Vita front touchscreen can be used for touch input. Touch behavior can be configured in the game configuration depending on the build and config files used by your installation.
+
+## Upstream Project
+
 Fallout 2 Community Engine is a fully working re-implementation of the Fallout 2 engine, optimized for a hassle-free experience on multiple platforms.  It provides high resolution support, quality-of-life improvements, and dozens of bug fixes.
 
-This is a fork of the original Fallout2: CE project, which is no longer getting regular updates.
+This is a fork of the original Fallout2: CE project, with updates taken from the active [fallout2-ce/fallout2-ce](https://github.com/fallout2-ce/fallout2-ce) fork.
 
 Popular Fallout 2 total conversion mods are partially supported. Original versions of Nevada and Sonora (that do not rely on extended features provided by Sfall) work. [Fallout 2 Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) is supported (in Beta). [Fallout Et Tu](https://github.com/rotators/Fo1in2) and [Olympus 2207](https://olympus2207.com) are not yet supported. Other mods (particularly Resurrection and Yesterday) are not tested.
 
