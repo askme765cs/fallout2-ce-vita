@@ -2,6 +2,8 @@
 
 #include <vector>
 
+#include <stdint.h>
+
 #include "debug.h"
 #include "game_sound.h"
 #include "sound.h"
@@ -35,6 +37,33 @@ static int scriptSoundGetBaseVolume(int mode)
     default:
         return soundEffectsGetVolume();
     }
+}
+
+static bool scriptSoundPointerLooksPoisoned(const char* ptr)
+{
+    uintptr_t value = reinterpret_cast<uintptr_t>(ptr);
+    if (value < 0x10000) {
+        return true;
+    }
+
+    int d7Bytes = 0;
+    for (int index = 0; index < 4; index++) {
+        if (((value >> (index * 8)) & 0xFF) == 0xD7) {
+            d7Bytes++;
+        }
+    }
+
+    if (d7Bytes >= 2) {
+        return true;
+    }
+
+#ifdef __vita__
+    if (value >= 0xD0000000) {
+        return true;
+    }
+#endif
+
+    return false;
 }
 
 static int scriptSoundClampVolume(int volume)
@@ -116,7 +145,11 @@ static void scriptSoundStopTrackedIndex(int index, bool restoreBackground)
 
 int scriptSoundPlay(const char* path, int mode)
 {
-    if (mode < 0 || path == nullptr || path[0] == '\0') {
+    if (mode < 0 || path == nullptr || scriptSoundPointerLooksPoisoned(path)) {
+        return 0;
+    }
+
+    if (path[0] == '\0') {
         return 0;
     }
 
