@@ -170,6 +170,12 @@ struct MapperSettings {
     std::string dev_path;
 };
 
+struct VitaSettings {
+    // 0 - disabled, 1 - direct, 2 - trackpad.
+    int front_touch_mode = 1;
+    int rear_touch_mode = 0;
+};
+
 struct Settings {
     SystemSettings system;
     ScreenSettings screen;
@@ -179,6 +185,7 @@ struct Settings {
     DebugSettings debug;
     QolSettings qol;
     MapperSettings mapper;
+    VitaSettings vita;
 };
 
 extern Settings settings;

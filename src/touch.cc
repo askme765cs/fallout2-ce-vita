@@ -46,10 +46,10 @@ TouchpadMode frontTouchpadMode = TouchpadMode::kTouchDirect;
 TouchpadMode rearTouchpadMode = TouchpadMode::kTouchDisabled;
 #endif
 
-static int find_touch(SDL_FingerID fingerId)
+static int find_touch(SDL_TouchID touchId, SDL_FingerID fingerId)
 {
     for (int index = 0; index < MAX_TOUCHES; index++) {
-        if (touches[index].fingerId == fingerId) {
+        if (touches[index].touchId == touchId && touches[index].fingerId == fingerId) {
             return index;
         }
     }
@@ -107,7 +107,7 @@ void touch_handle_start(SDL_TouchFingerEvent* event)
     // On iOS `fingerId` is an address of underlying `UITouch` object. When
     // `touchesBegan` is called this object might be reused, but with
     // incresed `tapCount` (which is ignored in this implementation).
-    int index = find_touch(event->fingerId);
+    int index = find_touch(event->touchId, event->fingerId);
     if (index == -1) {
         index = find_unused_touch_index();
     }
@@ -128,7 +128,7 @@ void touch_handle_start(SDL_TouchFingerEvent* event)
 
 void touch_handle_move(SDL_TouchFingerEvent* event)
 {
-    int index = find_touch(event->fingerId);
+    int index = find_touch(event->touchId, event->fingerId);
     if (index != -1) {
         Touch* touch = &(touches[index]);
         touch->currentTimestamp = event->timestamp;
@@ -140,7 +140,7 @@ void touch_handle_move(SDL_TouchFingerEvent* event)
 
 void touch_handle_end(SDL_TouchFingerEvent* event)
 {
-    int index = find_touch(event->fingerId);
+    int index = find_touch(event->touchId, event->fingerId);
     if (index != -1) {
         Touch* touch = &(touches[index]);
         touch->currentTimestamp = event->timestamp;
@@ -292,6 +292,7 @@ void touch_process_gesture()
             }
 
 #ifdef __vita__
+            bool handledVitaDirectTouch = false;
             if (touches[active[0]].touchId == 0 && frontTouchpadMode == TouchpadMode::kTouchDirect)
             {
                 SDL_Rect rect = getRenderRect();
@@ -306,10 +307,15 @@ void touch_process_gesture()
                 mouseHideCursor();
                 _mouse_set_position(touchPosX, touchPosY);
                 mouseShowCursor();
+                handledVitaDirectTouch = true;
             }
 #endif
 
+#ifdef __vita__
+            if (!handledVitaDirectTouch && gUseTouchscreenMode) {
+#else
             if (gUseTouchscreenMode) {
+#endif
                 mouseHideCursor();
                 _mouse_set_position(currentCentroid.x, currentCentroid.y);
                 mouseShowCursor();

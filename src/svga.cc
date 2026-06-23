@@ -129,6 +129,18 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
         height /= scale;
     }
 
+#ifdef __vita__
+    if (width < DEFAULT_WIDTH) {
+        width = DEFAULT_WIDTH;
+    }
+    if (height < DEFAULT_HEIGHT) {
+        height = DEFAULT_HEIGHT;
+    }
+
+    frontTouchpadMode = static_cast<TouchpadMode>(settings.vita.front_touch_mode);
+    rearTouchpadMode = static_cast<TouchpadMode>(settings.vita.rear_touch_mode);
+#endif
+
     if (_GNW95_init_window(width, height, !settings.screen.windowed, scale) == -1) {
         return -1;
     }

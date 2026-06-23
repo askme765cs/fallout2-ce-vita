@@ -230,6 +230,11 @@ void initSettingsRegistry(bool isMapper)
     SETTING(party_loot_and_barter);
 #undef SECT
 
+#define SECT vita
+    SETTING_P(front_touch_mode, clamp(0, 2));
+    SETTING_P(rear_touch_mode, clamp(0, 2));
+#undef SECT
+
     if (isMapper) {
 #define SECT mapper
         SETTING(override_librarian);
