@@ -51,7 +51,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Development Build
+          name: Fallout2-CE Vita CN Continuous Build
           prerelease: true
           make_latest: true
           files: build_vita/fallout2-ce.vpk
