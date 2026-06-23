@@ -585,19 +585,27 @@ static void FtFontDrawImpl(unsigned char* buf, const char* string, int length, i
             break;
         }
 
-        ptr += (current->maxHeight - g.top - maxTop) * pitch;
+        int yOffset = current->maxHeight - g.top - maxTop;
+        if (yOffset < 0) {
+            yOffset = 0;
+        }
 
+        unsigned char* glyphOrigin = ptr + yOffset * pitch;
         unsigned char* glyphDataPtr = g.buffer;
 
-        for (int y = 0; y < g.rows && y < current->maxHeight; y++) {
+        int maxRows = g.rows;
+        if (maxRows > current->maxHeight - yOffset) {
+            maxRows = current->maxHeight - yOffset;
+        }
+
+        for (int y = 0; y < maxRows; y++) {
+            unsigned char* rowPtr = glyphOrigin + y * pitch;
             for (int x = 0; x < g.width; x++) {
                 unsigned char byte = *glyphDataPtr++;
                 byte /= 26;
 
-                *ptr++ = palette[(byte << 8) + *ptr];
+                *rowPtr++ = palette[(byte << 8) + *rowPtr];
             }
-
-            ptr += pitch - g.width;
         }
 
         ptr = end;

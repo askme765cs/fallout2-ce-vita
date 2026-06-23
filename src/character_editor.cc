@@ -2974,6 +2974,7 @@ static void characterEditorDrawSkills(int a1)
 
     fontSetCurrent(101);
 
+    const int skillRowHeight = 11;
     y = 27;
     for (i = 0; i < SKILL_COUNT; i++) {
         if (i == selectedSkill) {
@@ -2998,11 +2999,11 @@ static void characterEditorDrawSkills(int a1)
 
         fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 573, valueString, 640, 640, color);
 
-        y += 10 + 1;
+        y += skillRowHeight;
     }
 
     if (!gCharacterEditorIsCreationMode) {
-        y = gCharacterEditorCurrentSkill * (fontGetLineHeight() + 1);
+        y = gCharacterEditorCurrentSkill * skillRowHeight;
         gCharacterEditorSkillValueAdjustmentSliderY = y + 27;
 
         blitBufferToBufferTrans(

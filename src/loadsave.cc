@@ -198,6 +198,8 @@ static const int gLoadSaveFrmIds[LOAD_SAVE_FRM_COUNT] = {
 // Control max number of save/load pages
 const int saveLoadPages = 10;
 constexpr int slotsPerPage = 10;
+constexpr int kLoadSaveSlotLineHeight = 10;
+constexpr int kLoadSaveSlotRowHeight = 3 * kLoadSaveSlotLineHeight + 4;
 const int saveLoadTotalSlots = saveLoadPages * slotsPerPage;
 constexpr int kLoadSaveActionDone = 500;
 
@@ -677,7 +679,7 @@ int lsgSaveGame(int mode)
                 }
 
                 // Calculate the clicked slot, adjusting for pagination
-                int relativeSlot = (mouseY - 79) / (3 * fontGetLineHeight() + 4);
+                int relativeSlot = (mouseY - 79) / kLoadSaveSlotRowHeight;
                 if (relativeSlot < 0) {
                     relativeSlot = 0;
                 } else if (relativeSlot > 9) {
@@ -1321,7 +1323,7 @@ int lsgLoadGame(int mode)
                 }
 
                 // Calculate the clicked slot, adjusting for pagination
-                int relativeSlot = (mouseY - 79) / (3 * fontGetLineHeight() + 4);
+                int relativeSlot = (mouseY - 79) / kLoadSaveSlotRowHeight;
                 if (relativeSlot < 0) {
                     relativeSlot = 0;
                 } else if (relativeSlot > 9) {
@@ -2009,6 +2011,7 @@ static int lsgLoadGameInSlot(int slot)
     for (int index = 0; index < LOAD_SAVE_HANDLER_COUNT; index += 1) {
         long pos = fileTell(_flptr);
         LoadGameHandler* handler = _master_load_list[index];
+        debugPrint("LOADSAVE: Begin load function #%d.\n", index);
         if (handler(_flptr) == -1) {
             debugPrint("\nLOADSAVE: ** Error reading load function #%d data! **\n", index);
             int v12 = fileTell(_flptr);
@@ -2318,7 +2321,7 @@ static void _ShowSlotList(int windowType)
         snprintf(_str, sizeof(_str), "[   %s %.2d:   ]", text, index + 1);
         fontDrawText(gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * y + 55, _str, LS_WINDOW_WIDTH, LS_WINDOW_WIDTH, color);
 
-        y += fontGetLineHeight();
+        y += kLoadSaveSlotLineHeight;
         switch (_LSstatus[index]) {
         case SLOT_STATE_OCCUPIED:
             strcpy(_str, _LSData[index].description);
@@ -2343,7 +2346,7 @@ static void _ShowSlotList(int windowType)
         }
 
         fontDrawText(gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * y + 55, _str, LS_WINDOW_WIDTH, LS_WINDOW_WIDTH, color);
-        y += 2 * fontGetLineHeight() + 4;
+        y += 2 * kLoadSaveSlotLineHeight + 4;
     }
 
     // Pagination navigation
@@ -2736,7 +2739,10 @@ static int _DummyFunc(File* stream)
 // 0x47F490
 static int _PrepLoad(File* stream)
 {
+    int oldFont = fontGetCurrent();
+    fontSetCurrent(0);
     gameReset();
+    fontSetCurrent(oldFont);
     gameMouseSetCursor(MOUSE_CURSOR_WAIT_PLANET);
     gMapHeader.name[0] = '\0';
     gameTimeSetTime(_LSData[_slot_cursor].gameTime);
