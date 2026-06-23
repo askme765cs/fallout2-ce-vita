@@ -32,8 +32,10 @@ jobs:
             cd /build/git/sourcedir
             cmake \
               -B build_vita \
+              -Wno-dev \
               -D CMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake \
               -D CMAKE_BUILD_TYPE=None \
+              -D CMAKE_POLICY_VERSION_MINIMUM=3.5 \
               -D VITA=ON
             cmake --build build_vita -- -j4
 
