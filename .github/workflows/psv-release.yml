@@ -52,7 +52,7 @@ jobs:
         with:
           tag_name: latest
           name: Fallout2-CE Vita CN Continuous Build
-          prerelease: true
+          prerelease: false
           make_latest: true
           files: build_vita/fallout2-ce.vpk
 
