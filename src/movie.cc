@@ -219,6 +219,18 @@ static SDL_Rect movieComputeDirectRect(int srcWidth, int srcHeight)
     int availableHeight = _movieH;
     bool centered = (gMovieFlags & MOVIE_EXTENDED_FLAG_CENTERED) != 0;
 
+#ifdef __vita__
+    // Real Vita is unreliable with the SDL streaming texture used for scaled
+    // movie overlays. Keep movies at their native size and blit into the main
+    // paletted surface like the original Vita port did.
+    return {
+        centered ? availableX + (availableWidth - srcWidth) / 2 : availableX,
+        centered ? availableY + (availableHeight - srcHeight) / 2 : availableY,
+        srcWidth,
+        srcHeight,
+    };
+#endif
+
     if (!settings.ui.movie_aspect_fit) {
         if (!centered) {
             return {

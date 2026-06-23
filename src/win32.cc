@@ -106,7 +106,9 @@ int main(int argc, char* argv[])
 #endif
 
 #ifdef __vita__
-    chdir("ux0:data/fallout2/");
+    if (chdir("ux0:data/Fallout2/") != 0) {
+        chdir("ux0:data/fallout2/");
+    }
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     sceSysmoduleLoadModule(SCE_SYSMODULE_IME);
     scePowerSetArmClockFrequency(444);
