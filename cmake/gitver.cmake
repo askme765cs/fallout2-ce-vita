@@ -38,6 +38,15 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
+
+if (HASH STREQUAL "")
+    set(HASH "unknown")
+endif()
+
+if (DATE STREQUAL "")
+    string(TIMESTAMP DATE "\"%b %d %Y %H:%M:%S\"")
+endif()
+
 # Define a variable for CI_BUILD
 set(CI_BUILD 0)
 
