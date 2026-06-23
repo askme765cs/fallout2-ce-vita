@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "debug.h"
@@ -34,7 +35,7 @@ static void* memoryBlockMallocImpl(size_t size);
 static void* memoryBlockReallocImpl(void* ptr, size_t size);
 static void memoryBlockFreeImpl(void* ptr);
 static void* mem_prep_block(void* block, size_t size);
-static void memoryBlockValidate(void* block);
+static bool memoryBlockValidate(void* block);
 
 // 0x51DED0 p_malloc
 static MallocProc* gMallocProc = memoryBlockMallocImpl;
@@ -116,11 +117,13 @@ static void* memoryBlockReallocImpl(void* ptr, size_t size)
         unsigned char* block = (unsigned char*)ptr - sizeof(MemoryBlockHeader);
 
         MemoryBlockHeader* header = (MemoryBlockHeader*)block;
+        if (!memoryBlockValidate(block)) {
+            debugPrint("Skipping realloc of corrupted block: ptr=0x%08x\n", (unsigned int)(uintptr_t)ptr);
+            return nullptr;
+        }
+
         size_t oldSize = header->size;
-
         gMemoryBlocksCurrentSize -= oldSize;
-
-        memoryBlockValidate(block);
 
         if (size != 0) {
             size += sizeof(MemoryBlockHeader) + sizeof(MemoryBlockFooter);
@@ -164,10 +167,18 @@ void internal_free(void* ptr)
 static void memoryBlockFreeImpl(void* ptr)
 {
     if (ptr != nullptr) {
+        if ((uintptr_t)ptr < sizeof(MemoryBlockHeader)) {
+            debugPrint("Skipping free of invalid pointer: ptr=0x%08x\n", (unsigned int)(uintptr_t)ptr);
+            return;
+        }
+
         void* block = (unsigned char*)ptr - sizeof(MemoryBlockHeader);
         MemoryBlockHeader* header = (MemoryBlockHeader*)block;
 
-        memoryBlockValidate(block);
+        if (!memoryBlockValidate(block)) {
+            debugPrint("Skipping free of corrupted block: ptr=0x%08x\n", (unsigned int)(uintptr_t)ptr);
+            return;
+        }
 
         gMemoryBlocksCurrentSize -= header->size;
         gMemoryBlocksCurrentCount--;
@@ -208,17 +219,26 @@ static void* mem_prep_block(void* block, size_t size)
 // [block] is a pointer to the the memory block itself, not it's data.
 //
 // 0x4C5CE4 mem_check_block
-static void memoryBlockValidate(void* block)
+static bool memoryBlockValidate(void* block)
 {
     MemoryBlockHeader* header = (MemoryBlockHeader*)block;
     if (header->guard != MEMORY_BLOCK_HEADER_GUARD) {
         debugPrint("Memory header stomped.\n");
+        return false;
+    }
+
+    if (header->size < sizeof(MemoryBlockHeader) + sizeof(MemoryBlockFooter)) {
+        debugPrint("Memory block size stomped: size=%u.\n", (unsigned int)header->size);
+        return false;
     }
 
     MemoryBlockFooter* footer = (MemoryBlockFooter*)((unsigned char*)block + header->size - sizeof(MemoryBlockFooter));
     if (footer->guard != MEMORY_BLOCK_FOOTER_GUARD) {
         debugPrint("Memory footer stomped.\n");
+        return false;
     }
+
+    return true;
 }
 
 } // namespace fallout

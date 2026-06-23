@@ -7,6 +7,10 @@
 #include <string.h>
 #include <string>
 
+#ifdef __vita__
+#include <psp2/kernel/clib.h>
+#endif
+
 #include "memory.h"
 #include "platform_compat.h"
 #include "window_manager_private.h"
@@ -186,6 +190,10 @@ int debugPrint(const char* format, ...)
 
 #ifndef NDEBUG
     SDL_Log("%s", string);
+#endif
+
+#ifdef __vita__
+    sceClibPrintf("%s", string);
 #endif
 
     return rc;

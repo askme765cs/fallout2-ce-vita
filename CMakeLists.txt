@@ -26,6 +26,7 @@ endif()
 
 option(FALLOUT_VENDORED "Use vendored third-party libraries" ON)
 option(FALLOUT_AUDIO_OGG "Enable OGG decoding with stb_vorbis when available" ON)
+option(VITA "PS Vita build" OFF)
 
 set(FALLOUT_STB_VORBIS_DIR "" CACHE PATH "Directory containing stb_vorbis.c")
 
@@ -109,6 +110,8 @@ set(FALLOUT_ENGINE_SOURCES
     "src/file_utils.h"
     "src/font_manager.cc"
     "src/font_manager.h"
+    "src/freetype_manager.cc"
+    "src/freetype_manager.h"
     "src/game_config.cc"
     "src/game_config.h"
     "src/game_config_migration.cc"
@@ -452,7 +455,10 @@ if(APPLE)
     set(MACOSX_BUNDLE_BUNDLE_VERSION "1.3.0")
 endif()
 
-if((NOT ${CMAKE_SYSTEM_NAME} MATCHES "Emscripten"))
+if(VITA)
+    find_package(ZLIB)
+    find_package(SDL2)
+elseif((NOT ${CMAKE_SYSTEM_NAME} MATCHES "Emscripten"))
     if(FALLOUT_VENDORED)
         add_subdirectory("third_party/zlib")
         add_subdirectory("third_party/sdl2")
@@ -507,6 +513,29 @@ else()
 endif()
 
 
+if(VITA)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        set(VITA_FLAGS "-Ofast -mcpu=cortex-a9 -mfpu=neon -fgraphite-identity -floop-parallelize-all -floop-nest-optimize -ftree-parallelize-loops=3 -fno-peephole2 -DNDEBUG -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.")
+    else()
+        set(VITA_FLAGS "-O2 -g -mcpu=cortex-a9 -mfpu=neon -fno-peephole2 -DNDEBUG")
+        add_definitions(-D_DEBUG)
+    endif()
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${VITA_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VITA_FLAGS}")
+
+    target_link_libraries(${EXECUTABLE_NAME}
+        SDL2::SDL2
+        SceIme_stub
+        SceAudioIn_stub
+        vita2d
+    )
+
+    target_compile_definitions(${EXECUTABLE_NAME} PRIVATE _GNU_SOURCE)
+
+    include("${CMAKE_SOURCE_DIR}/vita/vita.cmake")
+    add_definitions(-D__unix)
+endif()
+
 add_subdirectory("third_party/fpattern")
 target_link_libraries(${EXECUTABLE_NAME} fpattern::fpattern)
 target_link_libraries(${EXECUTABLE_NAME} fpattern_windows::fpattern_windows)
@@ -518,7 +547,15 @@ target_link_libraries(${EXECUTABLE_NAME} ${SDL2_LIBRARIES})
 target_link_libraries(${EXECUTABLE_NAME} ${SDL2_MAIN_LIBRARIES})
 target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
 
-if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
+add_subdirectory("third_party/freetype")
+target_link_libraries(${EXECUTABLE_NAME} ${FREETYPE_LIBRARIES})
+target_include_directories(${EXECUTABLE_NAME} PRIVATE ${FREETYPE_INCLUDE_DIRS})
+
+add_subdirectory("third_party/iconv")
+target_link_libraries(${EXECUTABLE_NAME} ${ICONV_LIBRARIES})
+target_include_directories(${EXECUTABLE_NAME} PRIVATE ${ICONV_INCLUDE_DIRS})
+
+if((NOT ANDROID) AND (NOT IOS) AND (NOT VITA) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     add_executable(ce-dat-tool
         "tools/dat_tool.cc"
         "tools/dat_archive.cc"
@@ -604,7 +641,7 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     endif()
 endif()
 
-if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
+if((NOT ANDROID) AND (NOT IOS) AND (NOT VITA) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     if(WIN32)
         add_executable(mapper-ce WIN32)
     else()
@@ -685,8 +722,12 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     target_include_directories(mapper-ce PRIVATE "src")
     target_include_directories(mapper-ce PRIVATE ${ZLIB_INCLUDE_DIRS})
     target_include_directories(mapper-ce PRIVATE ${SDL2_INCLUDE_DIRS})
+    target_include_directories(mapper-ce PRIVATE ${FREETYPE_INCLUDE_DIRS})
+    target_include_directories(mapper-ce PRIVATE ${ICONV_INCLUDE_DIRS})
 
     target_link_libraries(mapper-ce
+        ${FREETYPE_LIBRARIES}
+        ${ICONV_LIBRARIES}
         fpattern::fpattern
         fpattern_windows::fpattern_windows
         ${ZLIB_LIBRARIES}

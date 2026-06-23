@@ -3,7 +3,16 @@
 #include "sfall_kb_helpers.h"
 #include "svga.h"
 
+#ifdef __vita__
+#include <psp2/kernel/clib.h>
+#include "mouse.h"
+#endif
+
 namespace fallout {
+
+#ifdef __vita__
+SDL_GameController* gameController;
+#endif
 
 static int gMouseWheelDeltaX = 0;
 static int gMouseWheelDeltaY = 0;
@@ -18,6 +27,12 @@ static void mouseDeviceMapWindowToLogicalPosition(int* x, int* y);
 // 0x4E0400
 bool directInputInit()
 {
+#ifdef __vita__
+    if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
+        return false;
+    }
+#endif
+
     mouseDeviceRefreshWindowMapping();
 
     if (!mouseDeviceInit()) {
@@ -92,6 +107,17 @@ bool mouseDeviceGetData(MouseData* mouseState)
     // TODO: Move mouse events processing into `GNW95_process_message` and
     // update mouse position manually.
     SDL_PumpEvents();
+#ifdef __vita__
+    if (gameController != nullptr) {
+        mouseState->buttons[0] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_A);
+        mouseState->buttons[1] = SDL_GameControllerGetButton(gameController, SDL_CONTROLLER_BUTTON_B);
+    } else {
+        mouseState->buttons[0] = 0;
+        mouseState->buttons[1] = 0;
+    }
+    mouseState->x = 0;
+    mouseState->y = 0;
+#else
     Uint32 buttons = mouseDeviceUsesRelativeMode()
         ? SDL_GetRelativeMouseState(&(mouseState->x), &(mouseState->y))
         : SDL_GetMouseState(&(mouseState->x), &(mouseState->y));
@@ -100,6 +126,7 @@ bool mouseDeviceGetData(MouseData* mouseState)
     }
     mouseState->buttons[0] = (buttons & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
     mouseState->buttons[1] = (buttons & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
+#endif
     mouseState->wheelX = gMouseWheelDeltaX;
     mouseState->wheelY = gMouseWheelDeltaY;
 
@@ -138,6 +165,9 @@ bool keyboardDeviceGetData(KeyboardData* keyboardData)
 // 0x4E070C
 bool mouseDeviceInit()
 {
+#ifdef __vita__
+    return true;
+#endif
     mouseDeviceRefreshWindowMapping();
     return mouseDeviceInitMode();
 }
@@ -155,6 +185,10 @@ bool keyboardDeviceInit()
 
 // 0x4E0874
 void keyboardDeviceFree()
+{
+}
+
+void handleTouchEvent(SDL_Event* event)
 {
 }
 

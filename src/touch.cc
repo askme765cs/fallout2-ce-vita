@@ -25,6 +25,7 @@ struct TouchLocation {
 
 struct Touch {
     bool used;
+    SDL_TouchID touchId;
     SDL_FingerID fingerId;
     TouchLocation startLocation;
     Uint32 startTimestamp;
@@ -39,6 +40,11 @@ static std::stack<Gesture> gestureEventsQueue;
 
 static bool gUseTouchscreenMode = false;
 static bool gUsePanMode = false;
+
+#ifdef __vita__
+TouchpadMode frontTouchpadMode = TouchpadMode::kTouchDirect;
+TouchpadMode rearTouchpadMode = TouchpadMode::kTouchDisabled;
+#endif
 
 static int find_touch(SDL_FingerID fingerId)
 {
@@ -90,6 +96,14 @@ static TouchLocation touch_get_current_location_centroid(int* indexes, int lengt
 
 void touch_handle_start(SDL_TouchFingerEvent* event)
 {
+#ifdef __vita__
+    if ((event->touchId == 0 && frontTouchpadMode == TouchpadMode::kTouchDisabled)
+        || (event->touchId == 1 && rearTouchpadMode == TouchpadMode::kTouchDisabled))
+    {
+        return;
+    }
+#endif
+
     // On iOS `fingerId` is an address of underlying `UITouch` object. When
     // `touchesBegan` is called this object might be reused, but with
     // incresed `tapCount` (which is ignored in this implementation).
@@ -101,6 +115,7 @@ void touch_handle_start(SDL_TouchFingerEvent* event)
     if (index != -1) {
         Touch* touch = &(touches[index]);
         touch->used = true;
+        touch->touchId = event->touchId;
         touch->fingerId = event->fingerId;
         touch->startTimestamp = event->timestamp;
         touch->startLocation.x = static_cast<int>(event->x * screenGetWidth());
@@ -275,6 +290,24 @@ void touch_process_gesture()
                 currentGesture.y = currentCentroid.y;
                 gestureEventsQueue.push(currentGesture);
             }
+
+#ifdef __vita__
+            if (touches[active[0]].touchId == 0 && frontTouchpadMode == TouchpadMode::kTouchDirect)
+            {
+                SDL_Rect rect = getRenderRect();
+                float width = static_cast<float>(screenGetWidth());
+                float height = static_cast<float>(screenGetHeight());
+
+                int touchPosX = static_cast<float>(VITA_FULLSCREEN_WIDTH * (currentCentroid.x / width) - rect.x) *
+                                            (width / rect.w);
+                int touchPosY = static_cast<float>(VITA_FULLSCREEN_HEIGHT * (currentCentroid.y / height) - rect.y) *
+                                            (height / rect.h);
+
+                mouseHideCursor();
+                _mouse_set_position(touchPosX, touchPosY);
+                mouseShowCursor();
+            }
+#endif
 
             if (gUseTouchscreenMode) {
                 mouseHideCursor();

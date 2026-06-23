@@ -19,6 +19,14 @@ enum GestureState {
     kEnded,
 };
 
+#ifdef __vita__
+enum TouchpadMode {
+    kTouchDisabled = 0,
+    kTouchDirect = 1,
+    kTouchTrackpad = 2
+};
+#endif
+
 struct Gesture {
     GestureType type;
     GestureState state;

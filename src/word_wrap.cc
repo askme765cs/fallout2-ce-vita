@@ -9,7 +9,7 @@
 namespace fallout {
 
 // 0x4BC6F0 word_wrap
-int wordWrap(const char* string, int width, short* breakpoints, short* breakpointsLengthPtr)
+int leagcyWordWrap(const char* string, int width, short* breakpoints, short* breakpointsLengthPtr)
 {
     breakpoints[0] = 0;
     *breakpointsLengthPtr = 1;

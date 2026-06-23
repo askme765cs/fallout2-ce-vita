@@ -6,6 +6,10 @@
 #include "fps_limiter.h"
 #include "geometry.h"
 
+#ifdef __vita__
+#include "touch.h"
+#endif
+
 namespace fallout {
 
 extern Rect _scr_size;
@@ -46,6 +50,24 @@ int screenGetVisibleHeight();
 void handleWindowSizeChanged();
 void renderPresent();
 bool screenIsFullscreen();
+
+#ifdef __vita__
+enum
+{
+    VITA_FULLSCREEN_WIDTH = 960,
+    VITA_FULLSCREEN_HEIGHT = 544,
+    DEFAULT_WIDTH = 640,
+    DEFAULT_HEIGHT = 480
+};
+
+extern TouchpadMode frontTouchpadMode;
+extern TouchpadMode rearTouchpadMode;
+
+void updateVita2dPalette(SDL_Color* colors, int start, int count);
+void renderVita2dFrame(SDL_Surface* surface);
+void setRenderRect(int width, int height, bool fullscreen);
+SDL_Rect getRenderRect();
+#endif
 
 } // namespace fallout
 

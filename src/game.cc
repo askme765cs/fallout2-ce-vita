@@ -66,6 +66,7 @@
 #include "stat.h"
 #include "svga.h"
 #include "text_font.h"
+#include "freetype_manager.h"
 #include "tile.h"
 #include "trait.h"
 #include "version.h"
@@ -199,6 +200,10 @@ int gameInitWithOptions(const char* windowTitle, bool isMapper, int font, int fl
 
     if (!gIsMapper && skipOpeningMovies < 2) {
         showSplash();
+    }
+
+    if (!FtFontsInit()) {
+        fontManagerAdd(&gFtFontManager);
     }
 
     interfaceFontsInit();

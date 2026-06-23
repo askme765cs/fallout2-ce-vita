@@ -468,13 +468,14 @@ static void mainMenuDrawButtonLabels(const MainMenuLayout& layout, const MainMen
                 layout.screenWidth,
                 fontSettings);
         } else {
-            int scaledLen = interfaceFontGetStringWidthScaled(msg.text, fontSettings, layout.scale);
-            interfaceFontDrawTextScaled2D(Buffer2D(gMainMenuWindowBuffer, layout.screenWidth, layout.screenHeight),
-                labelPosition.x + offsets.menuX - scaledLen / 2,
-                labelPosition.y + offsets.menuY,
+            // Use free type font drawing for all text (including Chinese).
+            // interfaceFontDrawTextScaled2D uses single-byte AAF fonts which
+            // cannot render Chinese (GBK) text.
+            fontDrawText(gMainMenuWindowBuffer + (labelPosition.y + offsets.menuY) * layout.screenWidth + labelPosition.x + offsets.menuX - (len / 2),
                 msg.text,
-                fontSettings,
-                layout.scale);
+                layout.screenWidth - (labelPosition.x + offsets.menuX - (len / 2)) - 1,
+                layout.screenWidth,
+                fontSettings);
         }
     }
 }

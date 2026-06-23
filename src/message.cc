@@ -527,6 +527,24 @@ static int _message_load_field(File* file, char* str)
                 debugPrint("\nError reading message file - text exceeds limit.\n");
                 return 4;
             }
+
+            // Handle multi-byte character encoding (e.g., GBK for Chinese).
+            // If the current byte is in the GBK lead byte range (0x81-0xFE),
+            // read the trail byte without checking for delimiters { or }.
+            if ((unsigned char)ch >= 0x81 && (unsigned char)ch <= 0xFE) {
+                int nextCh = fileReadChar(file);
+                if (nextCh == -1) {
+                    debugPrint("\nError reading message file - EOF reached in multi-byte character.\n");
+                    return 3;
+                }
+                *(str + len) = nextCh;
+                len++;
+
+                if (len >= MESSAGE_LIST_ITEM_FIELD_MAX_SIZE) {
+                    debugPrint("\nError reading message file - text exceeds limit.\n");
+                    return 4;
+                }
+            }
         }
     }
 

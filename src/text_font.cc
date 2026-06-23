@@ -8,6 +8,7 @@
 #include "memory.h"
 #include "platform_compat.h"
 #include "settings.h"
+#include "word_wrap.h"
 
 #include <assert.h>
 
@@ -65,6 +66,7 @@ FontManager gTextFontManager = {
     textFontGetLetterSpacingImpl,
     textFontGetBufferSizeImpl,
     textFontGetMonospacedCharacterWidthImpl,
+    leagcyWordWrap,
 };
 
 // 0x51E3B0 curr_font_num
@@ -96,6 +98,8 @@ FontManagerGetBufferSizeProc* fontGetBufferSize = nullptr;
 
 // 0x51E3D4 text_max
 FontManagerGetMonospacedCharacterWidth* fontGetMonospacedCharacterWidth = nullptr;
+
+FontManageWordWrapProc* wordWrap = NULL;
 
 // 0x6ADB08 font
 static TextFontDescriptor gTextFontDescriptors[TEXT_FONT_MAX];
@@ -297,6 +301,7 @@ void fontSetCurrent(int font)
         fontGetLetterSpacing = fontManager->getLetterSpacingProc;
         fontGetBufferSize = fontManager->getBufferSizeProc;
         fontGetMonospacedCharacterWidth = fontManager->getMonospacedCharacterWidthProc;
+        wordWrap = fontManager->wordWrap;
 
         gCurrentFont = font;
 

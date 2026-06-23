@@ -57,6 +57,10 @@ void mouseGetWheel(int* x, int* y);
 void convertMouseWheelToArrowKey(int* keyCodePtr);
 int mouse_get_last_buttons();
 
+#ifdef __vita__
+double mouseGetSensitivity();
+#endif
+
 } // namespace fallout
 
 #endif /* FALLOUT_MOUSE_H_ */

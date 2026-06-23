@@ -627,7 +627,7 @@ static bool characterSelectorWindowRenderStats()
 
     fontGetCharacterWidth(0x20);
 
-    int vh = fontGetLineHeight();
+    int vh = 11;
     int y = 40;
 
     // NAME

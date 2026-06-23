@@ -2919,7 +2919,11 @@ static int _SlotMap2Game(File* stream)
                 snprintf(_str0, sizeof(_str0), "%s\\%s\\%s", _patches, basePath, protoPath);
                 snprintf(_str1, sizeof(_str1), "%s\\%s\\%s%.2d\\%s\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, basePath, protoPath);
 
+#ifdef __vita__
+                if (fileCopyDecompressed(_str1, _str0) == -1) {
+#else
                 if (_gzdecompress_file(_str1, _str0) == -1) {
+#endif
                     debugPrint("LOADSAVE: returning 6\n");
                     return -1;
                 }
@@ -2936,7 +2940,11 @@ static int _SlotMap2Game(File* stream)
         snprintf(_str0, sizeof(_str0), "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, fileName);
         snprintf(_str1, sizeof(_str1), "%s\\%s\\%s", _patches, "MAPS", fileName);
 
+#ifdef __vita__
+        if (fileCopyDecompressed(_str0, _str1) == -1) {
+#else
         if (_gzdecompress_file(_str0, _str1) == -1) {
+#endif
             debugPrint("LOADSAVE: returning 7\n");
             return -1;
         }

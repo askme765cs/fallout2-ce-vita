@@ -17,6 +17,8 @@ typedef int FontManagerGetLetterSpacingProc();
 typedef int FontManagerGetBufferSizeProc(const char* string);
 typedef int FontManagerGetMonospacedCharacterWidth();
 
+typedef int FontManageWordWrapProc(const char* string, int width, short* breakpoints, short* breakpointsLengthPtr);
+
 typedef struct FontManager {
     int minFont;
     int maxFont;
@@ -29,6 +31,8 @@ typedef struct FontManager {
     FontManagerGetLetterSpacingProc* getLetterSpacingProc;
     FontManagerGetBufferSizeProc* getBufferSizeProc;
     FontManagerGetMonospacedCharacterWidth* getMonospacedCharacterWidthProc;
+
+    FontManageWordWrapProc* wordWrap;
 } FontManager;
 
 #define FONT_SHADOW (0x10000)
@@ -46,6 +50,8 @@ extern FontManagerGetMonospacedStringWidthProc* fontGetMonospacedStringWidth;
 extern FontManagerGetLetterSpacingProc* fontGetLetterSpacing;
 extern FontManagerGetBufferSizeProc* fontGetBufferSize;
 extern FontManagerGetMonospacedCharacterWidth* fontGetMonospacedCharacterWidth;
+
+extern FontManageWordWrapProc* wordWrap;
 
 void fontDrawText2D(const Buffer2D& dest, int xPos, int yPos, const char* string, int length, int color);
 

@@ -595,12 +595,16 @@ void _mouse_info()
     // Mouse sensitivity only applies to relative movement. In windowed mode
     // SDL provides absolute coordinates that should not be scaled.
     if (mouseDeviceUsesRelativeMode()) {
+#ifndef __vita__
         x = (int)(x * gMouseSensitivity);
         y = (int)(y * gMouseSensitivity);
+#endif
     }
 
     _mouse_simulate_input(x, y, buttons);
 
+#ifndef __vita__
+    // breaks mouse button emulation on Vita
     // TODO: Move to `_mouse_simulate_input`.
     gMouseWheelX = mouseData.wheelX;
     gMouseWheelY = mouseData.wheelY;
@@ -609,6 +613,7 @@ void _mouse_info()
         gMouseEvent |= MOUSE_EVENT_WHEEL;
         _raw_buttons |= MOUSE_EVENT_WHEEL;
     }
+#endif
 }
 
 // 0x4CA698
@@ -832,6 +837,13 @@ void mouseSetSensitivity(double value)
         gMouseSensitivity = value;
     }
 }
+
+#ifdef __vita__
+double mouseGetSensitivity()
+{
+    return gMouseSensitivity;
+}
+#endif
 
 void mouseGetPositionInWindow(int win, int* x, int* y)
 {

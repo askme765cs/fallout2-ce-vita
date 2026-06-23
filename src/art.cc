@@ -149,6 +149,14 @@ int artInit()
     char string[200];
 
     int cacheSize = settings.system.art_cache_size;
+
+#ifdef __vita__
+    // RAM is limited on Vita
+    if (cacheSize > 256) {
+        cacheSize = 256;
+    }
+#endif
+
     if (!cacheInit(&gArtCache, artCacheGetFileSizeImpl, artCacheReadDataImpl, artCacheFreeImpl, cacheSize << 20)) {
         debugPrint("cache_init failed in art_init\n");
         return -1;
@@ -1487,9 +1495,10 @@ static int paddingForSize(int size)
 
 class NamedCacheEntry {
 public:
-    explicit NamedCacheEntry(ArtPtr&& art);
+    NamedCacheEntry(ArtPtr&& art, int size);
 
     const Art* art() const { return _art.get(); }
+    int size() const { return _size; }
 
     unsigned char* frameData(int frame, int direction, int& outWidth, int& outHeight) const;
 
@@ -1497,10 +1506,12 @@ public:
 
 private:
     ArtPtr _art;
+    int _size;
 };
 
-NamedCacheEntry::NamedCacheEntry(ArtPtr&& art)
+NamedCacheEntry::NamedCacheEntry(ArtPtr&& art, int size)
     : _art(std::move(art))
+    , _size(size)
 {
 }
 
@@ -1543,10 +1554,11 @@ std::shared_ptr<NamedCacheEntry> artLockNamedFrameData(const char* path)
         gNamedArtCacheMruCounter = mru;
     }
 
-    auto entry = std::make_shared<NamedCacheEntry>(ArtPtr(art));
+    int artSize = artGetDataSize(art);
+    auto entry = std::make_shared<NamedCacheEntry>(ArtPtr(art), artSize);
     entry->mru = ++gNamedArtCacheMruCounter;
 
-    gNamedArtCacheCurrentBytes += artGetDataSize(art);
+    gNamedArtCacheCurrentBytes += artSize;
 
     // Evict LRU entries if over soft limit (post-insertion)
     while (gNamedArtCacheCurrentBytes > kNamedCacheMaxBytes) {
@@ -1563,7 +1575,7 @@ std::shared_ptr<NamedCacheEntry> artLockNamedFrameData(const char* path)
             break;
         }
 
-        gNamedArtCacheCurrentBytes -= artGetDataSize(evictIt->second->art());
+        gNamedArtCacheCurrentBytes -= evictIt->second->size();
         gNamedArtCache.erase(evictIt);
     }
 
