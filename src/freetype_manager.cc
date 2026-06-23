@@ -150,13 +150,14 @@ static int LtoU(const char* input, size_t charInPutLen)
 
 static int UtoL(const char* input, size_t charInPutLen)
 {
-    size_t output_size = 1024;
+    char encoded[16];
+    size_t output_size = sizeof(encoded);
     iconv_t cd = iconv_open(current->encoding, "UCS-4-INTERNAL");
-    char* tmp = (char*)output;
+    char* tmp = encoded;
     iconv(cd, &input, &charInPutLen, &tmp, &output_size);
     iconv_close(cd);
 
-    return (1024 - output_size);
+    return sizeof(encoded) - output_size;
 }
 
 // When the glyph cache is full, return a zero glyph instead of allocating more.
@@ -639,48 +640,69 @@ static int FtFonteWordWrapImpl(const char* string, int width, short* breakpoints
 
     int accum = 0;
     int prevSpaceOrHyphen = -1;
+    int prevSpaceOrHyphenIndex = -1;
+    int lineStart = 0;
 
     int count = LtoU((char*)string, strlen(string));
-
-    int PreCharIndex;
-
-    int uint32Index;
     int CharIndex = 0;
 
     for (int i = 0; i < count;) 
     {
         const uint32_t ch = output[i];
+        int charStart = CharIndex;
+        int charLength;
 
         if (ch == L'\n' || ch == L'\r') {
+            charLength = 1;
+            CharIndex += charLength;
+            if (*breakpointsLengthPtr == WORD_WRAP_MAX_COUNT) {
+                return -1;
+            }
+            if (CharIndex > breakpoints[*breakpointsLengthPtr - 1]) {
+                breakpoints[*breakpointsLengthPtr] = CharIndex;
+                *breakpointsLengthPtr += 1;
+            }
+            lineStart = CharIndex;
+            accum = 0;
+            prevSpaceOrHyphen = -1;
+            prevSpaceOrHyphenIndex = -1;
+            i++;
             continue;
         }
 
         FtFontGlyph g = GetFtFontGlyph(ch);
-
-        PreCharIndex = CharIndex;
+        int characterWidth;
 
         if (ch == L' ' || (ch > 128 && ch < 256)) {
-            accum += current->letterSpacing + current->wordSpacing;
-            CharIndex += 1;
+            characterWidth = current->letterSpacing + current->wordSpacing;
+            charLength = 1;
         } else {
-            if (ch == '\x95')
-                accum += current->letterSpacing + g.width + 2;
-            else
-                accum += current->letterSpacing + g.width;
+            characterWidth = current->letterSpacing + g.width;
+            if (ch == '\x95') {
+                characterWidth += 2;
+            }
 
-            if ((ch > 0 && ch < 128) || ch == '\x95')
-                CharIndex += 1;
-            else
-                CharIndex += UtoL((char*)(&(output[i])), sizeof(uint32_t));
+            if ((ch > 0 && ch < 128) || ch == '\x95') {
+                charLength = 1;
+            } else {
+                charLength = UtoL((char*)(&(output[i])), sizeof(uint32_t));
+                if (charLength <= 0) {
+                    return -1;
+                }
+            }
         }
 
-        if (accum <= width) {
+        if (accum + characterWidth <= width || charStart == lineStart) {
+            accum += characterWidth;
+            CharIndex += charLength;
+
             // NOTE: quests.txt #807 uses extended ascii.
             if (ch == L' ' || ch == L'-') {
                 prevSpaceOrHyphen = CharIndex;
-                uint32Index = i;
+                prevSpaceOrHyphenIndex = i;
             } else if (current->warpMode == 1) {
                 prevSpaceOrHyphen = -1;
+                prevSpaceOrHyphenIndex = -1;
             }
             i++;
         } else {
@@ -688,20 +710,21 @@ static int FtFonteWordWrapImpl(const char* string, int width, short* breakpoints
                 return -1;
             }
 
-            if (prevSpaceOrHyphen != -1) {
+            if (prevSpaceOrHyphen > lineStart) {
                 // Word wrap.
                 breakpoints[*breakpointsLengthPtr] = prevSpaceOrHyphen;
-
-                i = uint32Index + 1;
-                CharIndex = prevSpaceOrHyphen + 1;
+                i = prevSpaceOrHyphenIndex + 1;
+                CharIndex = prevSpaceOrHyphen;
             } else {
-                // Character wrap.
-                breakpoints[*breakpointsLengthPtr] = PreCharIndex;
-                CharIndex = PreCharIndex;
+                // CJK text has no spaces, so wrap at the previous character boundary.
+                breakpoints[*breakpointsLengthPtr] = charStart;
+                CharIndex = charStart;
             }
 
+            lineStart = breakpoints[*breakpointsLengthPtr];
             *breakpointsLengthPtr += 1;
             prevSpaceOrHyphen = -1;
+            prevSpaceOrHyphenIndex = -1;
             accum = 0;
         }
     }
@@ -710,8 +733,10 @@ static int FtFonteWordWrapImpl(const char* string, int width, short* breakpoints
         return -1;
     }
 
-    breakpoints[*breakpointsLengthPtr] = CharIndex;
-    *breakpointsLengthPtr += 1;
+    if (CharIndex > breakpoints[*breakpointsLengthPtr - 1]) {
+        breakpoints[*breakpointsLengthPtr] = CharIndex;
+        *breakpointsLengthPtr += 1;
+    }
 
     return 0;
 }

@@ -50,6 +50,7 @@
 #include "text_font.h"
 #include "tile.h"
 #include "window_manager.h"
+#include "word_wrap.h"
 
 namespace fallout {
 
@@ -3091,6 +3092,8 @@ int objectGetCarriedQuantityByPid(Object* object, int pid)
 // 0x471D5C
 static void inventoryRenderSummary()
 {
+    constexpr int kInventorySummaryLineHeight = 11;
+
     int summaryStats[7];
     memcpy(summaryStats, gSummaryStats, sizeof(summaryStats));
 
@@ -3125,14 +3128,14 @@ static void inventoryRenderSummary()
     bufferDrawLine(windowBuffer,
         pitch,
         summaryX,
-        3 * fontGetLineHeight() / 2 + INVENTORY_SUMMARY_Y,
+        3 * kInventorySummaryLineHeight / 2 + INVENTORY_SUMMARY_Y,
         summaryMaxX,
-        3 * fontGetLineHeight() / 2 + INVENTORY_SUMMARY_Y,
+        3 * kInventorySummaryLineHeight / 2 + INVENTORY_SUMMARY_Y,
         _colorTable[992]);
 
     MessageListItem messageListItem;
 
-    int offset = pitch * 2 * fontGetLineHeight() + pitch * INVENTORY_SUMMARY_Y + summaryX;
+    int offset = pitch * 2 * kInventorySummaryLineHeight + pitch * INVENTORY_SUMMARY_Y + summaryX;
     for (int stat = 0; stat < PRIMARY_STAT_COUNT; stat++) {
         messageListItem.num = stat;
         if (messageListGetItem(&gInventoryMessageList, &messageListItem)) {
@@ -3143,10 +3146,10 @@ static void inventoryRenderSummary()
         snprintf(formattedText, sizeof(formattedText), "%d", value);
         fontDrawText(windowBuffer + offset + 24, formattedText, 80, pitch, _colorTable[992]);
 
-        offset += pitch * fontGetLineHeight();
+        offset += pitch * kInventorySummaryLineHeight;
     }
 
-    offset -= pitch * 7 * fontGetLineHeight();
+    offset -= pitch * 7 * kInventorySummaryLineHeight;
 
     for (int index = 0; index < 7; index += 1) {
         messageListItem.num = 7 + index;
@@ -3166,11 +3169,11 @@ static void inventoryRenderSummary()
 
         fontDrawText(windowBuffer + offset + 104, formattedText, 80, pitch, _colorTable[992]);
 
-        offset += pitch * fontGetLineHeight();
+        offset += pitch * kInventorySummaryLineHeight;
     }
 
-    bufferDrawLine(windowBuffer, pitch, summaryX, 18 * fontGetLineHeight() / 2 + 48, summaryMaxX, 18 * fontGetLineHeight() / 2 + 48, _colorTable[992]);
-    bufferDrawLine(windowBuffer, pitch, summaryX, 26 * fontGetLineHeight() / 2 + 48, summaryMaxX, 26 * fontGetLineHeight() / 2 + 48, _colorTable[992]);
+    bufferDrawLine(windowBuffer, pitch, summaryX, 18 * kInventorySummaryLineHeight / 2 + 48, summaryMaxX, 18 * kInventorySummaryLineHeight / 2 + 48, _colorTable[992]);
+    bufferDrawLine(windowBuffer, pitch, summaryX, 26 * kInventorySummaryLineHeight / 2 + 48, summaryMaxX, 26 * kInventorySummaryLineHeight / 2 + 48, _colorTable[992]);
 
     Object* itemsInHands[2] = {
         gInventoryLeftHandItem,
@@ -3192,7 +3195,7 @@ static void inventoryRenderSummary()
         HIT_MODE_KICK,
     };
 
-    offset += pitch * fontGetLineHeight();
+    offset += pitch * kInventorySummaryLineHeight;
 
     for (int index = 0; index < 2; index += 1) {
         Object* item = itemsInHands[index];
@@ -3205,7 +3208,7 @@ static void inventoryRenderSummary()
                 fontDrawText(windowBuffer + offset, messageListItem.text, 120, pitch, _colorTable[992]);
             }
 
-            offset += pitch * fontGetLineHeight();
+            offset += pitch * kInventorySummaryLineHeight;
 
             // Unarmed dmg:
             messageListItem.num = 24;
@@ -3241,14 +3244,14 @@ static void inventoryRenderSummary()
 
             fontDrawText(windowBuffer + offset, formattedText, 120, pitch, _colorTable[992]);
 
-            offset += 3 * pitch * fontGetLineHeight();
+            offset += 3 * pitch * kInventorySummaryLineHeight;
             continue;
         }
 
         const char* itemName = itemGetName(item);
         fontDrawText(windowBuffer + offset, itemName, 140, pitch, _colorTable[992]);
 
-        offset += pitch * fontGetLineHeight();
+        offset += pitch * kInventorySummaryLineHeight;
 
         int itemType = itemGetType(item);
         if (itemType != ITEM_TYPE_WEAPON) {
@@ -3260,7 +3263,7 @@ static void inventoryRenderSummary()
                 }
             }
 
-            offset += 3 * pitch * fontGetLineHeight();
+            offset += 3 * pitch * kInventorySummaryLineHeight;
             continue;
         }
 
@@ -3339,7 +3342,7 @@ static void inventoryRenderSummary()
             fontDrawText(windowBuffer + offset, formattedText, 140, pitch, _colorTable[992]);
         }
 
-        offset += pitch * fontGetLineHeight();
+        offset += pitch * kInventorySummaryLineHeight;
 
         if (ammoGetCapacity(item) > 0) {
             int ammoTypePid = weaponGetAmmoTypePid(item);
@@ -3369,7 +3372,7 @@ static void inventoryRenderSummary()
             fontDrawText(windowBuffer + offset, formattedText, 140, pitch, _colorTable[992]);
         }
 
-        offset += 2 * pitch * fontGetLineHeight();
+        offset += 2 * pitch * kInventorySummaryLineHeight;
     }
 
     // Total wt:
@@ -3835,75 +3838,40 @@ static void inventoryRenderItemDescription(const char* string)
 
     char* c = mutableString.data();
     while (c != nullptr && *c != '\0') {
+        while (*c == ' ') {
+            c++;
+        }
+        if (*c == '\0') {
+            break;
+        }
+
         _inven_display_msg_line += 1;
         if (_inven_display_msg_line > 17) {
             debugPrint("\nError: inven_display_msg: out of bounds!");
             goto end;
         }
 
-        char* space = nullptr;
-        if (fontGetStringWidth(c) > 152) {
-            // Look for next space.
-            space = c + 1;
-            while (*space != '\0' && *space != ' ') {
-                space += 1;
-            }
-
-            if (*space == '\0') {
-                // This was the last line containing very long word. Text
-                // drawing routine will silently truncate it after reaching
-                // desired length.
-                fontDrawText(windowBuffer + pitch * _inven_display_msg_line * fontGetLineHeight(), c, 152, pitch, _colorTable[992]);
-                goto end;
-            }
-
-            char* nextSpace = space + 1;
-            while (true) {
-                while (*nextSpace != '\0' && *nextSpace != ' ') {
-                    nextSpace += 1;
-                }
-
-                if (*nextSpace == '\0') {
-                    break;
-                }
-
-                // Break string and measure it.
-                *nextSpace = '\0';
-                if (fontGetStringWidth(c) >= 152) {
-                    // Next space is too far to fit in one line. Restore next
-                    // space's character and stop.
-                    *nextSpace = ' ';
-                    break;
-                }
-
-                space = nextSpace;
-
-                // Restore next space's character and continue looping from the
-                // next character.
-                *nextSpace = ' ';
-                nextSpace += 1;
-            }
-
-            if (*space == ' ') {
-                *space = '\0';
-            }
+        short beginnings[WORD_WRAP_MAX_COUNT];
+        short count;
+        int lineLength = strlen(c);
+        if (wordWrap(c, 152, beginnings, &count) == 0 && count > 1) {
+            lineLength = beginnings[1];
         }
 
-        if (fontGetStringWidth(c) > 152) {
-            debugPrint("\nError: inven_display_msg: word too long!");
-            goto end;
+        while (lineLength > 0 && (c[lineLength - 1] == ' ' || c[lineLength - 1] == '\n' || c[lineLength - 1] == '\r')) {
+            lineLength--;
+        }
+        if (lineLength <= 0) {
+            c++;
+            continue;
         }
 
+        char saved = c[lineLength];
+        c[lineLength] = '\0';
         fontDrawText(windowBuffer + pitch * _inven_display_msg_line * fontGetLineHeight(), c, 152, pitch, _colorTable[992]);
+        c[lineLength] = saved;
 
-        if (space != nullptr) {
-            c = space + 1;
-            if (*space == '\0') {
-                *space = ' ';
-            }
-        } else {
-            c = nullptr;
-        }
+        c += lineLength;
     }
 
 end:

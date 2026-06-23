@@ -21,6 +21,7 @@
 #include "text_font.h"
 #include "widget.h"
 #include "window_manager.h"
+#include "word_wrap.h"
 
 // Managed window API layer.
 //
@@ -1069,24 +1070,41 @@ char** windowWordWrap(char* string, int maxLength, int indent, int* substringLis
     char** substringList = nullptr;
     int substringListLength = 0;
 
-    char* start = string;
-    char* pch = string;
-    int width = indent;
-    while (*pch != '\0') {
-        width += fontGetCharacterWidth(*pch & 0xFF);
-        if (*pch != '\n' && width <= maxLength) {
-            width += fontGetLetterSpacing();
-            pch++;
+    short beginnings[WORD_WRAP_MAX_COUNT];
+    short count;
+    int wrapWidth = maxLength - indent;
+    if (wrapWidth <= 0 || wordWrap(string, wrapWidth, beginnings, &count) != 0) {
+        if (substringList != nullptr) {
+            substringList = (char**)internal_realloc_safe(substringList, sizeof(*substringList) * (substringListLength + 1), __FILE__, __LINE__); // "..\int\WINDOW.C", 1184
         } else {
-            while (width > maxLength) {
-                width -= fontGetCharacterWidth(*pch);
-                pch--;
-            }
+            substringList = (char**)internal_malloc_safe(sizeof(*substringList), __FILE__, __LINE__); // "..\int\WINDOW.C", 1185
+        }
 
-            if (*pch != '\n') {
-                while (pch != start && *pch != ' ') {
-                    pch--;
-                }
+        char* substring = (char*)internal_malloc_safe(strlen(string) + 1, __FILE__, __LINE__); // "..\int\WINDOW.C", 1169
+        strcpy(substring, string);
+
+        substringList[substringListLength] = substring;
+        substringListLength++;
+    } else {
+        int stringLength = strlen(string);
+        for (int index = 0; index < count - 1; index++) {
+            int beginning = beginnings[index];
+            int ending = beginnings[index + 1];
+
+            if (beginning < 0) {
+                beginning = 0;
+            }
+            if (ending > stringLength) {
+                ending = stringLength;
+            }
+            while (beginning < ending && string[beginning] == ' ') {
+                beginning++;
+            }
+            while (ending > beginning && (string[ending - 1] == ' ' || string[ending - 1] == '\n' || string[ending - 1] == '\r')) {
+                ending--;
+            }
+            if (ending <= beginning) {
+                continue;
             }
 
             if (substringList != nullptr) {
@@ -1095,35 +1113,14 @@ char** windowWordWrap(char* string, int maxLength, int indent, int* substringLis
                 substringList = (char**)internal_malloc_safe(sizeof(*substringList), __FILE__, __LINE__); // "..\int\WINDOW.C", 1167
             }
 
-            char* substring = (char*)internal_malloc_safe(pch - start + 1, __FILE__, __LINE__); // "..\int\WINDOW.C", 1169
-            strncpy(substring, start, pch - start);
-            substring[pch - start] = '\0';
+            int substringLength = ending - beginning;
+            char* substring = (char*)internal_malloc_safe(substringLength + 1, __FILE__, __LINE__); // "..\int\WINDOW.C", 1169
+            strncpy(substring, string + beginning, substringLength);
+            substring[substringLength] = '\0';
 
             substringList[substringListLength] = substring;
-
-            while (*pch == ' ') {
-                pch++;
-            }
-
-            width = 0;
-            start = pch;
             substringListLength++;
         }
-    }
-
-    if (start != pch) {
-        if (substringList != nullptr) {
-            substringList = (char**)internal_realloc_safe(substringList, sizeof(*substringList) * (substringListLength + 1), __FILE__, __LINE__); // "..\int\WINDOW.C", 1184
-        } else {
-            substringList = (char**)internal_malloc_safe(sizeof(*substringList), __FILE__, __LINE__); // "..\int\WINDOW.C", 1185
-        }
-
-        char* substring = (char*)internal_malloc_safe(pch - start + 1, __FILE__, __LINE__); // "..\int\WINDOW.C", 1169
-        strncpy(substring, start, pch - start);
-        substring[pch - start] = '\0';
-
-        substringList[substringListLength] = substring;
-        substringListLength++;
     }
 
     *substringListLengthPtr = substringListLength;

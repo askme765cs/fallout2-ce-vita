@@ -19,6 +19,7 @@
 #include "svga.h"
 #include "text_font.h"
 #include "window_manager.h"
+#include "word_wrap.h"
 
 namespace fallout {
 
@@ -259,66 +260,52 @@ void displayMonitorAddMessage(const char* str)
 
     std::string mutableMessage(str);
     char* mutableStr = mutableMessage.data();
-
-    // TODO: Refactor these two loops.
-    char* splitPos = nullptr;
-    while (true) {
-        while (fontGetStringWidth(mutableStr) < DISPLAY_MONITOR_WIDTH - _max_disp - knobWidth) {
-            char* temp = gDisplayMonitorLines[_disp_start];
-            int length;
-            if (knob != '\0') {
-                *temp++ = knob;
-                length = DISPLAY_MONITOR_LINE_LENGTH - 2;
-                knob = '\0';
-                knobWidth = 0;
-            } else {
-                length = DISPLAY_MONITOR_LINE_LENGTH - 1;
-            }
-            strncpy(temp, mutableStr, length);
-            gDisplayMonitorLines[_disp_start][DISPLAY_MONITOR_LINE_LENGTH - 1] = '\0';
-            _disp_start = (_disp_start + 1) % gDisplayMonitorLinesCapacity;
-
-            if (splitPos == nullptr) {
-                fontSetCurrent(oldFont);
-                _disp_curr = _disp_start;
-                displayMonitorRefresh();
-                return;
-            }
-
-            mutableStr = splitPos + 1;
-            *splitPos = ' ';
-            splitPos = nullptr;
+    while (*mutableStr != '\0') {
+        while (*mutableStr == ' ') {
+            mutableStr++;
         }
-
-        char* space = strrchr(mutableStr, ' ');
-        if (space == nullptr) {
+        if (*mutableStr == '\0') {
             break;
         }
 
-        if (splitPos != nullptr) {
-            *splitPos = ' ';
+        int availableWidth = DISPLAY_MONITOR_WIDTH - _max_disp - knobWidth;
+        short beginnings[WORD_WRAP_MAX_COUNT];
+        short count;
+        int lineLength = strlen(mutableStr);
+        if (availableWidth > 0 && wordWrap(mutableStr, availableWidth, beginnings, &count) == 0 && count > 1) {
+            lineLength = beginnings[1];
+        }
+        if (lineLength <= 0) {
+            break;
         }
 
-        splitPos = space;
-        if (space != nullptr) {
-            *space = '\0';
+        while (lineLength > 0 && (mutableStr[lineLength - 1] == ' ' || mutableStr[lineLength - 1] == '\n' || mutableStr[lineLength - 1] == '\r')) {
+            lineLength--;
         }
-    }
+        if (lineLength <= 0) {
+            mutableStr++;
+            continue;
+        }
 
-    char* temp = gDisplayMonitorLines[_disp_start];
-    int length;
-    if (knob != '\0') {
-        temp++;
-        gDisplayMonitorLines[_disp_start][0] = knob;
-        length = DISPLAY_MONITOR_LINE_LENGTH - 2;
-        knob = '\0';
-    } else {
-        length = DISPLAY_MONITOR_LINE_LENGTH - 1;
-    }
-    strncpy(temp, mutableStr, length);
+        char* temp = gDisplayMonitorLines[_disp_start];
+        int copyLength = DISPLAY_MONITOR_LINE_LENGTH - 1;
+        if (knob != '\0') {
+            *temp++ = knob;
+            copyLength = DISPLAY_MONITOR_LINE_LENGTH - 2;
+            knob = '\0';
+            knobWidth = 0;
+        }
 
-    gDisplayMonitorLines[_disp_start][DISPLAY_MONITOR_LINE_LENGTH - 1] = '\0';
-    _disp_start = (_disp_start + 1) % gDisplayMonitorLinesCapacity;
+        if (lineLength > copyLength) {
+            lineLength = copyLength;
+        }
+        strncpy(temp, mutableStr, lineLength);
+        temp[lineLength] = '\0';
+        gDisplayMonitorLines[_disp_start][DISPLAY_MONITOR_LINE_LENGTH - 1] = '\0';
+        _disp_start = (_disp_start + 1) % gDisplayMonitorLinesCapacity;
+
+        mutableStr += lineLength;
+    }
 
     fontSetCurrent(oldFont);
     _disp_curr = _disp_start;
