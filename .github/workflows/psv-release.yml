@@ -45,7 +45,7 @@ jobs:
           retention-days: 7
 
       - name: Upload development release
-        if: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/vita-cn-port') }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
