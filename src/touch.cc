@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <stack>
 
+#ifdef __vita__
+#include <psp2/touch.h>
+#endif
+
 #include "mouse.h"
 #include "svga.h"
 
@@ -107,6 +111,88 @@ static TouchLocation touch_get_current_location_centroid(int* indexes, int lengt
     return centroid;
 }
 
+#ifdef __vita__
+static int vita_native_front_finger_id = 1;
+static bool vita_native_front_was_down = false;
+static SceTouchPanelInfo vita_native_front_info;
+static bool vita_native_front_info_ready = false;
+
+static TouchLocation vita_native_touch_to_screen(const SceTouchReport& report)
+{
+    if (!vita_native_front_info_ready) {
+        if (sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT, &vita_native_front_info) < 0) {
+            vita_native_front_info.minDispX = 0;
+            vita_native_front_info.minDispY = 0;
+            vita_native_front_info.maxDispX = 1919;
+            vita_native_front_info.maxDispY = 1087;
+        }
+        vita_native_front_info_ready = true;
+    }
+
+    int minX = vita_native_front_info.minDispX;
+    int minY = vita_native_front_info.minDispY;
+    int maxX = vita_native_front_info.maxDispX;
+    int maxY = vita_native_front_info.maxDispY;
+    int rangeX = std::max(1, maxX - minX);
+    int rangeY = std::max(1, maxY - minY);
+
+    TouchLocation location;
+    location.x = (report.x - minX) * screenGetWidth() / rangeX;
+    location.y = (report.y - minY) * screenGetHeight() / rangeY;
+    location.x = std::max(0, std::min(screenGetWidth() - 1, location.x));
+    location.y = std::max(0, std::min(screenGetHeight() - 1, location.y));
+    return location;
+}
+
+static void touch_handle_native_front()
+{
+    SceTouchData data;
+    if (sceTouchPeek(SCE_TOUCH_PORT_FRONT, &data, 1) <= 0) {
+        return;
+    }
+
+    SDL_TouchID touchId = get_front_touch_id();
+    SDL_FingerID fingerId = vita_native_front_finger_id;
+    int index = find_touch(touchId, fingerId);
+
+    if (data.reportNum == 0 || frontTouchpadMode == TouchpadMode::kTouchDisabled) {
+        if (vita_native_front_was_down && index != -1) {
+            Touch* touch = &(touches[index]);
+            touch->currentTimestamp = SDL_GetTicks();
+            touch->phase = TOUCH_PHASE_ENDED;
+        }
+        vita_native_front_was_down = false;
+        return;
+    }
+
+    TouchLocation location = vita_native_touch_to_screen(data.report[0]);
+    if (!vita_native_front_was_down || index == -1) {
+        index = find_unused_touch_index();
+        if (index == -1) {
+            return;
+        }
+
+        Touch* touch = &(touches[index]);
+        touch->used = true;
+        touch->touchId = touchId;
+        touch->fingerId = fingerId;
+        touch->startTimestamp = SDL_GetTicks();
+        touch->startLocation = location;
+        touch->currentTimestamp = touch->startTimestamp;
+        touch->currentLocation = location;
+        touch->phase = TOUCH_PHASE_BEGAN;
+        vita_native_front_was_down = true;
+        return;
+    }
+
+    Touch* touch = &(touches[index]);
+    touch->currentTimestamp = SDL_GetTicks();
+    touch->currentLocation = location;
+    touch->phase = TOUCH_PHASE_MOVED;
+    vita_native_front_was_down = true;
+}
+#endif
+
 void touch_handle_start(SDL_TouchFingerEvent* event)
 {
 #ifdef __vita__
@@ -165,6 +251,10 @@ void touch_handle_end(SDL_TouchFingerEvent* event)
 
 void touch_process_gesture()
 {
+#ifdef __vita__
+    touch_handle_native_front();
+#endif
+
     Uint32 sequenceStartTimestamp = -1;
     int sequenceStartIndex = -1;
 

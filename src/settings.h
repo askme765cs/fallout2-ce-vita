@@ -174,8 +174,7 @@ struct VitaSettings {
     // 0 - disabled, 1 - direct, 2 - trackpad.
     int front_touch_mode = 1;
     int rear_touch_mode = 0;
-    // Some SDL/Vita builds can report front/rear touch IDs differently. Set to
-    // true if rear touch behaves like the front touchscreen.
+    // Vita SDL builds commonly report front as touch id 1 and rear as touch id 0.
     bool touch_port_swap = true;
 };
 

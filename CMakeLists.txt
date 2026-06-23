@@ -527,6 +527,7 @@ if(VITA)
         SDL2::SDL2
         SceIme_stub
         SceAudioIn_stub
+        SceTouch_stub
         vita2d
     )
 

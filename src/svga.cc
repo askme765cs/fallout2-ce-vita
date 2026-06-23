@@ -24,6 +24,7 @@ namespace fallout {
 
 #ifdef __vita__
 #include <vita2d.h>
+#include <psp2/touch.h>
 
 vita2d_texture* texBuffer;
 uint8_t* palettedTexturePointer;
@@ -138,8 +139,12 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
     }
 
     frontTouchpadMode = static_cast<TouchpadMode>(settings.vita.front_touch_mode);
-    rearTouchpadMode = static_cast<TouchpadMode>(settings.vita.rear_touch_mode);
-    vitaTouchPortSwap = settings.vita.touch_port_swap;
+    // Keep the rear panel disabled on Vita builds to avoid accidental cursor
+    // movement while holding the console, even if an old config enables it.
+    rearTouchpadMode = TouchpadMode::kTouchDisabled;
+    // Vita SDL reports front/rear IDs opposite to the native SceTouch port IDs
+    // on current Vita3K/real-hardware builds.
+    vitaTouchPortSwap = true;
 #endif
 
     if (_GNW95_init_window(width, height, !settings.screen.windowed, scale) == -1) {
@@ -182,9 +187,15 @@ int _init_vesa_mode(int width, int height)
 int _GNW95_init_window(int width, int height, bool fullscreen, int scale)
 {
 #ifdef __vita__
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_VITA_TOUCH_MOUSE_DEVICE, "1");
+
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         return -1;
     }
+
+    sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
+    sceTouchSetSamplingState(SCE_TOUCH_PORT_BACK, SCE_TOUCH_SAMPLING_STATE_STOP);
 
     vita2d_init();
     vita2d_set_vblank_wait(false);

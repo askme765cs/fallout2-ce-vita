@@ -1051,19 +1051,30 @@ void _GNW95_process_message()
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
         case SDL_MOUSEWHEEL:
+            if ((e.type == SDL_MOUSEMOTION && e.motion.which == SDL_TOUCH_MOUSEID)
+                || ((e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) && e.button.which == SDL_TOUCH_MOUSEID)
+                || (e.type == SDL_MOUSEWHEEL && e.wheel.which == SDL_TOUCH_MOUSEID)) {
+                break;
+            }
             if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) {
                 inputHandleMouseClickHook(e.button.button, e.type == SDL_MOUSEBUTTONDOWN);
             }
             handleMouseEvent(&e);
             break;
         case SDL_FINGERDOWN:
+#ifndef __vita__
             touch_handle_start(&(e.tfinger));
+#endif
             break;
         case SDL_FINGERMOTION:
+#ifndef __vita__
             touch_handle_move(&(e.tfinger));
+#endif
             break;
         case SDL_FINGERUP:
+#ifndef __vita__
             touch_handle_end(&(e.tfinger));
+#endif
             break;
         case SDL_KEYDOWN:
         case SDL_KEYUP: {
