@@ -451,7 +451,7 @@ static void renderNavigationButtons(int _view_page, int totalPages, bool isSubPa
         gPipboyCurrentLine = gPipboyLinesCount; // sets navigation to bottom of page
     }
 
-    if (totalPages == 1) {
+    if (totalPages <= 1) {
         // Single-page layout: Show a centered "Back" button only in sub-page mode
         if (isSubPage) {
             const char* text1 = getmsg(&gPipboyMessageList, &gPipboyMessageListItem, 201);
@@ -1191,7 +1191,7 @@ static void pipboyWindowHandleStatus(int userInput)
         }
 
         // Clicking a quest location
-        if (userInput <= gPipboyQuestLocationsCount) {
+        if (userInput >= 1 && userInput <= gPipboyQuestLocationsCount) {
             pipboyWindowQuestList(realIndex);
         }
     }
@@ -1404,6 +1404,21 @@ static void pipboyWindowRenderQuestLocationList(int selectedQuestLocation)
     // Pagination logic
     int maxEntriesPerPage = PIPBOY_STATUS_QUEST_LINES;
     totalPages = (gPipboyQuestLocationsCount + maxEntriesPerPage - 1) / maxEntriesPerPage;
+    if (gPipboyQuestLocationsCount == 0) {
+        totalPages = 1;
+        _view_page_quest = 0;
+        gPipboyWindowQuestsCurrentPageCount = 0;
+        renderNavigationButtons(_view_page_quest, totalPages, false);
+        return;
+    }
+
+    if (_view_page_quest >= totalPages) {
+        _view_page_quest = totalPages - 1;
+    }
+    if (_view_page_quest < 0) {
+        _view_page_quest = 0;
+    }
+
     int startIndex = _view_page_quest * maxEntriesPerPage;
     int endIndex = startIndex + maxEntriesPerPage;
 
