@@ -41,12 +41,12 @@ Prerequisites:
 - VitaSDK
 - SDL2 for Vita
 
-This repository uses the Vita toolchain file in `vita/vita.cmake`.
+This repository uses VitaSDK as the cross-compilation toolchain. The project-specific VPK packaging logic lives in `vita/vita.cmake` and is included automatically when `-DVITA=ON` is set.
 
 ```console
 $ mkdir -p build_vita
 $ cd build_vita
-$ cmake .. -DCMAKE_TOOLCHAIN_FILE=../vita/vita.cmake -DCMAKE_BUILD_TYPE=None -DVITA=ON
+$ cmake .. -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=None -DVITA=ON
 $ make -j4
 ```
 

@@ -41,12 +41,12 @@ ux0:data/fallout2/
 - VitaSDK
 - SDL2 for Vita
 
-本仓库使用 `vita/vita.cmake` 作为 Vita 工具链文件。
+本仓库使用 VitaSDK 作为交叉编译工具链。项目内的 `vita/vita.cmake` 负责 VPK 打包逻辑，并会在设置 `-DVITA=ON` 时自动引入。
 
 ```console
 $ mkdir -p build_vita
 $ cd build_vita
-$ cmake .. -DCMAKE_TOOLCHAIN_FILE=../vita/vita.cmake -DCMAKE_BUILD_TYPE=None -DVITA=ON
+$ cmake .. -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=None -DVITA=ON
 $ make -j4
 ```
 
