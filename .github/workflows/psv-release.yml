@@ -2,6 +2,10 @@ name: PS Vita Development Build
 
 on:
   push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
   pull_request:
 
 permissions:
@@ -46,12 +50,23 @@ jobs:
           path: build_vita/fallout2-ce.vpk
           retention-days: 7
 
+      - name: Move continuous release tag
+        if: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/vita-cn-port') }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f latest "$GITHUB_SHA"
+          git push --force origin refs/tags/latest
+
       - name: Upload development release
         if: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/vita-cn-port') }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
+          target_commitish: ${{ github.sha }}
           name: Fallout2-CE Vita CN Continuous Build
+          body: |
+            Continuous Vita CN build from `${{ github.ref_name }}` at `${{ github.sha }}`.
           prerelease: false
           make_latest: true
           files: build_vita/fallout2-ce.vpk
