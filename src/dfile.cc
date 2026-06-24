@@ -1,6 +1,7 @@
 #include "dfile.h"
 
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,10 @@ namespace fallout {
 
 // The size of decompression buffer for reading compressed [DFile]s.
 #define DFILE_DECOMPRESSION_BUFFER_SIZE (0x1000)
+
+// Small compressed entries are cheaper to inflate once than to drive zlib via
+// thousands of tiny reads on Vita.
+#define DFILE_MEMORY_BUFFER_MAX_SIZE (512 * 1024)
 
 // Specifies that [DFile] has unget character.
 //
@@ -49,10 +54,29 @@ enum class ZipSignature : int {
 static ZipSignature dbaseCheckZipSignature(FILE* stream);
 static bool dfileDecompressInit(z_streamp stream, DBaseFormat format, unsigned char* buffer);
 static bool dbaseParseZip(DBase* dbase, FILE* stream, int& errorFlags);
+static FILE* dbaseAcquireStream(DBase* dbase, bool* pooled);
+static void dbaseReleaseStream(DBase* dbase, FILE* stream);
 static DFile* dfileOpenInternal(DBase* dbase, const char* filename, const char* mode, DFile* dfile);
 static int dfileReadCharInternal(DFile* stream);
 static bool dfileReadCompressed(DFile* stream, void* ptr, size_t size);
+static bool dfileLoadMemoryBuffer(DFile* stream);
 static void dfileUngetCompressed(DFile* stream, int ch);
+static bool dfileProfileIsEnabled();
+static void dfileProfileLog(const char* format, ...);
+
+static bool gDfileProfileChecked = false;
+static bool gDfileProfileEnabled = false;
+static const char* gDfileProfileLabel = nullptr;
+static int gDfileProfileOpenCount = 0;
+static int gDfileProfilePooledOpenCount = 0;
+static unsigned int gDfileProfileOpenMs = 0;
+static unsigned int gDfileProfileSeekMs = 0;
+static int gDfileProfileCompressedReadCount = 0;
+static unsigned int gDfileProfileCompressedReadMs = 0;
+static unsigned int gDfileProfileCompressedReadBytes = 0;
+static int gDfileProfilePlainReadCount = 0;
+static unsigned int gDfileProfilePlainReadMs = 0;
+static unsigned int gDfileProfilePlainReadBytes = 0;
 
 // Reads .DAT or .ZIP file contents.
 //
@@ -217,6 +241,12 @@ bool dbaseClose(DBase* dbase)
         curr = next;
     }
 
+    for (int index = 0; index < dbase->streamPoolLength; index++) {
+        fclose(dbase->streamPool[index]);
+        dbase->streamPool[index] = nullptr;
+    }
+    dbase->streamPoolLength = 0;
+
     if (dbase->entries != nullptr) {
         for (int index = 0; index < dbase->entriesLength; index++) {
             DBaseEntry* entry = &(dbase->entries[index]);
@@ -308,8 +338,13 @@ int dfileClose(DFile* stream)
         free(stream->decompressionBuffer);
     }
 
+    if (stream->memoryBuffer != nullptr) {
+        free(stream->memoryBuffer);
+    }
+
     if (stream->stream != nullptr) {
-        fclose(stream->stream);
+        dbaseReleaseStream(stream->dbase, stream->stream);
+        stream->stream = nullptr;
     }
 
     // Loop thru open file handles and find previous to remove current handle
@@ -352,6 +387,46 @@ DFile* dfileOpen(DBase* dbase, const char* filePath, const char* mode)
     assert(mode); // dfile.c, 297
 
     return dfileOpenInternal(dbase, filePath, mode, nullptr);
+}
+
+void dfileProfileReset(const char* label)
+{
+    if (!dfileProfileIsEnabled()) {
+        return;
+    }
+
+    gDfileProfileLabel = label;
+    gDfileProfileOpenCount = 0;
+    gDfileProfilePooledOpenCount = 0;
+    gDfileProfileOpenMs = 0;
+    gDfileProfileSeekMs = 0;
+    gDfileProfileCompressedReadCount = 0;
+    gDfileProfileCompressedReadMs = 0;
+    gDfileProfileCompressedReadBytes = 0;
+    gDfileProfilePlainReadCount = 0;
+    gDfileProfilePlainReadMs = 0;
+    gDfileProfilePlainReadBytes = 0;
+}
+
+void dfileProfileReport()
+{
+    if (!dfileProfileIsEnabled() || gDfileProfileLabel == nullptr) {
+        return;
+    }
+
+    dfileProfileLog("DFILE PROFILE %s: opens=%d pooled=%d open=%u ms seek=%u ms plain_reads=%d plain_bytes=%u plain=%u ms compressed_reads=%d compressed_bytes=%u",
+        gDfileProfileLabel,
+        gDfileProfileOpenCount,
+        gDfileProfilePooledOpenCount,
+        gDfileProfileOpenMs,
+        gDfileProfileSeekMs,
+        gDfileProfilePlainReadCount,
+        gDfileProfilePlainReadBytes,
+        gDfileProfilePlainReadMs,
+        gDfileProfileCompressedReadCount,
+        gDfileProfileCompressedReadBytes);
+
+    gDfileProfileLabel = nullptr;
 }
 
 // [vfprintf].
@@ -498,7 +573,11 @@ size_t dfileRead(void* ptr, size_t size, size_t count, DFile* stream)
     }
 
     size_t bytesRead;
-    if (stream->entry->compressed == 1) {
+    if (stream->memoryBuffer != nullptr) {
+        memcpy(ptr, stream->memoryBuffer + stream->position, bytesToRead);
+        stream->position += bytesToRead;
+        bytesRead = bytesToRead;
+    } else if (stream->entry->compressed == 1) {
         if (!dfileReadCompressed(stream, ptr, bytesToRead)) {
             stream->flags |= DFILE_ERROR;
             return false;
@@ -506,8 +585,15 @@ size_t dfileRead(void* ptr, size_t size, size_t count, DFile* stream)
 
         bytesRead = bytesToRead;
     } else {
+        bool profileEnabled = dfileProfileIsEnabled();
+        unsigned int readStart = profileEnabled ? compat_timeGetTime() : 0;
         bytesRead = fread(ptr, 1, bytesToRead, stream->stream) + extraBytesRead;
         stream->position += bytesRead;
+        if (profileEnabled) {
+            gDfileProfilePlainReadCount++;
+            gDfileProfilePlainReadBytes += static_cast<unsigned int>(bytesRead);
+            gDfileProfilePlainReadMs += compat_timeGetTime() - readStart;
+        }
     }
 
     return bytesRead / size;
@@ -562,6 +648,12 @@ int dfileSeek(DFile* stream, long offset, int origin)
 
     if (offsetFromBeginning >= stream->entry->uncompressedSize) {
         return 1;
+    }
+
+    if (stream->memoryBuffer != nullptr) {
+        stream->position = offsetFromBeginning;
+        stream->flags &= ~(DFILE_HAS_UNGETC | DFILE_EOF);
+        return 0;
     }
 
     long pos = stream->position;
@@ -693,6 +785,38 @@ static bool dfileDecompressInit(z_streamp stream, DBaseFormat format, unsigned c
         : inflateInit(stream);
 
     return inflateResult == Z_OK;
+}
+
+static FILE* dbaseAcquireStream(DBase* dbase, bool* pooled)
+{
+    if (pooled != nullptr) {
+        *pooled = false;
+    }
+
+    if (dbase->streamPoolLength > 0) {
+        FILE* stream = dbase->streamPool[--dbase->streamPoolLength];
+        dbase->streamPool[dbase->streamPoolLength] = nullptr;
+        if (pooled != nullptr) {
+            *pooled = true;
+        }
+        return stream;
+    }
+
+    return compat_fopen(dbase->path, "rb");
+}
+
+static void dbaseReleaseStream(DBase* dbase, FILE* stream)
+{
+    if (stream == nullptr) {
+        return;
+    }
+
+    if (dbase != nullptr && dbase->streamPoolLength < DBASE_STREAM_POOL_SIZE) {
+        dbase->streamPool[dbase->streamPoolLength++] = stream;
+        return;
+    }
+
+    fclose(stream);
 }
 
 template <typename T>
@@ -927,6 +1051,10 @@ static bool dbaseParseZip(DBase* dbase, FILE* stream, int& errorFlags)
 // 0x4E5D9C dfile_fopen_helper
 static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* mode, DFile* dfile)
 {
+    bool profileEnabled = false;
+    bool pooled = false;
+    unsigned int openStart = 0;
+    unsigned int seekStart = 0;
     DBaseEntry* entry = (DBaseEntry*)bsearch(filePath, dbase->entries, dbase->entriesLength, sizeof(*dbase->entries), dbaseFindEntryByFilePath);
     if (entry == nullptr) {
         goto err;
@@ -952,8 +1080,13 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
         }
 
         if (dfile->stream != nullptr) {
-            fclose(dfile->stream);
+            dbaseReleaseStream(dfile->dbase, dfile->stream);
             dfile->stream = nullptr;
+        }
+
+        if (dfile->memoryBuffer != nullptr) {
+            free(dfile->memoryBuffer);
+            dfile->memoryBuffer = nullptr;
         }
 
         dfile->compressedBytesRead = 0;
@@ -963,15 +1096,30 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
 
     dfile->entry = entry;
 
+    profileEnabled = dfileProfileIsEnabled();
+
     // Open stream to .DAT file.
-    dfile->stream = compat_fopen(dbase->path, "rb");
+    openStart = profileEnabled ? compat_timeGetTime() : 0;
+    dfile->stream = dbaseAcquireStream(dbase, &pooled);
+    if (profileEnabled) {
+        if (pooled) {
+            gDfileProfilePooledOpenCount++;
+        } else {
+            gDfileProfileOpenCount++;
+            gDfileProfileOpenMs += compat_timeGetTime() - openStart;
+        }
+    }
     if (dfile->stream == nullptr) {
         goto err;
     }
 
     // Relocate stream to the beginning of data for specified entry.
+    seekStart = profileEnabled ? compat_timeGetTime() : 0;
     if (fseek(dfile->stream, dbase->dataOffset + entry->dataOffset, SEEK_SET) != 0) {
         goto err;
+    }
+    if (profileEnabled) {
+        gDfileProfileSeekMs += compat_timeGetTime() - seekStart;
     }
 
     if (entry->compressed == 1) {
@@ -994,6 +1142,14 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
         if (!dfileDecompressInit(dfile->decompressionStream, dbase->format, dfile->decompressionBuffer)) {
             goto err;
         }
+
+#ifdef __vita__
+        if (entry->uncompressedSize <= DFILE_MEMORY_BUFFER_MAX_SIZE) {
+            if (!dfileLoadMemoryBuffer(dfile)) {
+                goto err;
+            }
+        }
+#endif
     } else {
         // Entry is not compressed, there is no need to keep decompression
         // stream and decompression buffer (in case [dfile] was passed via
@@ -1027,6 +1183,23 @@ err:
 // 0x4E5F9C dfile_fgetc_helper
 static int dfileReadCharInternal(DFile* stream)
 {
+    if (stream->memoryBuffer != nullptr) {
+        if (stream->position >= stream->entry->uncompressedSize) {
+            return -1;
+        }
+
+        int ch = stream->memoryBuffer[stream->position++];
+        if ((stream->flags & DFILE_TEXT) != 0 && ch == '\r' && stream->position < stream->entry->uncompressedSize) {
+            int nextCh = stream->memoryBuffer[stream->position];
+            if (nextCh == '\n') {
+                ch = nextCh;
+                stream->position++;
+            }
+        }
+
+        return ch & 0xFF;
+    }
+
     if (stream->entry->compressed == 1) {
         char ch;
         if (!dfileReadCompressed(stream, &ch, sizeof(ch))) {
@@ -1083,6 +1256,9 @@ static int dfileReadCharInternal(DFile* stream)
 // 0x4E6078 dfile_read_comp_bytes
 static bool dfileReadCompressed(DFile* stream, void* ptr, size_t size)
 {
+    bool profileEnabled = dfileProfileIsEnabled();
+    size_t compressedBytesReadStart = profileEnabled ? stream->compressedBytesRead : 0;
+
     if ((stream->flags & DFILE_HAS_COMPRESSED_UNGETC) != 0) {
         unsigned char* byteBuffer = (unsigned char*)ptr;
         *byteBuffer++ = stream->compressedUngotten & 0xFF;
@@ -1130,6 +1306,44 @@ static bool dfileReadCompressed(DFile* stream, void* ptr, size_t size)
 
     stream->position += size;
 
+    if (profileEnabled) {
+        gDfileProfileCompressedReadCount++;
+        gDfileProfileCompressedReadBytes += static_cast<unsigned int>(stream->compressedBytesRead - compressedBytesReadStart);
+    }
+
+    return true;
+}
+
+static bool dfileLoadMemoryBuffer(DFile* stream)
+{
+    if (stream->entry->uncompressedSize < 0) {
+        return false;
+    }
+
+    if (stream->entry->uncompressedSize == 0) {
+        return true;
+    }
+
+    stream->memoryBuffer = static_cast<unsigned char*>(malloc(stream->entry->uncompressedSize));
+    if (stream->memoryBuffer == nullptr) {
+        return false;
+    }
+
+    if (!dfileReadCompressed(stream, stream->memoryBuffer, stream->entry->uncompressedSize)) {
+        free(stream->memoryBuffer);
+        stream->memoryBuffer = nullptr;
+        return false;
+    }
+
+    stream->position = 0;
+    stream->compressedBytesRead = 0;
+    stream->flags &= ~(DFILE_HAS_UNGETC | DFILE_HAS_COMPRESSED_UNGETC | DFILE_EOF);
+
+    if (stream->stream != nullptr) {
+        dbaseReleaseStream(stream->dbase, stream->stream);
+        stream->stream = nullptr;
+    }
+
     return true;
 }
 
@@ -1141,6 +1355,40 @@ static void dfileUngetCompressed(DFile* stream, int ch)
     stream->compressedUngotten = ch;
     stream->flags |= DFILE_HAS_COMPRESSED_UNGETC;
     stream->position--;
+}
+
+static bool dfileProfileIsEnabled()
+{
+#ifdef __vita__
+    if (!gDfileProfileChecked) {
+        gDfileProfileEnabled = compat_file_exists("ux0:data/Fallout2/profile_load.txt");
+        gDfileProfileChecked = true;
+    }
+
+    return gDfileProfileEnabled;
+#else
+    return false;
+#endif
+}
+
+static void dfileProfileLog(const char* format, ...)
+{
+    if (!dfileProfileIsEnabled()) {
+        return;
+    }
+
+    char message[512];
+
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    FILE* stream = compat_fopen("ux0:data/Fallout2/f2ce_load_profile.log", "a");
+    if (stream != nullptr) {
+        fprintf(stream, "%s\n", message);
+        fclose(stream);
+    }
 }
 
 } // namespace fallout

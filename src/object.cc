@@ -1,6 +1,8 @@
 #include "object.h"
 
 #include <assert.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <algorithm>
@@ -20,6 +22,7 @@
 #include "map.h"
 #include "memory.h"
 #include "party_member.h"
+#include "platform_compat.h"
 #include "proto.h"
 #include "proto_instance.h"
 #include "scripts.h"
@@ -32,6 +35,9 @@
 namespace fallout {
 
 static int objectLoadAllInternal(File* stream);
+static unsigned int objectProfileElapsedMs(unsigned int start);
+static bool objectProfileIsEnabled();
+static void objectProfileLog(const char* format, ...);
 static void _object_fix_weapon_ammo(Object* obj);
 static int objectWrite(Object* obj, File* stream);
 static int _obj_offset_table_init();
@@ -59,6 +65,9 @@ static int _obj_adjust_light(Object* obj, int a2, Rect* rect);
 static void objectDrawOutline(Object* object, Rect* rect);
 static void _obj_render_object(Object* object, Rect* rect, int light);
 static int _obj_preload_sort(const void* a1, const void* a2);
+
+static bool gObjectProfileChecked = false;
+static bool gObjectProfileEnabled = false;
 
 // 0x5195F8 objInitialized
 static bool gObjectsInitialized = false;
@@ -473,12 +482,64 @@ int objectLoadAll(File* stream)
     return rc;
 }
 
+static unsigned int objectProfileElapsedMs(unsigned int start)
+{
+    return compat_timeGetTime() - start;
+}
+
+static bool objectProfileIsEnabled()
+{
+#ifdef __vita__
+    if (!gObjectProfileChecked) {
+        gObjectProfileEnabled = compat_file_exists("ux0:data/Fallout2/profile_load.txt");
+        gObjectProfileChecked = true;
+    }
+
+    return gObjectProfileEnabled;
+#else
+    return false;
+#endif
+}
+
+static void objectProfileLog(const char* format, ...)
+{
+    if (!objectProfileIsEnabled()) {
+        return;
+    }
+
+    char message[512];
+
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    FILE* stream = compat_fopen("ux0:data/Fallout2/f2ce_load_profile.log", "a");
+    if (stream != nullptr) {
+        fprintf(stream, "%s\n", message);
+        fclose(stream);
+    }
+}
+
 // 0x488CF8 obj_load_func
 static int objectLoadAllInternal(File* stream)
 {
     if (stream == nullptr) {
         return -1;
     }
+
+    bool profileEnabled = objectProfileIsEnabled();
+    unsigned int profileStart = profileEnabled ? compat_timeGetTime() : 0;
+    unsigned int allocMs = 0;
+    unsigned int readMs = 0;
+    unsigned int scriptMs = 0;
+    unsigned int fixMs = 0;
+    unsigned int insertMs = 0;
+    unsigned int inventoryMs = 0;
+    unsigned int lightMs = 0;
+    int topLevelObjectCount = 0;
+    int inventoryObjectCount = 0;
+    int scriptedObjectCount = 0;
 
     bool fixMapInventory = settings.mapper.fix_map_inventory;
 
@@ -511,6 +572,7 @@ static int objectLoadAllInternal(File* stream)
         for (int objectIndex = 0; objectIndex < objectCountAtElevation; objectIndex++) {
             ObjectListNode* objectListNode;
 
+            unsigned int stageStart = profileEnabled ? compat_timeGetTime() : 0;
             // NOTE: Uninline.
             if (objectListNodeCreate(&objectListNode) == -1) {
                 return -1;
@@ -521,7 +583,9 @@ static int objectLoadAllInternal(File* stream)
                 objectListNodeDestroy(&objectListNode);
                 return -1;
             }
+            if (profileEnabled) allocMs += objectProfileElapsedMs(stageStart);
 
+            stageStart = profileEnabled ? compat_timeGetTime() : 0;
             if (objectRead(objectListNode->obj, stream) != 0) {
                 // NOTE: Uninline.
                 objectDeallocate(&(objectListNode->obj));
@@ -531,11 +595,15 @@ static int objectLoadAllInternal(File* stream)
 
                 return -1;
             }
+            if (profileEnabled) readMs += objectProfileElapsedMs(stageStart);
+            if (profileEnabled) topLevelObjectCount++;
 
             objectListNode->obj->outline = 0;
             gObjectFids[gObjectFidsLength++] = objectListNode->obj->fid;
 
+            stageStart = profileEnabled ? compat_timeGetTime() : 0;
             if (objectListNode->obj->sid != -1) {
+                if (profileEnabled) scriptedObjectCount++;
                 Script* script;
                 if (scriptGetScript(objectListNode->obj->sid, &script) == -1) {
                     objectListNode->obj->sid = -1;
@@ -545,16 +613,22 @@ static int objectLoadAllInternal(File* stream)
                     objectListNode->obj->scriptIndex = script->index;
                 }
             }
+            if (profileEnabled) scriptMs += objectProfileElapsedMs(stageStart);
 
+            stageStart = profileEnabled ? compat_timeGetTime() : 0;
             _obj_fix_violence_settings(&(objectListNode->obj->fid));
             objectListNode->obj->elevation = elevation;
+            if (profileEnabled) fixMs += objectProfileElapsedMs(stageStart);
 
+            stageStart = profileEnabled ? compat_timeGetTime() : 0;
             _obj_insert(objectListNode);
+            if (profileEnabled) insertMs += objectProfileElapsedMs(stageStart);
 
             if ((objectListNode->obj->flags & OBJECT_NO_REMOVE) && PID_TYPE(objectListNode->obj->pid) == OBJ_TYPE_CRITTER && objectListNode->obj->pid != 18000) {
                 objectListNode->obj->flags &= ~OBJECT_NO_REMOVE;
             }
 
+            stageStart = profileEnabled ? compat_timeGetTime() : 0;
             Inventory* inventory = &(objectListNode->obj->data.inventory);
             if (inventory->length != 0) {
                 inventory->items = (InventoryItem*)internal_malloc(sizeof(InventoryItem) * inventory->capacity);
@@ -580,20 +654,44 @@ static int objectLoadAllInternal(File* stream)
                             debugPrint("Error loading inventory\n");
                             return -1;
                         }
+                        if (profileEnabled) inventoryObjectCount++;
                     } else {
                         if (_obj_load_obj(stream, &(inventoryItem->item), elevation, objectListNode->obj) == -1) {
                             return -1;
                         }
+                        if (profileEnabled) inventoryObjectCount++;
                     }
                 }
             } else {
                 inventory->capacity = 0;
                 inventory->items = nullptr;
             }
+            if (profileEnabled) inventoryMs += objectProfileElapsedMs(stageStart);
         }
     }
 
+    // Warm art before rebuilding lights; light propagation asks objectGetRect(),
+    // which otherwise cold-loads art for many walls/tiles during load.
+    _obj_preload_art_cache(gMapHeader.flags);
+
+    unsigned int stageStart = profileEnabled ? compat_timeGetTime() : 0;
     _obj_rebuild_all_light();
+    if (profileEnabled) lightMs += objectProfileElapsedMs(stageStart);
+
+    if (profileEnabled) {
+        objectProfileLog("OBJECT PROFILE load: top=%d inventory=%d scripted=%d alloc=%u ms read=%u ms script=%u ms fix=%u ms insert=%u ms inventory=%u ms light=%u ms total=%u ms",
+            topLevelObjectCount,
+            inventoryObjectCount,
+            scriptedObjectCount,
+            allocMs,
+            readMs,
+            scriptMs,
+            fixMs,
+            insertMs,
+            inventoryMs,
+            lightMs,
+            objectProfileElapsedMs(profileStart));
+    }
 
     return 0;
 }
@@ -3179,6 +3277,21 @@ void _obj_preload_art_cache(int flags)
         return;
     }
 
+    bool profileEnabled = objectProfileIsEnabled();
+    unsigned int profileStart = profileEnabled ? compat_timeGetTime() : 0;
+    unsigned int squareScanMs = 0;
+    unsigned int sortMs = 0;
+    unsigned int objectArtMs = 0;
+    unsigned int tileArtMs = 0;
+    unsigned int wallArtMs = 0;
+    int objectArtLockCount = 0;
+    int objectArtHitCount = 0;
+    int tileArtLockCount = 0;
+    int tileArtHitCount = 0;
+    int wallArtLockCount = 0;
+    int wallArtHitCount = 0;
+
+    unsigned int stageStart = profileEnabled ? compat_timeGetTime() : 0;
     unsigned char arr[4096];
     memset(arr, 0, sizeof(arr));
 
@@ -3205,8 +3318,11 @@ void _obj_preload_art_cache(int flags)
             arr[(v3 >> 16) & 0xFFF] = 1;
         }
     }
+    if (profileEnabled) squareScanMs = objectProfileElapsedMs(stageStart);
 
+    stageStart = profileEnabled ? compat_timeGetTime() : 0;
     qsort(gObjectFids, gObjectFidsLength, sizeof(*gObjectFids), _obj_preload_sort);
+    if (profileEnabled) sortMs = objectProfileElapsedMs(stageStart);
 
     int v11 = gObjectFidsLength;
     int v12 = gObjectFidsLength;
@@ -3222,33 +3338,64 @@ void _obj_preload_art_cache(int flags)
     }
 
     CacheEntry* cache_handle;
+    stageStart = profileEnabled ? compat_timeGetTime() : 0;
+    if (profileEnabled) objectArtLockCount++;
     if (artLock(*gObjectFids, &cache_handle) != nullptr) {
+        if (profileEnabled) objectArtHitCount++;
         artUnlock(cache_handle);
     }
 
     for (int i = 1; i < v11; i++) {
         if (gObjectFids[i - 1] != gObjectFids[i]) {
+            if (profileEnabled) objectArtLockCount++;
             if (artLock(gObjectFids[i], &cache_handle) != nullptr) {
+                if (profileEnabled) objectArtHitCount++;
                 artUnlock(cache_handle);
             }
         }
     }
+    if (profileEnabled) objectArtMs = objectProfileElapsedMs(stageStart);
 
+    stageStart = profileEnabled ? compat_timeGetTime() : 0;
     for (int i = 0; i < 4096; i++) {
         if (arr[i] != 0) {
             int fid = buildFid(OBJ_TYPE_TILE, i, 0, 0, 0);
+            if (profileEnabled) tileArtLockCount++;
             if (artLock(fid, &cache_handle) != nullptr) {
+                if (profileEnabled) tileArtHitCount++;
                 artUnlock(cache_handle);
             }
         }
     }
+    if (profileEnabled) tileArtMs = objectProfileElapsedMs(stageStart);
 
+    stageStart = profileEnabled ? compat_timeGetTime() : 0;
     for (int i = v11; i < gObjectFidsLength; i++) {
         if (gObjectFids[i - 1] != gObjectFids[i]) {
+            if (profileEnabled) wallArtLockCount++;
             if (artLock(gObjectFids[i], &cache_handle) != nullptr) {
+                if (profileEnabled) wallArtHitCount++;
                 artUnlock(cache_handle);
             }
         }
+    }
+    if (profileEnabled) wallArtMs = objectProfileElapsedMs(stageStart);
+
+    if (profileEnabled) {
+        objectProfileLog("OBJECT PROFILE preload: fids=%d object_locks=%d/%d object=%u ms tile_locks=%d/%d tile=%u ms wall_locks=%d/%d wall=%u ms square=%u ms sort=%u ms total=%u ms",
+            gObjectFidsLength,
+            objectArtHitCount,
+            objectArtLockCount,
+            objectArtMs,
+            tileArtHitCount,
+            tileArtLockCount,
+            tileArtMs,
+            wallArtHitCount,
+            wallArtLockCount,
+            wallArtMs,
+            squareScanMs,
+            sortMs,
+            objectProfileElapsedMs(profileStart));
     }
 
     internal_free(gObjectFids);

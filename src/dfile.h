@@ -27,6 +27,8 @@ typedef struct DBase DBase;
 typedef struct DBaseEntry DBaseEntry;
 typedef struct DFile DFile;
 
+#define DBASE_STREAM_POOL_SIZE 4
+
 // A representation of .DAT or .ZIP file.
 typedef struct DBase {
     // The path of archive file that this structure represents.
@@ -46,6 +48,10 @@ typedef struct DBase {
 
     // The head of linked list of open file handles.
     DFile* dfileHead;
+
+    // Idle archive streams reused by read-only DFile handles.
+    FILE* streamPool[DBASE_STREAM_POOL_SIZE];
+    int streamPoolLength;
 } DBase;
 
 typedef struct DBaseEntry {
@@ -63,11 +69,10 @@ typedef struct DFile {
     int flags;
 
     // The stream of .DAT file opened for reading in binary mode.
-    //
-    // This stream is not shared across open handles. Instead every [DFile]
-    // opens it's own stream via [fopen], which is then closed via [fclose] in
-    // [dfileClose].
     FILE* stream;
+
+    // Optional fully decompressed contents for small compressed entries.
+    unsigned char* memoryBuffer;
 
     // The inflate stream used to decompress data.
     //
@@ -136,6 +141,8 @@ bool dbaseFindClose(DBase* dbase, DFileFindData* findFileData);
 long dfileGetSize(DFile* stream);
 int dfileClose(DFile* stream);
 DFile* dfileOpen(DBase* dbase, const char* filename, const char* mode);
+void dfileProfileReset(const char* label);
+void dfileProfileReport();
 int dfilePrintFormattedArgs(DFile* stream, const char* format, va_list args);
 int dfileReadChar(DFile* stream);
 char* dfileReadString(char* str, int size, DFile* stream);

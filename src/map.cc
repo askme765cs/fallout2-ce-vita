@@ -16,6 +16,7 @@
 #include "critter.h"
 #include "cycle.h"
 #include "debug.h"
+#include "dfile.h"
 #include "draw.h"
 #include "elevator.h"
 #include "game.h"
@@ -1026,9 +1027,11 @@ static int mapLoad(File* stream)
 
     error = "Error reading objects";
     stageStart = compat_timeGetTime();
+    dfileProfileReset("mapLoad objects");
     if (objectLoadAll(stream) != 0) {
         goto err;
     }
+    dfileProfileReport();
     mapProfileLog("mapLoad objects: %u ms", mapProfileElapsedMs(stageStart));
 
     stageStart = compat_timeGetTime();
@@ -1129,7 +1132,9 @@ err:
         rc = -1;
     } else {
         stageStart = compat_timeGetTime();
+        dfileProfileReset("mapLoad art preload");
         _obj_preload_art_cache(gMapHeader.flags);
+        dfileProfileReport();
         mapProfileLog("mapLoad art preload: %u ms", mapProfileElapsedMs(stageStart));
     }
 
