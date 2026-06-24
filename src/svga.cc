@@ -3,6 +3,8 @@
 #include <limits.h>
 #include <string.h>
 
+#include <algorithm>
+
 #include <SDL.h>
 
 #include "config.h"
@@ -358,6 +360,34 @@ void _GNW95_ShowRect(unsigned char* src, int srcPitch, int unused, int srcX, int
 {
     (void)unused;
 
+    if (src == nullptr || gSdlSurface == nullptr || gSdlSurface->pixels == nullptr || srcWidth <= 0 || srcHeight <= 0) {
+        return;
+    }
+
+    if (destX < 0) {
+        srcX -= destX;
+        srcWidth += destX;
+        destX = 0;
+    }
+
+    if (destY < 0) {
+        srcY -= destY;
+        srcHeight += destY;
+        destY = 0;
+    }
+
+    if (destX + srcWidth > gSdlSurface->w) {
+        srcWidth = gSdlSurface->w - destX;
+    }
+
+    if (destY + srcHeight > gSdlSurface->h) {
+        srcHeight = gSdlSurface->h - destY;
+    }
+
+    if (srcWidth <= 0 || srcHeight <= 0) {
+        return;
+    }
+
     blitBufferToBuffer(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch, (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + destX, gSdlSurface->pitch);
 
 #ifdef __vita__
@@ -515,7 +545,19 @@ void renderPresent()
 #ifdef __vita__
 void renderVita2dFrame(SDL_Surface* surface)
 {
-    memcpy(palettedTexturePointer, surface->pixels, surface->w * surface->h * sizeof(uint8_t));
+    if (surface == nullptr || surface->pixels == nullptr || texBuffer == nullptr || palettedTexturePointer == nullptr) {
+        return;
+    }
+
+    const int copyWidth = std::min(surface->w, static_cast<int>(vita2d_texture_get_width(texBuffer)));
+    const int copyHeight = std::min(surface->h, static_cast<int>(vita2d_texture_get_height(texBuffer)));
+    const int texturePitch = static_cast<int>(vita2d_texture_get_stride(texBuffer));
+
+    const uint8_t* src = static_cast<const uint8_t*>(surface->pixels);
+    for (int y = 0; y < copyHeight; y++) {
+        memcpy(palettedTexturePointer + y * texturePitch, src + y * surface->pitch, copyWidth);
+    }
+
     vita2d_start_drawing();
     vita2d_draw_rectangle(0, 0, VITA_FULLSCREEN_WIDTH, VITA_FULLSCREEN_HEIGHT, 0xff000000);
     vita2d_draw_texture_scale(texBuffer, renderRect.x, renderRect.y, (float)(renderRect.w) / surface->w, (float)(renderRect.h) / surface->h);
@@ -535,7 +577,7 @@ void updateVita2dPalette(SDL_Color* colors, int start, int count)
         palette32Bit[i] = SDL_MapRGBA(vitaPaletteSurface->format, colors[i].r, colors[i].g, colors[i].b, colors[i].a);
     }
 
-    memcpy(vita2d_texture_get_palette(texBuffer) + start * sizeof(uint32_t), palette32Bit, sizeof(uint32_t) * count);
+    memcpy(static_cast<uint8_t*>(vita2d_texture_get_palette(texBuffer)) + start * sizeof(uint32_t), palette32Bit, sizeof(uint32_t) * count);
 }
 
 void setRenderRect(int width, int height, bool fullscreen)

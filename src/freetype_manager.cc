@@ -439,7 +439,6 @@ static void FtFontSetCurrentImpl(int font)
     if (font >= 0 && font < FT_FONT_MAX && gFtFontDescriptors[font].filebuffer != NULL) {
         gCurrentFtFont = font;
         current = &(gFtFontDescriptors[font]);
-        debugPrint("FtFontSetCurrentImpl: set current=%d\n", font);
     }
 }
 

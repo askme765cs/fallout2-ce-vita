@@ -60,6 +60,10 @@ static void audioEngineMixin(void* userData, Uint8* stream, int length)
 
         if (soundBuffer->active && soundBuffer->playing) {
             int srcFrameSize = soundBuffer->bitsPerSample / 8 * soundBuffer->channels;
+            if (srcFrameSize <= 0 || soundBuffer->size == 0 || soundBuffer->data == nullptr || soundBuffer->stream == nullptr) {
+                soundBuffer->playing = false;
+                continue;
+            }
 
             unsigned char buffer[1024];
             int pos = 0;
@@ -70,7 +74,19 @@ static void audioEngineMixin(void* userData, Uint8* stream, int length)
                 }
 
                 // TODO: Make something better than frame-by-frame convertion.
-                SDL_AudioStreamPut(soundBuffer->stream, (unsigned char*)soundBuffer->data + soundBuffer->pos, srcFrameSize);
+                if (soundBuffer->pos + srcFrameSize > soundBuffer->size) {
+                    if (soundBuffer->looping) {
+                        soundBuffer->pos = 0;
+                    } else {
+                        soundBuffer->playing = false;
+                        break;
+                    }
+                }
+
+                if (SDL_AudioStreamPut(soundBuffer->stream, (unsigned char*)soundBuffer->data + soundBuffer->pos, srcFrameSize) == -1) {
+                    soundBuffer->playing = false;
+                    break;
+                }
                 soundBuffer->pos += srcFrameSize;
 
                 int bytesRead = SDL_AudioStreamGet(soundBuffer->stream, buffer, remaining);
@@ -179,12 +195,16 @@ bool audioEngineSoundBufferRelease(int soundBufferIndex)
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    SDL_LockAudioDevice(gAudioEngineDeviceId);
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
 
     if (!soundBuffer->active) {
+        SDL_UnlockAudioDevice(gAudioEngineDeviceId);
         return false;
     }
 
+    soundBuffer->playing = false;
+    soundBuffer->looping = false;
     soundBuffer->active = false;
 
     free(soundBuffer->data);
@@ -192,6 +212,8 @@ bool audioEngineSoundBufferRelease(int soundBufferIndex)
 
     SDL_FreeAudioStream(soundBuffer->stream);
     soundBuffer->stream = nullptr;
+
+    SDL_UnlockAudioDevice(gAudioEngineDeviceId);
 
     return true;
 }
