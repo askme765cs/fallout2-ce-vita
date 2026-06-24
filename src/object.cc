@@ -412,26 +412,28 @@ void objectsExit()
 // 0x488AF4 obj_read_obj
 int objectRead(Object* obj, File* stream)
 {
-    int field_74;
+    int values[18];
+    if (fileReadInt32List(stream, values, 18) == -1) {
+        return -1;
+    }
 
-    if (fileReadInt32(stream, &(obj->id)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->tile)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->x)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->y)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->sx)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->sy)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->frame)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->rotation)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->fid)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->flags)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->elevation)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->pid)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->cid)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->lightDistance)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->lightIntensity)) == -1) return -1;
-    if (fileReadInt32(stream, &field_74) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->sid)) == -1) return -1;
-    if (fileReadInt32(stream, &(obj->scriptIndex)) == -1) return -1;
+    obj->id = values[0];
+    obj->tile = values[1];
+    obj->x = values[2];
+    obj->y = values[3];
+    obj->sx = values[4];
+    obj->sy = values[5];
+    obj->frame = values[6];
+    obj->rotation = values[7];
+    obj->fid = values[8];
+    obj->flags = values[9];
+    obj->elevation = values[10];
+    obj->pid = values[11];
+    obj->cid = values[12];
+    obj->lightDistance = values[13];
+    obj->lightIntensity = values[14];
+    obj->sid = values[16];
+    obj->scriptIndex = values[17];
 
     obj->outline = 0;
     obj->owner = nullptr;
@@ -3872,9 +3874,6 @@ static void _obj_insert(ObjectListNode* objectListNode)
     if (objectListNode->obj->tile == -1) {
         objectListNodePtr = &gObjectListHead;
     } else {
-        Art* art = nullptr;
-        CacheEntry* cacheHandle = nullptr;
-
         objectListNodePtr = &(gObjectListHeadByTile[objectListNode->obj->tile]);
 
         while (*objectListNodePtr != nullptr) {
@@ -3890,30 +3889,16 @@ static void _obj_insert(ObjectListNode* objectListNode)
 
                 if ((obj->flags & OBJECT_FLAT) == (objectListNode->obj->flags & OBJECT_FLAT)) {
                     bool v11 = false;
-                    CacheEntry* a2;
-                    Art* v12 = artLock(obj->fid, &a2);
-                    if (v12 != nullptr) {
-
-                        if (art == nullptr) {
-                            art = artLock(objectListNode->obj->fid, &cacheHandle);
-                        }
-
-                        // TODO: Incomplete.
-
-                        artUnlock(a2);
-
-                        if (v11) {
-                            break;
-                        }
+                    // TODO: Incomplete original draw-order comparison.
+                    // Avoid locking art here; the placeholder never changed
+                    // behavior, but it makes map loading extremely slow on Vita.
+                    if (v11) {
+                        break;
                     }
                 }
             }
 
             objectListNodePtr = &((*objectListNodePtr)->next);
-        }
-
-        if (art != nullptr) {
-            artUnlock(cacheHandle);
         }
     }
 

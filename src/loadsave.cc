@@ -1,6 +1,7 @@
 #include "loadsave.h"
 
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -172,6 +173,12 @@ static int _get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* de
 static int _DummyFunc(File* stream);
 static int _PrepLoad(File* stream);
 static int _EndLoad(File* stream);
+static unsigned int loadSaveElapsedMs(unsigned int start);
+static bool loadSaveProfileIsEnabled();
+static void loadSaveProfileBegin(int slot);
+static void loadSaveProfileLog(const char* format, ...);
+static void loadSaveProfileEnd();
+static void loadSaveRunIoBenchmark();
 static int _GameMap2Slot(File* stream);
 static int _SlotMap2Game(File* stream);
 static int _mygets(char* dest, File* stream);
@@ -328,6 +335,11 @@ static char _str0[COMPAT_MAX_PATH];
 
 // 0x6144F8 str1
 static char _str1[COMPAT_MAX_PATH];
+
+static FILE* gLoadSaveProfileStream = nullptr;
+static bool gLoadSaveProfileChecked = false;
+static bool gLoadSaveProfileEnabled = false;
+static bool gLoadSaveIoBenchmarkDone = false;
 
 // 0x6145FC str
 static char _str[COMPAT_MAX_PATH];
@@ -1968,6 +1980,8 @@ bool _isLoadingGame()
 // 0x47DC68
 static int lsgLoadGameInSlot(int slot)
 {
+    unsigned int loadStart = compat_timeGetTime();
+
     if (slot < 0 || slot >= saveLoadTotalSlots) {
         return -1;
     }
@@ -1994,9 +2008,14 @@ static int lsgLoadGameInSlot(int slot)
         return -1;
     }
 
+    loadSaveProfileBegin(slot);
+
     long pos = fileTell(_flptr);
+    unsigned int headerStart = compat_timeGetTime();
     if (lsgLoadHeaderInSlot(slot) == -1) {
         debugPrint("\nLOADSAVE: ** Error reading save  game header! **\n");
+        loadSaveProfileLog("ERROR: reading save header failed");
+        loadSaveProfileEnd();
         fileClose(_flptr);
         gameReset();
         _loadingGame = false;
@@ -2007,15 +2026,19 @@ static int lsgLoadGameInSlot(int slot)
     debugPrint("\nLOADSAVE: Load name: %s\n", ptr->description);
 
     debugPrint("LOADSAVE: Load file header size read: %d bytes.\n", fileTell(_flptr) - pos);
+    loadSaveProfileLog("header: %d bytes in %u ms", fileTell(_flptr) - pos, loadSaveElapsedMs(headerStart));
 
     for (int index = 0; index < LOAD_SAVE_HANDLER_COUNT; index += 1) {
         long pos = fileTell(_flptr);
         LoadGameHandler* handler = _master_load_list[index];
+        unsigned int handlerStart = compat_timeGetTime();
         debugPrint("LOADSAVE: Begin load function #%d.\n", index);
         if (handler(_flptr) == -1) {
             debugPrint("\nLOADSAVE: ** Error reading load function #%d data! **\n", index);
             int v12 = fileTell(_flptr);
             debugPrint("LOADSAVE: Load function #%d data size read: %d bytes.\n", index, fileTell(_flptr) - pos);
+            loadSaveProfileLog("handler #%d ERROR after %d bytes in %u ms", index, fileTell(_flptr) - pos, loadSaveElapsedMs(handlerStart));
+            loadSaveProfileEnd();
             fileClose(_flptr);
             gameReset();
             _loadingGame = false;
@@ -2023,9 +2046,11 @@ static int lsgLoadGameInSlot(int slot)
         }
 
         debugPrint("LOADSAVE: Load function #%d data size read: %d bytes.\n", index, fileTell(_flptr) - pos);
+        loadSaveProfileLog("handler #%d: %d bytes in %u ms", index, fileTell(_flptr) - pos, loadSaveElapsedMs(handlerStart));
     }
 
     debugPrint("LOADSAVE: Total load data read: %ld bytes.\n", fileTell(_flptr));
+    loadSaveProfileLog("SAVE.DAT handlers total: %ld bytes in %u ms", fileTell(_flptr), loadSaveElapsedMs(loadStart));
     fileClose(_flptr);
 
     // SFALL: Load sfallgv.sav.
@@ -2034,16 +2059,22 @@ static int lsgLoadGameInSlot(int slot)
 
     _flptr = fileOpen(_gmpath, "rb");
     if (_flptr != nullptr) {
+        unsigned int sfallStart = compat_timeGetTime();
         bool loaded = sfallLoadGameData(_flptr);
         fileClose(_flptr);
+        loadSaveProfileLog("sfallgv.sav: %u ms", loadSaveElapsedMs(sfallStart));
         if (!loaded) {
+            loadSaveProfileLog("ERROR: sfallgv.sav load failed");
+            loadSaveProfileEnd();
             return -1;
         }
     }
 
+    unsigned int postStart = compat_timeGetTime();
     snprintf(_str, sizeof(_str), "%s\\", "MAPS");
     MapDirErase(_str, "BAK");
     _proto_dude_update_gender();
+    loadSaveProfileLog("post-load cleanup/gender update: %u ms", loadSaveElapsedMs(postStart));
 
     // Game Loaded.
     gLoadSaveMessageListItem.num = 141;
@@ -2060,6 +2091,9 @@ static int lsgLoadGameInSlot(int slot)
     // SFALL: Call "after start" event
     sfallOnAfterGameStarted();
     gGameLoaded = true;
+
+    loadSaveProfileLog("load slot %d finished in %u ms", slot + 1, loadSaveElapsedMs(loadStart));
+    loadSaveProfileEnd();
 
     return 0;
 }
@@ -2270,6 +2304,8 @@ static int lsgLoadHeaderInSlot(int slot)
 // 0x47E5D0
 static int _GetSlotList()
 {
+    unsigned int slotListStart = compat_timeGetTime();
+
     int index = 0;
     for (; index < saveLoadTotalSlots; index += 1) {
         snprintf(_str, sizeof(_str), "%s\\%s%.2d\\%s", "SAVEGAME", "SLOT", index + 1, "SAVE.DAT");
@@ -2300,6 +2336,7 @@ static int _GetSlotList()
             fileClose(_flptr);
         }
     }
+    loadSaveProfileLog("slot list scan: %d slots in %u ms", index, loadSaveElapsedMs(slotListStart));
     return index;
 }
 
@@ -2736,12 +2773,195 @@ static int _DummyFunc(File* stream)
     return 0;
 }
 
+static unsigned int loadSaveElapsedMs(unsigned int start)
+{
+    return compat_timeGetTime() - start;
+}
+
+static bool loadSaveProfileIsEnabled()
+{
+#ifdef __vita__
+    if (!gLoadSaveProfileChecked) {
+        gLoadSaveProfileEnabled = compat_file_exists("ux0:data/Fallout2/profile_load.txt");
+        gLoadSaveProfileChecked = true;
+    }
+
+    return gLoadSaveProfileEnabled;
+#else
+    return false;
+#endif
+}
+
+static void loadSaveProfileBegin(int slot)
+{
+#ifdef __vita__
+    if (!loadSaveProfileIsEnabled()) {
+        return;
+    }
+
+    if (gLoadSaveProfileStream == nullptr) {
+        gLoadSaveProfileStream = compat_fopen("ux0:data/Fallout2/f2ce_load_profile.log", "a");
+    }
+#endif
+
+    loadSaveProfileLog("");
+    loadSaveProfileLog("=== load slot %d begin at %u ms ===", slot + 1, compat_timeGetTime());
+    loadSaveRunIoBenchmark();
+}
+
+static void loadSaveProfileLog(const char* format, ...)
+{
+    if (!loadSaveProfileIsEnabled()) {
+        return;
+    }
+
+    char message[512];
+
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    debugPrint("LOADSAVE PROFILE: %s\n", message);
+
+#ifdef __vita__
+    if (gLoadSaveProfileStream == nullptr) {
+        gLoadSaveProfileStream = compat_fopen("ux0:data/Fallout2/f2ce_load_profile.log", "a");
+    }
+
+    if (gLoadSaveProfileStream != nullptr) {
+        fprintf(gLoadSaveProfileStream, "%s\n", message);
+        fflush(gLoadSaveProfileStream);
+    }
+#endif
+}
+
+static void loadSaveProfileEnd()
+{
+    if (!loadSaveProfileIsEnabled()) {
+        return;
+    }
+
+    loadSaveProfileLog("=== load end ===");
+
+#ifdef __vita__
+    if (gLoadSaveProfileStream != nullptr) {
+        fclose(gLoadSaveProfileStream);
+        gLoadSaveProfileStream = nullptr;
+    }
+#endif
+}
+
+static void loadSaveRunIoBenchmark()
+{
+#ifndef __vita__
+    return;
+#else
+    if (gLoadSaveIoBenchmarkDone) {
+        return;
+    }
+
+    gLoadSaveIoBenchmarkDone = true;
+
+    constexpr int kBufferSize = 64 * 1024;
+    constexpr int kTotalSize = 4 * 1024 * 1024;
+    constexpr int kSmallFileCount = 64;
+    constexpr int kSmallFileSize = 1024;
+
+    unsigned char* buffer = static_cast<unsigned char*>(internal_malloc(kBufferSize));
+    if (buffer == nullptr) {
+        loadSaveProfileLog("IO benchmark: skipped, no buffer");
+        return;
+    }
+
+    for (int index = 0; index < kBufferSize; index++) {
+        buffer[index] = static_cast<unsigned char>(index);
+    }
+
+    const char* largePath = "ux0:data/Fallout2/f2ce_io_test.tmp";
+
+    unsigned int writeStart = compat_timeGetTime();
+    FILE* stream = compat_fopen(largePath, "wb");
+    int bytesWrittenTotal = 0;
+    if (stream != nullptr) {
+        for (int offset = 0; offset < kTotalSize; offset += kBufferSize) {
+            size_t bytesWritten = fwrite(buffer, 1, kBufferSize, stream);
+            bytesWrittenTotal += static_cast<int>(bytesWritten);
+            if (bytesWritten != kBufferSize) {
+                break;
+            }
+        }
+        fflush(stream);
+        fclose(stream);
+    }
+    unsigned int writeMs = loadSaveElapsedMs(writeStart);
+
+    unsigned int readStart = compat_timeGetTime();
+    stream = compat_fopen(largePath, "rb");
+    int bytesReadTotal = 0;
+    if (stream != nullptr) {
+        size_t bytesRead;
+        while ((bytesRead = fread(buffer, 1, kBufferSize, stream)) > 0) {
+            bytesReadTotal += static_cast<int>(bytesRead);
+        }
+        fclose(stream);
+    }
+    unsigned int readMs = loadSaveElapsedMs(readStart);
+    compat_remove(largePath);
+
+    unsigned int smallStart = compat_timeGetTime();
+    int smallFilesWritten = 0;
+    for (int index = 0; index < kSmallFileCount; index++) {
+        char path[COMPAT_MAX_PATH];
+        snprintf(path, sizeof(path), "ux0:data/Fallout2/f2ce_io_%03d.tmp", index);
+        stream = compat_fopen(path, "wb");
+        if (stream == nullptr) {
+            break;
+        }
+        size_t bytesWritten = fwrite(buffer, 1, kSmallFileSize, stream);
+        fclose(stream);
+        if (bytesWritten != kSmallFileSize) {
+            compat_remove(path);
+            break;
+        }
+        smallFilesWritten++;
+    }
+    unsigned int smallWriteMs = loadSaveElapsedMs(smallStart);
+
+    unsigned int smallDeleteStart = compat_timeGetTime();
+    for (int index = 0; index < smallFilesWritten; index++) {
+        char path[COMPAT_MAX_PATH];
+        snprintf(path, sizeof(path), "ux0:data/Fallout2/f2ce_io_%03d.tmp", index);
+        compat_remove(path);
+    }
+    unsigned int smallDeleteMs = loadSaveElapsedMs(smallDeleteStart);
+
+    internal_free(buffer);
+
+    loadSaveProfileLog("IO benchmark: seq write %d bytes in %u ms (%u KB/s)",
+        bytesWrittenTotal,
+        writeMs,
+        writeMs != 0 ? static_cast<unsigned int>(bytesWrittenTotal / writeMs) : 0);
+    loadSaveProfileLog("IO benchmark: seq read %d bytes in %u ms (%u KB/s)",
+        bytesReadTotal,
+        readMs,
+        readMs != 0 ? static_cast<unsigned int>(bytesReadTotal / readMs) : 0);
+    loadSaveProfileLog("IO benchmark: small write %d x %d bytes in %u ms, delete in %u ms",
+        smallFilesWritten,
+        kSmallFileSize,
+        smallWriteMs,
+        smallDeleteMs);
+#endif
+}
+
 // 0x47F490
 static int _PrepLoad(File* stream)
 {
     int oldFont = fontGetCurrent();
     fontSetCurrent(0);
+    unsigned int resetStart = compat_timeGetTime();
     gameReset();
+    loadSaveProfileLog("_PrepLoad gameReset: %u ms", loadSaveElapsedMs(resetStart));
     fontSetCurrent(oldFont);
     gameMouseSetCursor(MOUSE_CURSOR_WAIT_PLANET);
     gMapHeader.name[0] = '\0';
@@ -2752,6 +2972,7 @@ static int _PrepLoad(File* stream)
 // 0x47F4C8
 static int _EndLoad(File* stream)
 {
+    unsigned int endStart = compat_timeGetTime();
     wmMapMusicStart();
     dudeSetName(_LSData[_slot_cursor].characterName);
     interfaceBarRefresh();
@@ -2760,6 +2981,7 @@ static int _EndLoad(File* stream)
     if (isInCombat()) {
         scriptsRequestCombat(nullptr);
     }
+    loadSaveProfileLog("_EndLoad refresh/music: %u ms", loadSaveElapsedMs(endStart));
     return 0;
 }
 
@@ -2879,6 +3101,7 @@ static int _GameMap2Slot(File* stream)
 // 0x47F990
 static int _SlotMap2Game(File* stream)
 {
+    unsigned int slotMapStart = compat_timeGetTime();
     debugPrint("LOADSAVE: in SlotMap2Game\n");
 
     int fileNameListLength;
@@ -2892,6 +3115,9 @@ static int _SlotMap2Game(File* stream)
         return -1;
     }
 
+    loadSaveProfileLog("SlotMap2Game map file count: %d", fileNameListLength);
+
+    unsigned int eraseStart = compat_timeGetTime();
     snprintf(_str0, sizeof(_str0), "%s\\", PROTO_DIR_NAME "\\" CRITTERS_DIR_NAME);
 
     if (MapDirErase(_str0, PROTO_FILE_EXT) == -1) {
@@ -2910,10 +3136,13 @@ static int _SlotMap2Game(File* stream)
         debugPrint("LOADSAVE: returning 5\n");
         return -1;
     }
+    loadSaveProfileLog("SlotMap2Game erase dirs: %u ms", loadSaveElapsedMs(eraseStart));
 
     snprintf(_str0, sizeof(_str0), "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
     compat_remove(_str0);
 
+    unsigned int protoStart = compat_timeGetTime();
+    int protoCopyCount = 0;
     for (int index = 1; index < gPartyMemberDescriptionsLength; index += 1) {
         int pid = gPartyMemberPids[index];
         if (pid != -2) {
@@ -2933,10 +3162,14 @@ static int _SlotMap2Game(File* stream)
                     debugPrint("LOADSAVE: returning 6\n");
                     return -1;
                 }
+                protoCopyCount++;
             }
         }
     }
+    loadSaveProfileLog("SlotMap2Game copy protos: %d files in %u ms", protoCopyCount, loadSaveElapsedMs(protoStart));
 
+    unsigned int mapCopyStart = compat_timeGetTime();
+    int mapCopyCount = 0;
     for (int index = 0; index < fileNameListLength; index += 1) {
         char fileName[COMPAT_MAX_PATH];
         if (_mygets(fileName, stream) == -1) {
@@ -2954,8 +3187,11 @@ static int _SlotMap2Game(File* stream)
             debugPrint("LOADSAVE: returning 7\n");
             return -1;
         }
+        mapCopyCount++;
     }
+    loadSaveProfileLog("SlotMap2Game copy maps: %d files in %u ms", mapCopyCount, loadSaveElapsedMs(mapCopyStart));
 
+    unsigned int automapStart = compat_timeGetTime();
     const char* automapFileName = _strmfe(_str1, "AUTOMAP.DB", "SAV");
     snprintf(_str0, sizeof(_str0), "%s\\%s\\%s%.2d\\%s", _patches, "SAVEGAME", "SLOT", _slot_cursor + 1, automapFileName);
     snprintf(_str1, sizeof(_str1), "%s\\%s\\%s", _patches, "MAPS", "AUTOMAP.DB");
@@ -2963,6 +3199,7 @@ static int _SlotMap2Game(File* stream)
         debugPrint("LOADSAVE: returning 8\n");
         return -1;
     }
+    loadSaveProfileLog("SlotMap2Game copy automap: %u ms", loadSaveElapsedMs(automapStart));
 
     snprintf(_str1, sizeof(_str1), "%s\\%s", "MAPS", "AUTOMAP.DB");
 
@@ -2972,10 +3209,13 @@ static int _SlotMap2Game(File* stream)
         return -1;
     }
 
+    unsigned int mapLoadStart = compat_timeGetTime();
     if (mapLoadSaved(_LSData[_slot_cursor].fileName) == -1) {
         debugPrint("LOADSAVE: returning 13\n");
         return -1;
     }
+    loadSaveProfileLog("mapLoadSaved(%s): %u ms", _LSData[_slot_cursor].fileName, loadSaveElapsedMs(mapLoadStart));
+    loadSaveProfileLog("SlotMap2Game total: %u ms", loadSaveElapsedMs(slotMapStart));
 
     return 0;
 }

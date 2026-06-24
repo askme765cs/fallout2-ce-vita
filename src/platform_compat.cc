@@ -39,7 +39,9 @@ static void compat_prepare_native_path(char* nativePath, const char* path)
     strncpy(nativePath, path, COMPAT_MAX_PATH - 1);
     nativePath[COMPAT_MAX_PATH - 1] = '\0';
     compat_windows_path_to_native(nativePath);
+#ifndef __vita__
     compat_resolve_path(nativePath);
+#endif
 }
 
 int compat_stricmp(const char* string1, const char* string2)

@@ -1,6 +1,7 @@
 #include "map.h"
 
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -30,6 +31,7 @@
 #include "memory.h"
 #include "object.h"
 #include "party_member.h"
+#include "platform_compat.h"
 #include "proto.h"
 #include "proto_instance.h"
 #include "queue.h"
@@ -70,6 +72,9 @@ static void _square_reset();
 static int _square_load(File* stream, int flags);
 static int mapHeaderWrite(MapHeader* ptr, File* stream);
 static int mapHeaderRead(MapHeader* ptr, File* stream);
+static unsigned int mapProfileElapsedMs(unsigned int start);
+static bool mapProfileIsEnabled();
+static void mapProfileLog(const char* format, ...);
 
 // 0x50B058
 static char byte_50B058[] = "";
@@ -79,6 +84,10 @@ static char _aErrorF2[] = "ERROR! F2";
 
 // 0x519540 map_scroll_refresh
 static IsoWindowRefreshProc* _map_scroll_refresh = isoWindowRefreshRectGame;
+
+static FILE* gMapProfileStream = nullptr;
+static bool gMapProfileChecked = false;
+static bool gMapProfileEnabled = false;
 
 // 0x519544 map_data_elev_flags
 static const int _map_data_elev_flags[ELEVATION_COUNT] = {
@@ -853,9 +862,58 @@ int mapLoadById(int map)
     return rc;
 }
 
+static unsigned int mapProfileElapsedMs(unsigned int start)
+{
+    return compat_timeGetTime() - start;
+}
+
+static bool mapProfileIsEnabled()
+{
+#ifdef __vita__
+    if (!gMapProfileChecked) {
+        gMapProfileEnabled = compat_file_exists("ux0:data/Fallout2/profile_load.txt");
+        gMapProfileChecked = true;
+    }
+
+    return gMapProfileEnabled;
+#else
+    return false;
+#endif
+}
+
+static void mapProfileLog(const char* format, ...)
+{
+    if (!mapProfileIsEnabled()) {
+        return;
+    }
+
+    char message[512];
+
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    debugPrint("MAP PROFILE: %s\n", message);
+
+#ifdef __vita__
+    if (gMapProfileStream == nullptr) {
+        gMapProfileStream = compat_fopen("ux0:data/Fallout2/f2ce_load_profile.log", "a");
+    }
+
+    if (gMapProfileStream != nullptr) {
+        fprintf(gMapProfileStream, "%s\n", message);
+        fflush(gMapProfileStream);
+    }
+#endif
+}
+
 // 0x482B74 map_load_file
 static int mapLoad(File* stream)
 {
+    unsigned int mapLoadStart = compat_timeGetTime();
+    unsigned int stageStart = mapLoadStart;
+
     int mapLoadSoundId = 0;
     if (!settings.system.executableIsMapper()) {
         _map_save_in_game(true);
@@ -873,6 +931,7 @@ static int mapLoad(File* stream)
     gameMouseSetCursor(MOUSE_CURSOR_WAIT_PLANET);
     fileSetReadProgressHandler(gameMouseRefreshImmediately, 32768);
     tileDisable();
+    mapProfileLog("mapLoad setup: %u ms", mapProfileElapsedMs(stageStart));
 
     int rc = 0;
 
@@ -896,9 +955,11 @@ static int mapLoad(File* stream)
     }
 
     error = "Error reading header";
+    stageStart = compat_timeGetTime();
     if (mapHeaderRead(&gMapHeader, stream) != 0) {
         goto err;
     }
+    mapProfileLog("mapLoad header: %u ms", mapProfileElapsedMs(stageStart));
 
     error = "Invalid map version";
     if (gMapHeader.version != 19 && gMapHeader.version != 20) {
@@ -910,7 +971,9 @@ static int mapLoad(File* stream)
         mapSetEnteringLocation(gMapHeader.enteringElevation, gMapHeader.enteringTile, gMapHeader.enteringRotation);
     }
 
+    stageStart = compat_timeGetTime();
     _obj_remove_all();
+    mapProfileLog("mapLoad remove objects: %u ms", mapProfileElapsedMs(stageStart));
 
     if (gMapHeader.globalVariablesCount < 0) {
         gMapHeader.globalVariablesCount = 0;
@@ -922,6 +985,7 @@ static int mapLoad(File* stream)
 
     error = "Error allocating global vars";
     // NOTE: Uninline.
+    stageStart = compat_timeGetTime();
     if (mapGlobalVariablesInit(gMapHeader.globalVariablesCount) != 0) {
         goto err;
     }
@@ -931,9 +995,11 @@ static int mapLoad(File* stream)
     if (mapGlobalVariablesLoad(stream) != 0) {
         goto err;
     }
+    mapProfileLog("mapLoad global vars: %u ms", mapProfileElapsedMs(stageStart));
 
     error = "Error allocating local vars";
     // NOTE: Uninline.
+    stageStart = compat_timeGetTime();
     if (mapLocalVariablesInit(gMapHeader.localVariablesCount) != 0) {
         goto err;
     }
@@ -943,21 +1009,29 @@ static int mapLoad(File* stream)
     if (mapLocalVariablesLoad(stream) != 0) {
         goto err;
     }
+    mapProfileLog("mapLoad local vars: %u ms", mapProfileElapsedMs(stageStart));
 
+    stageStart = compat_timeGetTime();
     if (_square_load(stream, gMapHeader.flags) != 0) {
         goto err;
     }
+    mapProfileLog("mapLoad squares: %u ms", mapProfileElapsedMs(stageStart));
 
     error = "Error reading scripts";
+    stageStart = compat_timeGetTime();
     if (scriptLoadAll(stream) != 0) {
         goto err;
     }
+    mapProfileLog("mapLoad scripts: %u ms", mapProfileElapsedMs(stageStart));
 
     error = "Error reading objects";
+    stageStart = compat_timeGetTime();
     if (objectLoadAll(stream) != 0) {
         goto err;
     }
+    mapProfileLog("mapLoad objects: %u ms", mapProfileElapsedMs(stageStart));
 
+    stageStart = compat_timeGetTime();
     if ((gMapHeader.flags & 1) == 0) {
         _map_fix_critter_combat_data();
     }
@@ -966,16 +1040,20 @@ static int mapLoad(File* stream)
     if (mapSetElevation(gEnteringElevation) != 0) {
         goto err;
     }
+    mapProfileLog("mapLoad elevation/combat fix: %u ms", mapProfileElapsedMs(stageStart));
 
     if (settings.system.executableIsMapper() || settings.ui.edg_support) {
         mapEdgeLoad(gMapHeader.name);
     }
 
     error = "Error setting tile center";
+    stageStart = compat_timeGetTime();
     if (tileSetCenter(gEnteringTile, TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS) != 0) {
         goto err;
     }
+    mapProfileLog("mapLoad tile center: %u ms", mapProfileElapsedMs(stageStart));
 
+    stageStart = compat_timeGetTime();
     lightSetAmbientIntensity(LIGHT_INTENSITY_MAX, false);
     objectSetLocation(gDude, gCenterTile, gElevation, nullptr);
     objectSetRotation(gDude, gEnteringRotation, nullptr);
@@ -1002,9 +1080,11 @@ static int mapLoad(File* stream)
         }
         gMapHeader.globalVariablesCount = gMapGlobalVarsLength;
     }
+    mapProfileLog("mapLoad dude/global gam setup: %u ms", mapProfileElapsedMs(stageStart));
 
     scriptsEnable();
 
+    stageStart = compat_timeGetTime();
     if (gMapHeader.scriptIndex > 0) {
         error = "Error creating new map script";
         if (scriptAdd(&gMapSid, SCRIPT_TYPE_SYSTEM) == -1) {
@@ -1035,6 +1115,7 @@ static int mapLoad(File* stream)
             goto err;
         }
     }
+    mapProfileLog("mapLoad map script setup: %u ms", mapProfileElapsedMs(stageStart));
 
     error = nullptr;
 
@@ -1047,9 +1128,12 @@ err:
         mapNewMap();
         rc = -1;
     } else {
+        stageStart = compat_timeGetTime();
         _obj_preload_art_cache(gMapHeader.flags);
+        mapProfileLog("mapLoad art preload: %u ms", mapProfileElapsedMs(stageStart));
     }
 
+    stageStart = compat_timeGetTime();
     sfallOnBeforeMapLoad();
 
     _partyMemberRecoverLoad();
@@ -1064,11 +1148,15 @@ err:
     if (scriptsExecStartProc() == -1) {
         debugPrint("\n   Error: scr_load_all_scripts failed!");
     }
+    mapProfileLog("mapLoad recover/interface/start scripts: %u ms", mapProfileElapsedMs(stageStart));
 
+    stageStart = compat_timeGetTime();
     scriptsExecMapEnterProc();
     scriptsExecMapUpdateProc();
     tileEnable();
+    mapProfileLog("mapLoad map enter/update: %u ms", mapProfileElapsedMs(stageStart));
 
+    stageStart = compat_timeGetTime();
     if (gMapTransition.map > 0) {
         if (gMapTransition.rotation >= 0) {
             objectSetRotation(gDude, gMapTransition.rotation, nullptr);
@@ -1076,7 +1164,9 @@ err:
     } else {
         tileWindowRefresh();
     }
+    mapProfileLog("mapLoad final tile refresh: %u ms", mapProfileElapsedMs(stageStart));
 
+    stageStart = compat_timeGetTime();
     gameTimeScheduleUpdateEvent();
 
     if (_gsound_sfx_q_start() == -1) {
@@ -1089,6 +1179,7 @@ err:
     if (wmCheckGameAreaEvents() != 0) {
         rc = -1;
     }
+    mapProfileLog("mapLoad sound/worldmap events: %u ms", mapProfileElapsedMs(stageStart));
 
     fileSetReadProgressHandler(nullptr, 0);
 
@@ -1111,6 +1202,15 @@ err:
         scriptSoundStop(mapLoadSoundId);
         mapLoadSoundId = 0;
     }
+
+    mapProfileLog("mapLoad total: %u ms", mapProfileElapsedMs(mapLoadStart));
+
+#ifdef __vita__
+    if (gMapProfileStream != nullptr) {
+        fclose(gMapProfileStream);
+        gMapProfileStream = nullptr;
+    }
+#endif
 
     return rc;
 }

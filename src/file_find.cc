@@ -30,7 +30,9 @@ bool fileFindFirst(const char* path, DirectoryFileFindData* findData)
 
     char basePath[COMPAT_MAX_PATH];
     compat_makepath(basePath, drive, dir, nullptr, nullptr);
+#ifndef __vita__
     compat_resolve_path(basePath);
+#endif
 
     findData->dir = opendir(basePath);
     if (findData->dir == nullptr) {
