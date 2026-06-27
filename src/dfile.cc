@@ -19,7 +19,7 @@ namespace fallout {
 
 // Small compressed entries are cheaper to inflate once than to drive zlib via
 // thousands of tiny reads on Vita.
-#define DFILE_MEMORY_BUFFER_MAX_SIZE (512 * 1024)
+#define DFILE_MEMORY_BUFFER_MAX_SIZE (256 * 1024)
 
 // Specifies that [DFile] has unget character.
 //
@@ -1146,7 +1146,10 @@ static DFile* dfileOpenInternal(DBase* dbase, const char* filePath, const char* 
 #ifdef __vita__
         if (entry->uncompressedSize <= DFILE_MEMORY_BUFFER_MAX_SIZE) {
             if (!dfileLoadMemoryBuffer(dfile)) {
-                goto err;
+                // Memory buffering failed (likely heap fragmentation).
+                // Fall back to streaming decompression — memoryBuffer is
+                // already NULL, and read/seek/readChar paths already use
+                // streaming when memoryBuffer is NULL.
             }
         }
 #endif
