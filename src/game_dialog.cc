@@ -6,6 +6,8 @@
 #include <string.h>
 #include <string>
 
+#include "word_wrap.h"
+
 #include "actions.h"
 #include "animation.h"
 #include "art.h"
@@ -3196,14 +3198,27 @@ void _gdialog_scroll_subwin(int windowIdx, bool scrollUp, const unsigned char* w
 // 0x447F64
 int _text_num_lines(const char* text, int maxWidth)
 {
-    int width = fontGetStringWidth(text);
+    if (text == nullptr || text[0] == '\0') {
+        return 0;
+    }
 
+    if (fontGetStringWidth(text) <= maxWidth) {
+        return 1;
+    }
+
+    short beginnings[WORD_WRAP_MAX_COUNT];
+    short count;
+    if (wordWrap(text, maxWidth, beginnings, &count) == 0) {
+        return count - 1;
+    }
+
+    // Fallback to naive calculation if wordWrap fails.
+    int width = fontGetStringWidth(text);
     int lineCount = 0;
     while (width > 0) {
         width -= maxWidth;
         lineCount++;
     }
-
     return lineCount;
 }
 
@@ -3271,6 +3286,59 @@ static int gameDialogDrawText(unsigned char* buffer, Rect* rect, const char* str
                     *end = '\0';
                 }
             } else {
+                // CJK text: no spaces found. Use wordWrap for character-boundary breaking.
+                short beginnings[WORD_WRAP_MAX_COUNT];
+                short count;
+
+                if (wordWrap(start, maxWidth, beginnings, &count) == 0 && count > 1) {
+                    // wordWrap returned valid multi-line breakpoints.
+                    // beginnings[1] is the byte offset (from start) where the second line begins.
+                    int firstLineLen = beginnings[1];
+
+                    // Save the byte at the breakpoint (could be a multibyte CJK byte).
+                    char saved = start[firstLineLen];
+                    start[firstLineLen] = '\0';
+
+                    if (rect->bottom - fontGetLineHeight() >= rect->top) {
+                        if (draw != 0) {
+                            unsigned char* dest;
+                            if (draw != 1 || start == mutableText) {
+                                dest = buffer + 10;
+                            } else {
+                                dest = buffer;
+                            }
+                            fontDrawText(dest + pitch * rect->top, start, maxWidth, pitch, color);
+                        }
+
+                        if (textOffset != nullptr) {
+                            *textOffset += firstLineLen;
+                        }
+
+                        rect->top += height;
+                    }
+
+                    // Restore the original byte.
+                    start[firstLineLen] = saved;
+
+                    // Advance start to the beginning of the next line.
+                    start += firstLineLen;
+
+                    // Skip any whitespace at the start of the next line.
+                    while (*start == ' ' || *start == '\n' || *start == '\r') {
+                        if (textOffset != nullptr) {
+                            *textOffset += 1;
+                        }
+                        start++;
+                    }
+
+                    // Set end = nullptr so the while-loop bottom code terminates the
+                    // loop naturally if start is now empty.
+                    end = nullptr;
+                    continue;
+                }
+
+                // Fallback: wordWrap failed or returned single line.
+                // Use original behavior: draw the entire remaining string (clipped to maxWidth).
                 if (rect->bottom - fontGetLineHeight() < rect->top) {
                     return rect->top;
                 }
